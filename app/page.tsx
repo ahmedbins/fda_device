@@ -63,6 +63,15 @@ type RecordItem = {
   products?: Product[];
 };
 
+type MatrixRow = {
+  key: string;
+  productCode: string;
+  deviceType: string;
+  company: string;
+  devices: string[];
+  registrations: number;
+};
+
 type Filters = {
   keyword: string;
   productCode: string;
@@ -101,7 +110,7 @@ function buildSearch(filters: Filters) {
   if (filters.keyword.trim()) {
     const value = quote(filters.keyword);
     clauses.push(
-      `(registration.name:${value} OR proprietary_name:${value} OR products.openfda.device_name:${value})`,
+      `(registration.name:${value} OR registration.owner_operator.firm_name:${value} OR proprietary_name:${value} OR products.openfda.device_name:${value})`,
     );
   }
   if (filters.productCode.trim())
@@ -129,6 +138,43 @@ function firmName(item: RecordItem) {
 function productSummary(item: RecordItem) {
   const product = item.products?.[0];
   return product?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device";
+}
+
+function companyName(item: RecordItem) {
+  return item.registration?.owner_operator?.firm_name || firmName(item);
+}
+
+function buildMatrix(items: RecordItem[]): MatrixRow[] {
+  const groups = new Map<string, { productCode: string; deviceType: string; company: string; devices: Set<string>; registrationIds: Set<string> }>();
+  items.forEach((item, recordIndex) => {
+    const company = companyName(item);
+    const tradeNames = (item.proprietary_name || []).filter(Boolean);
+    (item.products || []).forEach((product) => {
+      const productCode = product.product_code || "—";
+      const deviceType = product.openfda?.device_name || "Unspecified device type";
+      const key = `${productCode.toLowerCase()}|${deviceType.toLowerCase()}|${company.toLowerCase()}`;
+      const existing = groups.get(key) || {
+        productCode,
+        deviceType,
+        company,
+        devices: new Set<string>(),
+        registrationIds: new Set<string>(),
+      };
+      (tradeNames.length ? tradeNames : [deviceType]).forEach((name) => existing.devices.add(name));
+      existing.registrationIds.add(item.registration?.registration_number || `record-${recordIndex}`);
+      groups.set(key, existing);
+    });
+  });
+  return [...groups.entries()]
+    .map(([key, value]) => ({
+      key,
+      productCode: value.productCode,
+      deviceType: value.deviceType,
+      company: value.company,
+      devices: [...value.devices].sort((a, b) => a.localeCompare(b)),
+      registrations: value.registrationIds.size,
+    }))
+    .sort((a, b) => a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company));
 }
 
 function locationSummary(item: RecordItem) {
@@ -164,6 +210,7 @@ function escapeCsv(value: unknown) {
 
 export default function Home() {
   const [mode, setMode] = useState<"api" | "files">("api");
+  const [viewMode, setViewMode] = useState<"records" | "matrix">("records");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [localRecords, setLocalRecords] = useState<RecordItem[]>([]);
@@ -181,19 +228,22 @@ export default function Home() {
   const activeFilters = Object.values(filters).filter(Boolean).length;
 
   const runSearch = useCallback(
-    async (nextSkip = 0) => {
+    async (nextSkip = 0, requestedView: "records" | "matrix" = viewMode) => {
       setError("");
       setSelected(null);
       if (mode === "files") {
         setSkip(nextSkip);
         const filtered = localRecords.filter((record) => localMatches(record, filters));
         setTotal(filtered.length);
-        setRecords(filtered.slice(nextSkip, nextSkip + limit));
+        setRecords(requestedView === "matrix" ? filtered.slice(0, 1000) : filtered.slice(nextSkip, nextSkip + limit));
         return;
       }
       setLoading(true);
       try {
-        const params = new URLSearchParams({ limit: String(limit), skip: String(nextSkip) });
+        const params = new URLSearchParams({
+          limit: String(requestedView === "matrix" ? 1000 : limit),
+          skip: String(requestedView === "matrix" ? 0 : nextSkip),
+        });
         const search = buildSearch(filters);
         if (search) params.set("search", search);
         const response = await fetch(`${API}?${params.toString()}`);
@@ -205,7 +255,7 @@ export default function Home() {
         if (!response.ok) throw new Error(data.error?.message || "The FDA API could not complete this search.");
         setRecords(data.results || []);
         setTotal(data.meta?.results?.total || 0);
-        setSkip(nextSkip);
+        setSkip(requestedView === "matrix" ? 0 : nextSkip);
       } catch (caught) {
         setRecords([]);
         setTotal(0);
@@ -214,7 +264,7 @@ export default function Home() {
         setLoading(false);
       }
     },
-    [filters, limit, localRecords, mode],
+    [filters, limit, localRecords, mode, viewMode],
   );
 
   const importFiles = async (files: FileList | null) => {
@@ -248,7 +298,7 @@ export default function Home() {
       setLocalRecords(collected);
       setFileNames(names);
       setMode("files");
-      setRecords(collected.slice(0, limit));
+      setRecords(collected.slice(0, viewMode === "matrix" ? 1000 : limit));
       setTotal(collected.length);
       setSkip(0);
     } catch (caught) {
@@ -284,7 +334,7 @@ export default function Home() {
   };
 
   const exportCsv = () => {
-    const rows = records.map((item) => [
+    const recordRows = records.map((item) => [
       item.registration?.registration_number,
       firmName(item),
       locationSummary(item),
@@ -292,10 +342,10 @@ export default function Home() {
       item.products?.map((p) => p.openfda?.device_name).filter(Boolean).join("; "),
       item.establishment_type?.join("; "),
     ]);
-    const csv = [
-      ["Registration #", "Establishment", "Location", "Product codes", "Devices", "Establishment types"],
-      ...rows,
-    ]
+    const matrixExportRows = buildMatrix(records).map((row) => [row.productCode, row.deviceType, row.company, row.devices.join("; "), row.registrations]);
+    const csv = (viewMode === "matrix"
+      ? [["Product code", "Device type", "Company", "Registered devices", "Registrations"], ...matrixExportRows]
+      : [["Registration #", "Establishment", "Location", "Product codes", "Devices", "Establishment types"], ...recordRows])
       .map((row) => row.map(escapeCsv).join(","))
       .join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -310,6 +360,14 @@ export default function Home() {
     if (!total) return "0 records";
     return `${(skip + 1).toLocaleString()}–${Math.min(skip + records.length, total).toLocaleString()} of ${total.toLocaleString()}`;
   }, [records.length, skip, total]);
+
+  const matrixRows = useMemo(() => buildMatrix(records), [records]);
+
+  const switchView = (nextView: "records" | "matrix") => {
+    if (nextView === viewMode) return;
+    setViewMode(nextView);
+    if (records.length || activeFilters) runSearch(0, nextView);
+  };
 
   return (
     <main>
@@ -384,11 +442,15 @@ export default function Home() {
           <div className="results-toolbar">
             <div className="results-title">
               <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
-              <div><span>03 / RESULTS</span><h2>{records.length ? rangeLabel : "Search records"}</h2></div>
+              <div><span>03 / RESULTS</span><h2>{records.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : "Search records"}</h2></div>
             </div>
             <div className="toolbar-actions">
+              <div className="view-switch" role="group" aria-label="Results view">
+                <button className={viewMode === "records" ? "active" : ""} onClick={() => switchView("records")}>Records</button>
+                <button className={viewMode === "matrix" ? "active" : ""} onClick={() => switchView("matrix")}>Company + devices</button>
+              </div>
               {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
-              <label className="page-size">Rows <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}><option>25</option><option>50</option><option>100</option></select></label>
+              {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}><option>25</option><option>50</option><option>100</option></select></label>}
               <button className="icon-button" onClick={exportCsv} disabled={!records.length} aria-label="Export visible results to CSV"><ArrowDownToLine size={18} /></button>
               <button className="icon-button" onClick={() => runSearch(skip)} disabled={loading} aria-label="Refresh results"><RefreshCw className={loading ? "spin" : ""} size={18} /></button>
             </div>
@@ -406,8 +468,14 @@ export default function Home() {
             </div>
           ) : (
             <>
+              {viewMode === "matrix" && (
+                <div className="matrix-note">
+                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device groups</b> from {records.length.toLocaleString()} matching records</span></div>
+                  {total > 1000 && <span>Showing the first 1,000 of {total.toLocaleString()} matches. Add filters for a complete company view.</span>}
+                </div>
+              )}
               <div className="table-wrap" aria-live="polite">
-                <table>
+                {viewMode === "records" ? <table>
                   <thead><tr><th>Establishment</th><th>Primary device</th><th>Product</th><th>Location</th><th>Class</th><th aria-label="Open record" /></tr></thead>
                   <tbody>
                     {records.map((item, index) => {
@@ -424,12 +492,25 @@ export default function Home() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table> : <table className="matrix-table">
+                  <thead><tr><th>Product code</th><th>Device type</th><th>Company</th><th>Registered devices</th><th>Regs.</th></tr></thead>
+                  <tbody>
+                    {matrixRows.map((row) => (
+                      <tr key={row.key}>
+                        <td><span className="code-pill">{row.productCode}</span></td>
+                        <td><b>{row.deviceType}</b></td>
+                        <td><b>{row.company}</b></td>
+                        <td><div className="device-name-list">{row.devices.map((device) => <span key={device}>{device}</span>)}</div></td>
+                        <td><b>{row.registrations}</b></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>}
               </div>
-              <div className="pagination">
+              {viewMode === "records" && <div className="pagination">
                 <span>{rangeLabel}</span>
                 <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit))} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit)} disabled={skip + records.length >= total || loading}>Next <ArrowRight size={15} /></button></div>
-              </div>
+              </div>}
             </>
           )}
           {loading && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{importProgress || "Searching openFDA…"}</span></div>}
