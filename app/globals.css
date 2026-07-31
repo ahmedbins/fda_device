@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  --font-roboto: "Roboto", Arial, sans-serif;
+  --font-rufina: "Rufina", Georgia, serif;
   --ink: #163669;
   --ink-2: #132f59;
   --paper: #f8fafb;
