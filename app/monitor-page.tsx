@@ -462,7 +462,7 @@ export default function MonitorPage() {
           <button className="icon-button" onClick={copyLink} aria-label="Copy shareable link" title="Copy a shareable link to this view">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
           <button className="icon-button" onClick={() => refresh()} disabled={anyLoading || !codes.length} aria-label="Refresh all sections" title="Re-fetch all sections"><RefreshCw className={anyLoading ? "spin" : ""} size={16} /></button>
         </div>
-        {refreshedAt && <small className="monitor-refreshed">Checked {refreshedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · windows compare against the last {days} days</small>}
+        {refreshedAt && <small className="monitor-refreshed">Pulled {refreshedAt.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · windows compare against the last {days} days · each section shows its own FDA data vintage</small>}
       </section>
 
       <section className="stat-tiles" aria-label="Summary">
@@ -476,7 +476,7 @@ export default function MonitorPage() {
         <div className="section-head">
           <h2><PackagePlus size={17} /> New device listings {sectionMeta(listings, newListings.length)}</h2>
           <div className="section-tools">
-            {listings.datasetDate && <span className="dataset-date">dataset {listings.datasetDate}</span>}
+            {listings.datasetDate && <span className="dataset-date">FDA data as of {listings.datasetDate}</span>}
             <button className="icon-button small" onClick={exportListings} disabled={!newListings.length} aria-label="Export new listings CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
           </div>
         </div>
@@ -513,7 +513,7 @@ export default function MonitorPage() {
         <div className="section-head">
           <h2><BadgeCheck size={17} /> 510(k) clearances {sectionMeta(clearances, newClearances.length)}</h2>
           <div className="section-tools">
-            {clearances.datasetDate && <span className="dataset-date">dataset {clearances.datasetDate}</span>}
+            {clearances.datasetDate && <span className="dataset-date">FDA data as of {clearances.datasetDate}</span>}
             <button className="icon-button small" onClick={exportClearances} disabled={!newClearances.length} aria-label="Export clearances CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
           </div>
         </div>
@@ -553,7 +553,7 @@ export default function MonitorPage() {
         <div className="section-head">
           <h2><TriangleAlert size={17} /> Recalls {sectionMeta(recalls, newRecalls.length)}</h2>
           <div className="section-tools">
-            {recalls.datasetDate && <span className="dataset-date">dataset {recalls.datasetDate}</span>}
+            {recalls.datasetDate && <span className="dataset-date">FDA data as of {recalls.datasetDate}</span>}
             <button className="icon-button small" onClick={exportRecalls} disabled={!newRecalls.length} aria-label="Export recalls CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
           </div>
         </div>
@@ -595,7 +595,7 @@ export default function MonitorPage() {
         <div className="section-head">
           <h2><Activity size={17} /> Adverse events (MAUDE) {sectionMeta(events, newEvents.length, eventsPlus)}</h2>
           <div className="section-tools">
-            {events.datasetDate && <span className="dataset-date">dataset {events.datasetDate}</span>}
+            {events.datasetDate && <span className="dataset-date">FDA data as of {events.datasetDate}</span>}
             <button className="icon-button small" onClick={exportEvents} disabled={!newEvents.length} aria-label="Export adverse events CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
           </div>
         </div>

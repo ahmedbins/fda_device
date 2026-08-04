@@ -243,6 +243,7 @@ export default function Home() {
   const [datasetUpdated, setDatasetUpdated] = useState("");
   const [datasetTotal, setDatasetTotal] = useState(0);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [codeCounts, setCodeCounts] = useState<{ code: string; count: number }[] | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -300,6 +301,7 @@ export default function Home() {
         setSkip(requestedView === "matrix" ? 0 : nextSkip);
         setAppliedFilters(nextFilters);
         setFetchedAt(new Date());
+        setCheckedAt(new Date());
         if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
         syncUrl(nextFilters, requestedView);
         if (nextFilters.productCodes.length) {
@@ -337,6 +339,7 @@ export default function Home() {
       .then((data: { meta?: { last_updated?: string; results?: { total?: number } } }) => {
         if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
         if (data.meta?.results?.total) setDatasetTotal(data.meta.results.total);
+        setCheckedAt(new Date());
       })
       .catch(() => {});
     if (initial.autorun) queueMicrotask(() => runSearch(0, initial.view, initial.filters));
@@ -589,6 +592,8 @@ export default function Home() {
 
   const exportCount = Math.min(total, mode === "files" ? total : EXPORT_CAP);
   const timeFormat: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+  const freshnessHint = "\"FDA data as of\" is the date openFDA last rebuilt this dataset — records newer than that aren't published yet. \"Pulled\" is when this page last called the live API.";
 
   return (
     <main>
@@ -603,8 +608,8 @@ export default function Home() {
             <a className="current" href="/">Explorer</a>
             <a href="/monitor">Monitoring</a>
           </nav>
-          <div className="source-status">
-            <span className="pulse" /> openFDA live{datasetUpdated ? ` · data ${datasetUpdated}` : ""}
+          <div className="source-status" title={freshnessHint}>
+            <span className="pulse" /> openFDA live{datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}
           </div>
         </div>
       </header>
@@ -616,11 +621,12 @@ export default function Home() {
             <h1>Device registrations.<br /><em>Made searchable.</em></h1>
             <p>Search FDA registrations and listings.</p>
           </div>
-          <div className="dataset-note">
+          <div className="dataset-note" title={freshnessHint}>
             <Database size={20} />
             <div>
               <b>{datasetTotal ? `${datasetTotal.toLocaleString()} records` : "openFDA device registry"}</b>
-              <span>{datasetUpdated ? `Dataset refreshed ${datasetUpdated}` : "Registrations & listings"}</span>
+              <span>{datasetUpdated ? `FDA data as of ${datasetUpdated}` : "Registrations & listings"}</span>
+              <span>{checkedAt ? `Pulled ${checkedAt.toLocaleString([], dateTimeFormat)}` : "Contacting live API…"}</span>
             </div>
           </div>
         </div>
@@ -721,9 +727,9 @@ export default function Home() {
                 <span>03 / RESULTS</span>
                 <h2>{records.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : "Search records"}</h2>
                 {fetchedAt && (
-                  <small className="fetch-meta">
+                  <small className="fetch-meta" title={mode === "api" ? freshnessHint : undefined}>
                     {mode === "api"
-                      ? `Fetched ${fetchedAt.toLocaleTimeString([], timeFormat)}${datasetUpdated ? ` · FDA dataset updated ${datasetUpdated}` : ""}`
+                      ? `Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`
                       : `Filtered ${fetchedAt.toLocaleTimeString([], timeFormat)} · local import`}
                   </small>
                 )}
