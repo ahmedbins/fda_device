@@ -12,7 +12,15 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vite build output for Cloudflare Pages.
+    "work/**",
   ]),
+  {
+    // These components also ship in the plain Vite SPA, where the pages are
+    // separate HTML entries — cross-page navigation must be real <a> links.
+    files: ["app/page.tsx", "app/monitor-page.tsx"],
+    rules: { "@next/next/no-html-link-for-pages": "off" },
+  },
 ]);
 
 export default eslintConfig;

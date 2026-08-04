@@ -12,6 +12,7 @@
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "build:pages": "vite build --config cloudflare-spa/vite.config.ts",
     "deploy:pages": "npm run build:pages && wrangler pages deploy work/cloudflare-pages --project-name=fda-device-index --commit-dirty=true",
+    "deploy:dev": "npm run build:pages && wrangler pages deploy work/cloudflare-pages --project-name=fda-device-internaluseonly --commit-dirty=true",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

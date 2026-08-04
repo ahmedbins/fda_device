@@ -24,46 +24,20 @@ import {
   X,
 } from "lucide-react";
 import { unzip } from "fflate";
-
-type Product = {
-  product_code?: string;
-  created_date?: string;
-  owner_operator_number?: string;
-  exempt?: string;
-  openfda?: {
-    device_name?: string;
-    medical_specialty_description?: string;
-    regulation_number?: string;
-    device_class?: string;
-  };
-};
-
-type Registration = {
-  registration_number?: string;
-  fei_number?: string;
-  status_code?: string;
-  reg_expiry_date_year?: string;
-  name?: string;
-  business_name?: string;
-  address_line_1?: string;
-  address_line_2?: string;
-  city?: string;
-  state_code?: string;
-  iso_country_code?: string;
-  zip_code?: string;
-  postal_code?: string;
-  owner_operator?: { firm_name?: string; owner_operator_number?: string };
-  us_agent?: { business_name?: string; name?: string; email_address?: string };
-};
-
-type RecordItem = {
-  proprietary_name?: string[];
-  establishment_type?: string[];
-  registration?: Registration;
-  pma_number?: string;
-  k_number?: string;
-  products?: Product[];
-};
+import {
+  API,
+  CODE_NAMES,
+  PRESET,
+  PRESET_CODES,
+  type RecordItem,
+  companyName,
+  downloadCsv,
+  firmName,
+  locationSummary,
+  parseCodes,
+  quote,
+  useDevHost,
+} from "./fda-shared";
 
 type MatrixRow = {
   key: string;
@@ -85,7 +59,6 @@ type Filters = {
 
 type ViewMode = "records" | "matrix";
 
-const API = "https://api.fda.gov/device/registrationlisting.json";
 const EXPORT_CAP = 26000; // openFDA pagination ceiling: skip<=25000 + limit<=1000
 const EMPTY_FILTERS: Filters = {
   keyword: "",
@@ -96,17 +69,6 @@ const EMPTY_FILTERS: Filters = {
   establishment: "",
 };
 
-const PRESET = [
-  { code: "QUF", name: "Hearing Aid, Air-Conduction, Over The Counter" },
-  { code: "QUG", name: "Hearing Aid, Air-Conduction With Wireless Technology, Over The Counter" },
-  { code: "QDD", name: "Self-Fitting Air-Conduction Hearing Aid, Prescription" },
-  { code: "QUH", name: "Self-Fitting Air-Conduction Hearing Aid, Over The Counter" },
-  { code: "OSM", name: "Hearing Aid, Air-Conduction With Wireless Technology, Prescription" },
-  { code: "SCR", name: "Air-Conduction Hearing Aid Software" },
-];
-const PRESET_CODES = PRESET.map((p) => p.code);
-const CODE_NAMES = new Map(PRESET.map((p) => [p.code, p.name]));
-
 const ESTABLISHMENT_TYPES = [
   "Manufacture Medical Device",
   "Manufacture Medical Device for Another Party (Contract Manufacturer)",
@@ -116,19 +78,6 @@ const ESTABLISHMENT_TYPES = [
   "Export Device to the United States But Perform No Other Operation on Device",
   "Remanufacture Medical Device",
 ];
-
-function quote(value: string) {
-  return `"${value.replace(/["\\]/g, " ").trim()}"`;
-}
-
-function parseCodes(text: string) {
-  return [...new Set(
-    text
-      .toUpperCase()
-      .split(/[^A-Z0-9]+/)
-      .filter((code) => code.length >= 2 && code.length <= 8),
-  )];
-}
 
 function buildSearch(filters: Filters) {
   const clauses: string[] = [];
@@ -155,19 +104,6 @@ function buildSearch(filters: Filters) {
   if (filters.establishment)
     clauses.push(`establishment_type:${quote(filters.establishment)}`);
   return clauses.join(" AND ");
-}
-
-function firmName(item: RecordItem) {
-  return (
-    item.registration?.name ||
-    item.registration?.business_name ||
-    item.registration?.owner_operator?.firm_name ||
-    "Unnamed establishment"
-  );
-}
-
-function companyName(item: RecordItem) {
-  return item.registration?.owner_operator?.firm_name || firmName(item);
 }
 
 function productFilterActive(filters: Filters) {
@@ -217,11 +153,6 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
       registrations: value.registrationIds.size,
     }))
     .sort((a, b) => a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company));
-}
-
-function locationSummary(item: RecordItem) {
-  const r = item.registration;
-  return [r?.city, r?.state_code, r?.iso_country_code].filter(Boolean).join(", ") || "Location unavailable";
 }
 
 function localMatches(item: RecordItem, filters: Filters) {
@@ -290,21 +221,6 @@ function initialStateFromUrl() {
   return { filters, view, autorun };
 }
 
-function escapeCsv(value: unknown) {
-  const text = String(value ?? "");
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
-function downloadCsv(rows: unknown[][], filename: string) {
-  const csv = rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 export default function Home() {
   const [initial] = useState(initialStateFromUrl);
   const [mode, setMode] = useState<"api" | "files">("api");
@@ -333,6 +249,7 @@ export default function Home() {
   const codeInput = useRef<HTMLInputElement>(null);
   const searchSeq = useRef(0);
 
+  const devHost = useDevHost();
   const activeFilters = [
     filters.keyword.trim(),
     filters.productCodes.length,
@@ -679,9 +596,16 @@ export default function Home() {
         <a className="brand" href="#top" aria-label="FDA Device Explorer home">
           <span className="brand-mark"><PackageSearch size={19} /></span>
           <span><b>SONOVA</b> / DEVICE DATA</span>
+          {devHost && <span className="dev-badge">DEV</span>}
         </a>
-        <div className="source-status">
-          <span className="pulse" /> openFDA live{datasetUpdated ? ` · data ${datasetUpdated}` : ""}
+        <div className="topbar-right">
+          <nav className="top-nav" aria-label="Pages">
+            <a className="current" href="/">Explorer</a>
+            <a href="/monitor">Monitoring</a>
+          </nav>
+          <div className="source-status">
+            <span className="pulse" /> openFDA live{datasetUpdated ? ` · data ${datasetUpdated}` : ""}
+          </div>
         </div>
       </header>
 
