@@ -592,7 +592,7 @@ export default function Home() {
 
   const exportCount = Math.min(total, mode === "files" ? total : EXPORT_CAP);
   const timeFormat: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
-  const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+  const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const freshnessHint = "\"FDA data as of\" is the date openFDA last rebuilt this dataset — records newer than that aren't published yet. \"Pulled\" is when this page last called the live API.";
 
   return (

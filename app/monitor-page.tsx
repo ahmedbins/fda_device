@@ -462,7 +462,7 @@ export default function MonitorPage() {
           <button className="icon-button" onClick={copyLink} aria-label="Copy shareable link" title="Copy a shareable link to this view">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
           <button className="icon-button" onClick={() => refresh()} disabled={anyLoading || !codes.length} aria-label="Refresh all sections" title="Re-fetch all sections"><RefreshCw className={anyLoading ? "spin" : ""} size={16} /></button>
         </div>
-        {refreshedAt && <small className="monitor-refreshed">Pulled {refreshedAt.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · windows compare against the last {days} days · each section shows its own FDA data vintage</small>}
+        {refreshedAt && <small className="monitor-refreshed">Pulled {refreshedAt.toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })} · windows compare against the last {days} days · each section shows its own FDA data vintage</small>}
       </section>
 
       <section className="stat-tiles" aria-label="Summary">
