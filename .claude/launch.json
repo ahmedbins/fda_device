@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fda-spa-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "preview", "--config", "cloudflare-spa/vite.config.ts", "--port", "4173", "--strictPort"],
+      "port": 4173
+    }
+  ]
+}

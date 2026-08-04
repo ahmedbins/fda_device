@@ -174,6 +174,41 @@ td > span:not(.code-pill):not(.class-badge) { display: block; max-width: 280px; 
 .raw-section summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font: 600 11px var(--font-roboto), sans-serif; list-style: none; }
 .raw-section pre { max-height: 420px; overflow: auto; margin: 18px 0 0; padding: 16px; border-radius: 4px; color: #d7e3df; background: var(--ink); white-space: pre-wrap; word-break: break-word; font: 10px/1.6 ui-monospace, monospace; }
 
+.chip-input { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 42px; padding: 5px 8px; background: var(--white); border: 1px solid #c5cfd3; border-radius: 4px; cursor: text; }
+.chip-input:focus-within { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.chip-input input { flex: 1 1 90px; min-width: 90px; min-height: 30px; padding: 0 4px; border: 0; outline: none; background: transparent; color: var(--ink); font-size: 13px; text-transform: uppercase; }
+.chip-input input::placeholder { text-transform: none; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 5px 5px 9px; border-radius: 3px; background: #e3f0f6; color: #15415d; font: 650 10px var(--font-roboto), sans-serif; letter-spacing: .04em; }
+.chip button { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #4a6a7a; }
+.chip button:hover { background: #cfe4ee; color: var(--ink); }
+.field-hint { color: var(--muted); font-size: 10px; line-height: 1.4; }
+
+.preset-toggle { width: 100%; margin: -4px 0 18px; padding: 11px 12px; display: flex; align-items: center; gap: 11px; text-align: left; background: var(--white); border: 1px solid #c5cfd3; border-radius: 6px; color: var(--ink); transition: border-color .15s ease, background .15s ease; }
+.preset-toggle > svg { color: var(--coral); flex: 0 0 auto; }
+.preset-toggle:hover { border-color: var(--coral); }
+.preset-toggle.active { border-color: var(--coral); background: #f2f9fd; }
+.preset-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.preset-copy b { font: 600 11px var(--font-roboto), sans-serif; }
+.preset-copy em { font-style: normal; color: var(--muted); font-size: 9.5px; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preset-state { flex: 0 0 auto; min-width: 40px; padding: 5px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border-radius: 11px; background: #e5e9e7; color: var(--muted); font: 700 9px var(--font-roboto), sans-serif; letter-spacing: .06em; }
+.preset-toggle.active .preset-state { background: var(--coral); color: #fff; }
+
+.fetch-meta { display: block; color: var(--muted); font-size: 10px; }
+.code-count-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px clamp(18px, 3vw, 38px); background: #f6fafc; border-bottom: 1px solid var(--line); }
+.strip-label { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; color: var(--coral); text-transform: uppercase; font: 600 9px var(--font-roboto), sans-serif; letter-spacing: .1em; }
+.code-count { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px 5px 5px; background: var(--white); border: 1px solid #cfe1e9; border-radius: 3px; color: var(--ink); font-size: 11px; }
+.code-count b { padding: 3px 5px; border-radius: 3px; color: #15415d; background: #e3f0f6; font: 650 10px var(--font-roboto), sans-serif; }
+.code-count.zero { opacity: .55; }
+
+.pill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 200px; }
+.pill-more { color: var(--muted); font: 600 9px var(--font-roboto), sans-serif; }
+.export-button { white-space: nowrap; }
+.empty-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.listing-note { margin-left: auto; color: var(--muted); font: 500 10px var(--font-roboto), sans-serif; font-style: normal; }
+.match-tag { display: inline-block; margin-right: 6px; padding: 4px 6px; border-radius: 3px; background: #dff1e4; color: #2f6647; text-transform: uppercase; letter-spacing: .06em; font: 600 8.5px var(--font-roboto), sans-serif; }
+.product-list article.dim { opacity: .55; }
+.product-list article > div > span:last-child { display: inline-flex; align-items: center; }
+
 @media (max-width: 980px) {
   .hero-grid { grid-template-columns: 1fr; }
   .dataset-note { max-width: 420px; }
