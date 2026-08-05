@@ -9,6 +9,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  Columns3,
   Database,
   Ear,
   FileArchive,
@@ -46,6 +47,12 @@ type MatrixRow = {
   company: string;
   devices: string[];
   registrations: number;
+  productListings: number;
+  establishments: number;
+  deviceClasses: string[];
+  specialties: string[];
+  countries: string[];
+  latestListing: string;
 };
 
 type Filters = {
@@ -58,6 +65,40 @@ type Filters = {
 };
 
 type ViewMode = "records" | "matrix";
+type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "deviceClass" | "expiry" | "registrationNumber" | "feiNumber";
+type MatrixColumn = "productCode" | "deviceType" | "company" | "listedDeviceCount" | "registeredDevices" | "registrations" | "productListings" | "establishments" | "deviceClass" | "specialty" | "countries" | "latestListing";
+
+const RECORD_COLUMN_OPTIONS: { key: RecordColumn; label: string; hint: string }[] = [
+  { key: "establishment", label: "Establishment", hint: "Registered facility name" },
+  { key: "ownerOperator", label: "Owner / operator", hint: "Parent company or legal operator" },
+  { key: "primaryDevice", label: "Primary device", hint: "First matching FDA device type" },
+  { key: "productCodes", label: "Product codes", hint: "Matching FDA product codes" },
+  { key: "listedProducts", label: "Listed products", hint: "Matching product entries on the record" },
+  { key: "tradeNames", label: "Trade names", hint: "Proprietary device names" },
+  { key: "location", label: "Location", hint: "City, state and country" },
+  { key: "deviceClass", label: "Device class", hint: "FDA regulatory class" },
+  { key: "expiry", label: "Expiry year", hint: "Registration expiry year" },
+  { key: "registrationNumber", label: "Registration #", hint: "FDA registration number" },
+  { key: "feiNumber", label: "FEI number", hint: "FDA establishment identifier" },
+];
+
+const MATRIX_COLUMN_OPTIONS: { key: MatrixColumn; label: string; hint: string }[] = [
+  { key: "productCode", label: "Product code", hint: "FDA product code" },
+  { key: "deviceType", label: "Device type", hint: "FDA device classification name" },
+  { key: "company", label: "Company", hint: "Owner / operator" },
+  { key: "listedDeviceCount", label: "Listed devices", hint: "Unique proprietary names for this company and code" },
+  { key: "registeredDevices", label: "Registered devices", hint: "Unique proprietary device names" },
+  { key: "registrations", label: "Registrations", hint: "Distinct FDA registration records" },
+  { key: "productListings", label: "Product listings", hint: "Raw matching product entries" },
+  { key: "establishments", label: "Establishments", hint: "Distinct registered facilities" },
+  { key: "deviceClass", label: "Device class", hint: "FDA regulatory classes" },
+  { key: "specialty", label: "Medical specialty", hint: "FDA specialty descriptions" },
+  { key: "countries", label: "Countries", hint: "Countries represented by matching facilities" },
+  { key: "latestListing", label: "Latest listing", hint: "Newest product created date in the group" },
+];
+
+const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice", "productCodes", "listedProducts", "location", "deviceClass"];
+const DEFAULT_MATRIX_COLUMNS: MatrixColumn[] = ["productCode", "deviceType", "company", "listedDeviceCount", "registeredDevices", "registrations"];
 
 const EXPORT_CAP = 26000; // openFDA pagination ceiling: skip<=25000 + limit<=1000
 const EMPTY_FILTERS: Filters = {
@@ -123,7 +164,19 @@ function matchingProducts(item: RecordItem, filters: Filters) {
 }
 
 function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
-  const groups = new Map<string, { productCode: string; deviceType: string; company: string; devices: Set<string>; registrationIds: Set<string> }>();
+  const groups = new Map<string, {
+    productCode: string;
+    deviceType: string;
+    company: string;
+    devices: Set<string>;
+    registrationIds: Set<string>;
+    productListings: number;
+    establishments: Set<string>;
+    deviceClasses: Set<string>;
+    specialties: Set<string>;
+    countries: Set<string>;
+    latestListing: string;
+  }>();
   items.forEach((item, recordIndex) => {
     const company = companyName(item);
     const tradeNames = (item.proprietary_name || []).filter(Boolean);
@@ -137,9 +190,21 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
         company,
         devices: new Set<string>(),
         registrationIds: new Set<string>(),
+        productListings: 0,
+        establishments: new Set<string>(),
+        deviceClasses: new Set<string>(),
+        specialties: new Set<string>(),
+        countries: new Set<string>(),
+        latestListing: "",
       };
-      (tradeNames.length ? tradeNames : [deviceType]).forEach((name) => existing.devices.add(name));
+      tradeNames.forEach((name) => existing.devices.add(name));
       existing.registrationIds.add(item.registration?.registration_number || `record-${recordIndex}`);
+      existing.productListings += 1;
+      existing.establishments.add(firmName(item));
+      if (product.openfda?.device_class) existing.deviceClasses.add(product.openfda.device_class);
+      if (product.openfda?.medical_specialty_description) existing.specialties.add(product.openfda.medical_specialty_description);
+      if (item.registration?.iso_country_code) existing.countries.add(item.registration.iso_country_code);
+      if (product.created_date && product.created_date > existing.latestListing) existing.latestListing = product.created_date;
       groups.set(key, existing);
     });
   });
@@ -151,6 +216,12 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
       company: value.company,
       devices: [...value.devices].sort((a, b) => a.localeCompare(b)),
       registrations: value.registrationIds.size,
+      productListings: value.productListings,
+      establishments: value.establishments.size,
+      deviceClasses: [...value.deviceClasses].sort(),
+      specialties: [...value.specialties].sort(),
+      countries: [...value.countries].sort(),
+      latestListing: value.latestListing,
     }))
     .sort((a, b) => a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company));
 }
@@ -246,6 +317,9 @@ export default function Home() {
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [codeCounts, setCodeCounts] = useState<{ code: string; count: number }[] | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [recordColumns, setRecordColumns] = useState<RecordColumn[]>(DEFAULT_RECORD_COLUMNS);
+  const [matrixColumns, setMatrixColumns] = useState<MatrixColumn[]>(DEFAULT_MATRIX_COLUMNS);
+  const [columnPrefsReady, setColumnPrefsReady] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const codeInput = useRef<HTMLInputElement>(null);
   const searchSeq = useRef(0);
@@ -345,6 +419,41 @@ export default function Home() {
     if (initial.autorun) queueMicrotask(() => runSearch(0, initial.view, initial.filters));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    try {
+      const savedRecords = JSON.parse(localStorage.getItem("fda-record-columns") || "null") as RecordColumn[] | null;
+      const savedMatrix = JSON.parse(localStorage.getItem("fda-matrix-columns") || "null") as MatrixColumn[] | null;
+      const validRecords = savedRecords?.filter((key) => RECORD_COLUMN_OPTIONS.some((option) => option.key === key));
+      const validMatrix = savedMatrix?.filter((key) => MATRIX_COLUMN_OPTIONS.some((option) => option.key === key));
+      queueMicrotask(() => {
+        if (validRecords?.length) setRecordColumns(validRecords);
+        if (validMatrix?.length) setMatrixColumns(validMatrix);
+        setColumnPrefsReady(true);
+      });
+    } catch {
+      // Ignore malformed local preferences and use the defaults.
+      queueMicrotask(() => setColumnPrefsReady(true));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!columnPrefsReady) return;
+    localStorage.setItem("fda-record-columns", JSON.stringify(recordColumns));
+    localStorage.setItem("fda-matrix-columns", JSON.stringify(matrixColumns));
+  }, [columnPrefsReady, recordColumns, matrixColumns]);
+
+  const toggleRecordColumn = (key: RecordColumn) => {
+    setRecordColumns((current) => current.includes(key)
+      ? (current.length > 1 ? current.filter((column) => column !== key) : current)
+      : [...current, key]);
+  };
+
+  const toggleMatrixColumn = (key: MatrixColumn) => {
+    setMatrixColumns((current) => current.includes(key)
+      ? (current.length > 1 ? current.filter((column) => column !== key) : current)
+      : [...current, key]);
+  };
 
   const commitCodes = (text: string) => {
     const parsed = parseCodes(text);
@@ -500,51 +609,60 @@ export default function Home() {
       const stamp = new Date().toISOString().slice(0, 10);
       const codesPart = appliedFilters.productCodes.length ? appliedFilters.productCodes.join("+") : "all";
       if (viewMode === "matrix") {
-        const rows = buildMatrix(all, appliedFilters).map((row) => [
-          row.productCode,
-          row.deviceType,
-          row.company,
-          row.devices.join("; "),
-          row.registrations,
-        ]);
+        const labels: Record<MatrixColumn, string> = {
+          productCode: "Product code", deviceType: "Device type", company: "Company",
+          listedDeviceCount: "Listed devices", registeredDevices: "Registered devices",
+          registrations: "Registrations", productListings: "Product listings",
+          establishments: "Establishments", deviceClass: "Device class",
+          specialty: "Medical specialty", countries: "Countries", latestListing: "Latest listing",
+        };
+        const value = (row: MatrixRow, column: MatrixColumn): unknown => ({
+          productCode: row.productCode,
+          deviceType: row.deviceType,
+          company: row.company,
+          listedDeviceCount: row.devices.length,
+          registeredDevices: row.devices.join("; "),
+          registrations: row.registrations,
+          productListings: row.productListings,
+          establishments: row.establishments,
+          deviceClass: row.deviceClasses.join("; "),
+          specialty: row.specialties.join("; "),
+          countries: row.countries.join("; "),
+          latestListing: row.latestListing,
+        })[column];
+        const rows = buildMatrix(all, appliedFilters).map((row) => matrixColumns.map((column) => value(row, column)));
         downloadCsv(
-          [["Product code", "Device type", "Company", "Registered devices", "Registrations"], ...rows],
+          [matrixColumns.map((column) => labels[column]), ...rows],
           `fda-devices-matrix-${codesPart}-${stamp}.csv`,
         );
       } else {
-        const filtered = productFilterActive(appliedFilters);
+        const labels: Record<RecordColumn, string> = {
+          establishment: "Establishment", ownerOperator: "Owner / operator", primaryDevice: "Primary device",
+          productCodes: "Product codes", listedProducts: "Listed products", tradeNames: "Trade names",
+          location: "Location", deviceClass: "Device class", expiry: "Expiry year",
+          registrationNumber: "Registration #", feiNumber: "FEI number",
+        };
         const rows = all.map((item) => {
           const matched = matchingProducts(item, appliedFilters);
-          return [
-            item.registration?.registration_number,
-            firmName(item),
-            companyName(item),
-            item.registration?.city,
-            item.registration?.state_code,
-            item.registration?.iso_country_code,
-            [...new Set(matched.map((p) => p.product_code).filter(Boolean))].join("; "),
-            [...new Set(matched.map((p) => p.openfda?.device_name).filter(Boolean))].join("; "),
-            [...new Set((item.products || []).map((p) => p.product_code).filter(Boolean))].join("; "),
-            (item.proprietary_name || []).join("; "),
-            (item.establishment_type || []).join("; "),
-            item.registration?.reg_expiry_date_year,
-          ];
+          const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
+          const primary = shown[0];
+          const values: Record<RecordColumn, unknown> = {
+            establishment: firmName(item),
+            ownerOperator: companyName(item),
+            primaryDevice: primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device",
+            productCodes: [...new Set(shown.map((p) => p.product_code).filter(Boolean))].join("; "),
+            listedProducts: shown.length,
+            tradeNames: (item.proprietary_name || []).join("; "),
+            location: locationSummary(item),
+            deviceClass: [...new Set(shown.map((p) => p.openfda?.device_class).filter(Boolean))].join("; "),
+            expiry: item.registration?.reg_expiry_date_year,
+            registrationNumber: item.registration?.registration_number,
+            feiNumber: item.registration?.fei_number,
+          };
+          return recordColumns.map((column) => values[column]);
         });
         downloadCsv(
-          [[
-            "Registration #",
-            "Establishment",
-            "Owner / operator",
-            "City",
-            "State",
-            "Country",
-            filtered ? "Matched product codes" : "Product codes",
-            filtered ? "Matched device types" : "Device types",
-            "All product codes",
-            "Trade names",
-            "Establishment types",
-            "Expiry year",
-          ], ...rows],
+          [recordColumns.map((column) => labels[column]), ...rows],
           `fda-devices-${codesPart}-${stamp}.csv`,
         );
       }
@@ -740,6 +858,36 @@ export default function Home() {
                 <button className={viewMode === "records" ? "active" : ""} onClick={() => switchView("records")}>Records</button>
                 <button className={viewMode === "matrix" ? "active" : ""} onClick={() => switchView("matrix")}>Company + devices</button>
               </div>
+              <details className="column-picker">
+                <summary className="secondary"><Columns3 size={15} /> Columns · {viewMode === "records" ? recordColumns.length : matrixColumns.length}</summary>
+                <div className="column-menu">
+                  <div className="column-menu-head">
+                    <div><b>Display columns</b><span>Saved on this device</span></div>
+                    <button type="button" onClick={() => viewMode === "records" ? setRecordColumns(DEFAULT_RECORD_COLUMNS) : setMatrixColumns(DEFAULT_MATRIX_COLUMNS)}>Reset</button>
+                  </div>
+                  <div className="column-options">
+                    {(viewMode === "records" ? RECORD_COLUMN_OPTIONS : MATRIX_COLUMN_OPTIONS).map((option) => {
+                      const checked = viewMode === "records"
+                        ? recordColumns.includes(option.key as RecordColumn)
+                        : matrixColumns.includes(option.key as MatrixColumn);
+                      const onlyVisible = checked && (viewMode === "records" ? recordColumns.length === 1 : matrixColumns.length === 1);
+                      return (
+                        <label key={option.key} title={onlyVisible ? "Keep at least one column visible" : undefined}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={onlyVisible}
+                            onChange={() => viewMode === "records"
+                              ? toggleRecordColumn(option.key as RecordColumn)
+                              : toggleMatrixColumn(option.key as MatrixColumn)}
+                          />
+                          <span><b>{option.label}</b><small>{option.hint}</small></span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </details>
               {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
               {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}><option>25</option><option>50</option><option>100</option></select></label>}
               <button
@@ -783,48 +931,86 @@ export default function Home() {
               {viewMode === "matrix" && (
                 <div className="matrix-note">
                   <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device groups</b> from {records.length.toLocaleString()} matching records</span></div>
-                  {total > 1000 && <span>Grouping the first 1,000 of {total.toLocaleString()} matches — the CSV export fetches them all.</span>}
+                  <span>{total > 1000 && `Grouping the first 1,000 of ${total.toLocaleString()} matches · `}Listed devices counts unique proprietary names; CSV export fetches every available match.</span>
                 </div>
               )}
               <div className="table-wrap" aria-live="polite">
                 {viewMode === "records" ? <table>
-                  <thead><tr><th>Establishment</th><th>Primary device</th><th>Product</th><th>Location</th><th>Class</th><th aria-label="Open record" /></tr></thead>
+                  <thead><tr>
+                    {recordColumns.includes("establishment") && <th>Establishment</th>}
+                    {recordColumns.includes("ownerOperator") && <th>Owner / operator</th>}
+                    {recordColumns.includes("primaryDevice") && <th>Primary device</th>}
+                    {recordColumns.includes("productCodes") && <th>Product codes</th>}
+                    {recordColumns.includes("listedProducts") && <th className="numeric-head">Listed products</th>}
+                    {recordColumns.includes("tradeNames") && <th>Trade names</th>}
+                    {recordColumns.includes("location") && <th>Location</th>}
+                    {recordColumns.includes("deviceClass") && <th>Class</th>}
+                    {recordColumns.includes("expiry") && <th>Expiry</th>}
+                    {recordColumns.includes("registrationNumber") && <th>Registration #</th>}
+                    {recordColumns.includes("feiNumber") && <th>FEI number</th>}
+                    <th aria-label="Open record" />
+                  </tr></thead>
                   <tbody>
                     {records.map((item, index) => {
                       const matched = matchingProducts(item, appliedFilters);
-                      const shown = matched.length ? matched : item.products || [];
+                      const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
                       const primary = shown[0];
                       const codes = [...new Set(shown.map((p) => p.product_code).filter(Boolean))] as string[];
                       const listingCount = item.products?.length || 0;
                       return (
                         <tr key={`${item.registration?.registration_number || "record"}-${index}`} onClick={() => setSelected(item)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelected(item)}>
-                          <td><b>{firmName(item)}</b><span>REG {item.registration?.registration_number || "—"}</span></td>
-                          <td><b>{primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device"}</b><span>{item.proprietary_name?.slice(0, 2).join(" · ") || "No proprietary name"}</span></td>
-                          <td>
+                          {recordColumns.includes("establishment") && <td><b>{firmName(item)}</b><span>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
+                          {recordColumns.includes("ownerOperator") && <td><b>{companyName(item)}</b><span>Operator {item.registration?.owner_operator?.owner_operator_number || "—"}</span></td>}
+                          {recordColumns.includes("primaryDevice") && <td><b>{primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device"}</b><span>{primary?.openfda?.medical_specialty_description || "Specialty unavailable"}</span></td>}
+                          {recordColumns.includes("productCodes") && <td>
                             <div className="pill-row">
                               {codes.slice(0, 3).map((code) => <span key={code} className="code-pill">{code}</span>)}
                               {codes.length > 3 && <span className="pill-more">+{codes.length - 3}</span>}
                               {!codes.length && <span className="code-pill">—</span>}
                             </div>
-                            <span>{productFilterActive(appliedFilters) ? `${matched.length} of ${listingCount} listing${listingCount === 1 ? "" : "s"} match` : `${listingCount.toLocaleString()} listing${listingCount === 1 ? "" : "s"}`}</span>
-                          </td>
-                          <td><b>{locationSummary(item)}</b><span>{item.registration?.reg_expiry_date_year ? `Expires ${item.registration.reg_expiry_date_year}` : "Expiry not listed"}</span></td>
-                          <td><span className={`class-badge class-${primary?.openfda?.device_class || "u"}`}>{primary?.openfda?.device_class ? `Class ${primary.openfda.device_class}` : "—"}</span></td>
+                          </td>}
+                          {recordColumns.includes("listedProducts") && <td className="count-cell"><b>{shown.length.toLocaleString()}</b><span>{productFilterActive(appliedFilters) ? `${matched.length} of ${listingCount} match` : "Product entries"}</span></td>}
+                          {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{item.proprietary_name?.length ? item.proprietary_name.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{(item.proprietary_name?.length || 0) > 5 && <em>+{(item.proprietary_name?.length || 0) - 5} more</em>}</div></td>}
+                          {recordColumns.includes("location") && <td><b>{locationSummary(item)}</b></td>}
+                          {recordColumns.includes("deviceClass") && <td><span className={`class-badge class-${primary?.openfda?.device_class || "u"}`}>{primary?.openfda?.device_class ? `Class ${primary.openfda.device_class}` : "—"}</span></td>}
+                          {recordColumns.includes("expiry") && <td><b>{item.registration?.reg_expiry_date_year || "—"}</b></td>}
+                          {recordColumns.includes("registrationNumber") && <td><b className="mono-value">{item.registration?.registration_number || "—"}</b></td>}
+                          {recordColumns.includes("feiNumber") && <td><b className="mono-value">{item.registration?.fei_number || "—"}</b></td>}
                           <td><ArrowRight size={17} /></td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table> : <table className="matrix-table">
-                  <thead><tr><th>Product code</th><th>Device type</th><th>Company</th><th>Registered devices</th><th>Regs.</th></tr></thead>
+                  <thead><tr>
+                    {matrixColumns.includes("productCode") && <th>Product code</th>}
+                    {matrixColumns.includes("deviceType") && <th>Device type</th>}
+                    {matrixColumns.includes("company") && <th>Company</th>}
+                    {matrixColumns.includes("listedDeviceCount") && <th className="numeric-head">Listed devices</th>}
+                    {matrixColumns.includes("registeredDevices") && <th>Registered devices</th>}
+                    {matrixColumns.includes("registrations") && <th className="numeric-head">Registrations</th>}
+                    {matrixColumns.includes("productListings") && <th className="numeric-head">Product listings</th>}
+                    {matrixColumns.includes("establishments") && <th className="numeric-head">Establishments</th>}
+                    {matrixColumns.includes("deviceClass") && <th>Device class</th>}
+                    {matrixColumns.includes("specialty") && <th>Medical specialty</th>}
+                    {matrixColumns.includes("countries") && <th>Countries</th>}
+                    {matrixColumns.includes("latestListing") && <th>Latest listing</th>}
+                  </tr></thead>
                   <tbody>
                     {matrixRows.map((row) => (
                       <tr key={row.key}>
-                        <td><span className="code-pill">{row.productCode}</span></td>
-                        <td><b>{row.deviceType}</b></td>
-                        <td><b>{row.company}</b></td>
-                        <td><div className="device-name-list">{row.devices.map((device) => <span key={device}>{device}</span>)}</div></td>
-                        <td><b>{row.registrations}</b></td>
+                        {matrixColumns.includes("productCode") && <td><span className="code-pill">{row.productCode}</span></td>}
+                        {matrixColumns.includes("deviceType") && <td><b>{row.deviceType}</b></td>}
+                        {matrixColumns.includes("company") && <td><b>{row.company}</b></td>}
+                        {matrixColumns.includes("listedDeviceCount") && <td className="count-cell"><b>{row.devices.length.toLocaleString()}</b><span>Unique names</span></td>}
+                        {matrixColumns.includes("registeredDevices") && <td><div className="device-name-list">{row.devices.length ? row.devices.map((device) => <span key={device}>{device}</span>) : <em>No proprietary names listed</em>}</div></td>}
+                        {matrixColumns.includes("registrations") && <td className="count-cell"><b>{row.registrations.toLocaleString()}</b></td>}
+                        {matrixColumns.includes("productListings") && <td className="count-cell"><b>{row.productListings.toLocaleString()}</b></td>}
+                        {matrixColumns.includes("establishments") && <td className="count-cell"><b>{row.establishments.toLocaleString()}</b></td>}
+                        {matrixColumns.includes("deviceClass") && <td><div className="pill-row">{row.deviceClasses.length ? row.deviceClasses.map((value) => <span key={value} className={`class-badge class-${value.toLowerCase()}`}>Class {value}</span>) : "—"}</div></td>}
+                        {matrixColumns.includes("specialty") && <td><span className="cell-list">{row.specialties.join(" · ") || "—"}</span></td>}
+                        {matrixColumns.includes("countries") && <td><div className="pill-row">{row.countries.length ? row.countries.map((value) => <span key={value} className="code-pill neutral">{value}</span>) : "—"}</div></td>}
+                        {matrixColumns.includes("latestListing") && <td><b className="mono-value">{row.latestListing || "—"}</b></td>}
                       </tr>
                     ))}
                   </tbody>
