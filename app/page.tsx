@@ -163,12 +163,24 @@ function matchingProducts(item: RecordItem, filters: Filters) {
   );
 }
 
+function listedDeviceNames(item: RecordItem) {
+  const names = new Map<string, string>();
+  (item.proprietary_name || []).forEach((rawName) => {
+    rawName.split(/[;\n]+/).forEach((part) => {
+      const name = part.replace(/\s+/g, " ").trim();
+      const key = name.toLocaleLowerCase();
+      if (name && !names.has(key)) names.set(key, name);
+    });
+  });
+  return [...names.values()];
+}
+
 function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
   const groups = new Map<string, {
     productCode: string;
     deviceType: string;
     company: string;
-    devices: Set<string>;
+    devices: Map<string, string>;
     registrationIds: Set<string>;
     productListings: number;
     establishments: Set<string>;
@@ -179,7 +191,7 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
   }>();
   items.forEach((item, recordIndex) => {
     const company = companyName(item);
-    const tradeNames = (item.proprietary_name || []).filter(Boolean);
+    const tradeNames = listedDeviceNames(item);
     matchingProducts(item, filters).forEach((product) => {
       const productCode = product.product_code || "—";
       const deviceType = product.openfda?.device_name || "Unspecified device type";
@@ -188,7 +200,7 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
         productCode,
         deviceType,
         company,
-        devices: new Set<string>(),
+        devices: new Map<string, string>(),
         registrationIds: new Set<string>(),
         productListings: 0,
         establishments: new Set<string>(),
@@ -197,7 +209,10 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
         countries: new Set<string>(),
         latestListing: "",
       };
-      tradeNames.forEach((name) => existing.devices.add(name));
+      tradeNames.forEach((name) => {
+        const normalized = name.toLocaleLowerCase();
+        if (!existing.devices.has(normalized)) existing.devices.set(normalized, name);
+      });
       existing.registrationIds.add(item.registration?.registration_number || `record-${recordIndex}`);
       existing.productListings += 1;
       existing.establishments.add(firmName(item));
@@ -214,7 +229,7 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
       productCode: value.productCode,
       deviceType: value.deviceType,
       company: value.company,
-      devices: [...value.devices].sort((a, b) => a.localeCompare(b)),
+      devices: [...value.devices.values()].sort((a, b) => a.localeCompare(b)),
       registrations: value.registrationIds.size,
       productListings: value.productListings,
       establishments: value.establishments.size,
@@ -652,7 +667,7 @@ export default function Home() {
             primaryDevice: primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device",
             productCodes: [...new Set(shown.map((p) => p.product_code).filter(Boolean))].join("; "),
             listedProducts: shown.length,
-            tradeNames: (item.proprietary_name || []).join("; "),
+            tradeNames: listedDeviceNames(item).join("; "),
             location: locationSummary(item),
             deviceClass: [...new Set(shown.map((p) => p.openfda?.device_class).filter(Boolean))].join("; "),
             expiry: item.registration?.reg_expiry_date_year,
@@ -957,6 +972,7 @@ export default function Home() {
                       const primary = shown[0];
                       const codes = [...new Set(shown.map((p) => p.product_code).filter(Boolean))] as string[];
                       const listingCount = item.products?.length || 0;
+                      const tradeNames = listedDeviceNames(item);
                       return (
                         <tr key={`${item.registration?.registration_number || "record"}-${index}`} onClick={() => setSelected(item)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelected(item)}>
                           {recordColumns.includes("establishment") && <td><b>{firmName(item)}</b><span>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
@@ -970,7 +986,7 @@ export default function Home() {
                             </div>
                           </td>}
                           {recordColumns.includes("listedProducts") && <td className="count-cell"><b>{shown.length.toLocaleString()}</b><span>{productFilterActive(appliedFilters) ? `${matched.length} of ${listingCount} match` : "Product entries"}</span></td>}
-                          {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{item.proprietary_name?.length ? item.proprietary_name.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{(item.proprietary_name?.length || 0) > 5 && <em>+{(item.proprietary_name?.length || 0) - 5} more</em>}</div></td>}
+                          {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{tradeNames.length ? tradeNames.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{tradeNames.length > 5 && <em>+{tradeNames.length - 5} more</em>}</div></td>}
                           {recordColumns.includes("location") && <td><b>{locationSummary(item)}</b></td>}
                           {recordColumns.includes("deviceClass") && <td><span className={`class-badge class-${primary?.openfda?.device_class || "u"}`}>{primary?.openfda?.device_class ? `Class ${primary.openfda.device_class}` : "—"}</span></td>}
                           {recordColumns.includes("expiry") && <td><b>{item.registration?.reg_expiry_date_year || "—"}</b></td>}
