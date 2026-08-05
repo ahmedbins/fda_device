@@ -18,6 +18,8 @@ import {
   LoaderCircle,
   MapPin,
   PackageSearch,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -65,6 +67,8 @@ type Filters = {
 };
 
 type ViewMode = "records" | "matrix";
+type MatrixSort = "code" | "devices" | "company" | "registrations";
+type CountryOption = { code: string; count: number; name: string };
 type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "deviceClass" | "expiry" | "registrationNumber" | "feiNumber";
 type MatrixColumn = "productCode" | "deviceType" | "company" | "listedDeviceCount" | "registeredDevices" | "registrations" | "productListings" | "establishments" | "deviceClass" | "specialty" | "countries" | "latestListing";
 
@@ -119,6 +123,14 @@ const ESTABLISHMENT_TYPES = [
   "Export Device to the United States But Perform No Other Operation on Device",
   "Remanufacture Medical Device",
 ];
+
+function regionName(code: string) {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code;
+  } catch {
+    return code;
+  }
+}
 
 function buildSearch(filters: Filters) {
   const clauses: string[] = [];
@@ -241,6 +253,15 @@ function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
     .sort((a, b) => a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company));
 }
 
+function sortMatrixRows(rows: MatrixRow[], sort: MatrixSort) {
+  return [...rows].sort((a, b) => {
+    if (sort === "devices") return b.devices.length - a.devices.length || a.company.localeCompare(b.company);
+    if (sort === "registrations") return b.registrations - a.registrations || a.company.localeCompare(b.company);
+    if (sort === "company") return a.company.localeCompare(b.company) || a.productCode.localeCompare(b.productCode);
+    return a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company);
+  });
+}
+
 function localMatches(item: RecordItem, filters: Filters) {
   const haystack = [
     firmName(item),
@@ -335,14 +356,37 @@ export default function Home() {
   const [recordColumns, setRecordColumns] = useState<RecordColumn[]>(DEFAULT_RECORD_COLUMNS);
   const [matrixColumns, setMatrixColumns] = useState<MatrixColumn[]>(DEFAULT_MATRIX_COLUMNS);
   const [columnPrefsReady, setColumnPrefsReady] = useState(false);
+  const [apiCountries, setApiCountries] = useState<CountryOption[]>([]);
+  const [matrixSort, setMatrixSort] = useState<MatrixSort>("code");
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+  const [filterPanelPrefsReady, setFilterPanelPrefsReady] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const codeInput = useRef<HTMLInputElement>(null);
+  const columnPicker = useRef<HTMLDetailsElement>(null);
   const searchSeq = useRef(0);
 
   const devHost = useDevHost();
+  const countryOptions = useMemo(() => {
+    if (mode !== "files" || !localRecords.length) return apiCountries;
+    const counts = new Map<string, number>();
+    localRecords.forEach((record) => {
+      const code = record.registration?.iso_country_code?.toUpperCase();
+      if (code) counts.set(code, (counts.get(code) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .map(([code, count]) => ({ code, count, name: regionName(code) }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [apiCountries, localRecords, mode]);
+  const topCountries = countryOptions.slice(0, 4);
   const activeFilters = [
     filters.keyword.trim(),
     filters.productCodes.length,
+    filters.country.trim(),
+    filters.state.trim(),
+    filters.deviceClass,
+    filters.establishment,
+  ].filter(Boolean).length;
+  const narrowFilterCount = [
     filters.country.trim(),
     filters.state.trim(),
     filters.deviceClass,
@@ -431,6 +475,20 @@ export default function Home() {
         setCheckedAt(new Date());
       })
       .catch(() => {});
+    const countryParams = new URLSearchParams({ count: "registration.iso_country_code", limit: "250" });
+    fetch(`${API}?${countryParams.toString()}`)
+      .then((res) => res.json())
+      .then((data: { results?: { term?: string; count?: number }[] }) => {
+        const countries = (data.results || [])
+          .filter((entry) => entry.term)
+          .map((entry) => {
+            const code = String(entry.term).toUpperCase();
+            return { code, count: entry.count || 0, name: regionName(code) };
+          })
+          .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+        setApiCountries(countries);
+      })
+      .catch(() => {});
     if (initial.autorun) queueMicrotask(() => runSearch(0, initial.view, initial.filters));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -457,6 +515,43 @@ export default function Home() {
     localStorage.setItem("fda-record-columns", JSON.stringify(recordColumns));
     localStorage.setItem("fda-matrix-columns", JSON.stringify(matrixColumns));
   }, [columnPrefsReady, recordColumns, matrixColumns]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
+    queueMicrotask(() => {
+      setFiltersCollapsed(saved);
+      setFilterPanelPrefsReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!filterPanelPrefsReady) return;
+    localStorage.setItem("fda-filter-panel-collapsed", filtersCollapsed ? "1" : "0");
+  }, [filterPanelPrefsReady, filtersCollapsed]);
+
+  useEffect(() => {
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      const picker = columnPicker.current;
+      if (picker?.open && event.target instanceof Node && !picker.contains(event.target)) picker.open = false;
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      const picker = columnPicker.current;
+      if (event.key === "Escape" && picker?.open) {
+        picker.open = false;
+        picker.querySelector<HTMLElement>("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (columnPicker.current) columnPicker.current.open = false;
+  }, [viewMode]);
 
   const toggleRecordColumn = (key: RecordColumn) => {
     setRecordColumns((current) => current.includes(key)
@@ -645,7 +740,8 @@ export default function Home() {
           countries: row.countries.join("; "),
           latestListing: row.latestListing,
         })[column];
-        const rows = buildMatrix(all, appliedFilters).map((row) => matrixColumns.map((column) => value(row, column)));
+        const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
+          .map((row) => matrixColumns.map((column) => value(row, column)));
         downloadCsv(
           [matrixColumns.map((column) => labels[column]), ...rows],
           `fda-devices-matrix-${codesPart}-${stamp}.csv`,
@@ -703,7 +799,10 @@ export default function Home() {
     return `${(skip + 1).toLocaleString()}–${Math.min(skip + records.length, total).toLocaleString()} of ${total.toLocaleString()}`;
   }, [records.length, skip, total]);
 
-  const matrixRows = useMemo(() => buildMatrix(records, appliedFilters), [records, appliedFilters]);
+  const matrixRows = useMemo(
+    () => sortMatrixRows(buildMatrix(records, appliedFilters), matrixSort),
+    [records, appliedFilters, matrixSort],
+  );
 
   const drawerProducts = useMemo(() => {
     if (!selected) return [];
@@ -765,17 +864,22 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="workspace" aria-label="Device data explorer">
+      <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="Device data explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
           <div className="panel-heading">
             <div><span>02</span><h2>Filters</h2></div>
-            <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
+            <div className="panel-heading-actions">
+              <button className="icon-button collapse-filter-panel" onClick={() => setFiltersCollapsed((current) => !current)} aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"} aria-expanded={!filtersCollapsed} title={filtersCollapsed ? "Expand filters" : "Collapse filters"}>{filtersCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
+              <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
+            </div>
           </div>
 
           <div className="source-switch" role="group" aria-label="Data source">
             <button className={mode === "api" ? "active" : ""} onClick={() => setSource("api")}><Database size={15} /> Live API</button>
             <button className={mode === "files" ? "active" : ""} onClick={() => setSource("files")} disabled={!localRecords.length}><FileArchive size={15} /> Local files</button>
           </div>
+
+          <div className="filter-group-heading"><span>Find</span><small>Name or code</small></div>
 
           <label className="field keyword-field">
             <span>Keywords</span>
@@ -809,10 +913,12 @@ export default function Home() {
                   }
                 }}
                 onBlur={() => codeDraft.trim() && commitCodes(codeDraft)}
+                list="product-code-options"
                 placeholder={filters.productCodes.length ? "Add code…" : "e.g. QUH, OSM, SCR"}
                 aria-label="Product codes"
               />
             </div>
+            <datalist id="product-code-options">{PRESET.map((item) => <option key={item.code} value={item.code} label={item.name} />)}</datalist>
             <small className="field-hint">Add several codes — results match any of them.</small>
           </div>
 
@@ -828,15 +934,29 @@ export default function Home() {
             <span className="preset-state">{presetActive ? <><Check size={12} /> ON</> : "OFF"}</span>
           </button>
 
-          <div className="two-col">
-            <label className="field"><span>Device class</span><span className="select-wrap"><select value={filters.deviceClass} onChange={(e) => setFilters({ ...filters, deviceClass: e.target.value })}><option value="">Any class</option><option value="1">Class I</option><option value="2">Class II</option><option value="3">Class III</option><option value="U">Unclassified</option></select><ChevronDown size={14} /></span></label>
-            <label className="field"><span>Country code</span><input value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} placeholder="US" maxLength={2} onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
+          <div className="filter-group-heading narrow-heading">
+            <span>Narrow</span>
+            <small>{narrowFilterCount ? `${narrowFilterCount} selected` : "Optional"}</small>
           </div>
 
           <div className="two-col">
-            <label className="field"><span>State code</span><input value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value })} placeholder="CA" maxLength={3} onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
-            <label className="field"><span>Establishment</span><span className="select-wrap"><select value={filters.establishment} onChange={(e) => setFilters({ ...filters, establishment: e.target.value })}><option value="">All types</option>{ESTABLISHMENT_TYPES.map((type) => <option key={type}>{type}</option>)}</select><ChevronDown size={14} /></span></label>
+            <label className="field"><span>Device class</span><span className="select-wrap"><select value={filters.deviceClass} onChange={(e) => setFilters({ ...filters, deviceClass: e.target.value })}><option value="">Any class</option><option value="1">Class I</option><option value="2">Class II</option><option value="3">Class III</option><option value="U">Unclassified</option></select><ChevronDown size={14} /></span></label>
+            <label className="field"><span>Country</span><input value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value.toUpperCase().slice(0, 2) })} list="country-options" placeholder="US" maxLength={2} autoComplete="off" onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
           </div>
+          <datalist id="country-options">{countryOptions.map((country) => <option key={country.code} value={country.code} label={`${country.name} · ${country.count.toLocaleString()} records`} />)}</datalist>
+
+          {!!topCountries.length && <div className="country-quick" aria-label="Common countries">
+            <span>Top</span>
+            {topCountries.map((country) => <button key={country.code} type="button" className={filters.country === country.code ? "active" : ""} onClick={() => setFilters((current) => ({ ...current, country: current.country === country.code ? "" : country.code }))} title={`${country.name} · ${country.count.toLocaleString()} records`}><b>{country.code}</b><em>{country.count >= 1000 ? `${Math.round(country.count / 1000)}K` : country.count.toLocaleString()}</em></button>)}
+          </div>}
+
+          <details className="more-filters" defaultOpen={Boolean(initial.filters.state || initial.filters.establishment)}>
+            <summary><span>More filters</span>{(filters.state || filters.establishment) && <b>{[filters.state, filters.establishment].filter(Boolean).length}</b>}<ChevronDown size={14} /></summary>
+            <div className="more-filter-fields">
+              <label className="field"><span>State / region code</span><input value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value.toUpperCase().slice(0, 3) })} placeholder="CA" maxLength={3} onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
+              <label className="field"><span>Establishment role</span><span className="select-wrap"><select value={filters.establishment} onChange={(e) => setFilters({ ...filters, establishment: e.target.value })}><option value="">All roles</option>{ESTABLISHMENT_TYPES.map((type) => <option key={type}>{type}</option>)}</select><ChevronDown size={14} /></span></label>
+            </div>
+          </details>
 
           <div className="query-actions">
             <button className="primary" onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} Search records</button>
@@ -855,7 +975,7 @@ export default function Home() {
         <section className="results-panel">
           <div className="results-toolbar">
             <div className="results-title">
-              <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
+              <button className="icon-button filter-toggle" onClick={() => { setFiltersCollapsed(false); setFiltersOpen(true); }} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
               <div>
                 <span>03 / RESULTS</span>
                 <h2>{records.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : "Search records"}</h2>
@@ -873,7 +993,7 @@ export default function Home() {
                 <button className={viewMode === "records" ? "active" : ""} onClick={() => switchView("records")}>Records</button>
                 <button className={viewMode === "matrix" ? "active" : ""} onClick={() => switchView("matrix")}>Company + devices</button>
               </div>
-              <details className="column-picker">
+              <details ref={columnPicker} className="column-picker">
                 <summary className="secondary"><Columns3 size={15} /> Columns · {viewMode === "records" ? recordColumns.length : matrixColumns.length}</summary>
                 <div className="column-menu">
                   <div className="column-menu-head">
@@ -903,6 +1023,7 @@ export default function Home() {
                   </div>
                 </div>
               </details>
+              {viewMode === "matrix" && <label className="matrix-sort">Sort <select value={matrixSort} onChange={(e) => setMatrixSort(e.target.value as MatrixSort)} aria-label="Sort company and device rows"><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option><option value="company">Company A–Z</option></select></label>}
               {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
               {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}><option>25</option><option>50</option><option>100</option></select></label>}
               <button
