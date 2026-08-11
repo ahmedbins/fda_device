@@ -6,7 +6,6 @@
 | --- | --- | --- |
 | Internal Use Only | `fda-device-internaluseonly` | `npm run deploy:internal` |
 | Main | `fda-device-index` | `npm run deploy:main` |
-| Owner-only Sites mirror | Managed by Sites | Sites publishing workflow |
 
 Main and Internal use the same static multi-route build. The target project name is the only difference between their deployment commands.
 
@@ -69,11 +68,10 @@ Smoke-test all four regulatory routes and confirm that the deployed source/prove
 
 `npm run build:pages` uses `cloudflare-spa/vite.config.ts` and writes output to `work/cloudflare-pages/`. That directory is generated and ignored by Git.
 
-`npm run build` creates the full vinext Worker build used by the Sites mirror. `dist/` is generated and ignored by Git.
+`npm run build` creates the full vinext Worker build used for production validation. `dist/` is generated and ignored by Git.
 
 ## Rollback
 
 Use the Cloudflare Pages deployment history to promote the last known-good deployment for the affected project. Then revert or fix the responsible Git commit so the repository again describes the deployed state.
 
 Main and Internal can be rolled back independently, but a fix should be revalidated internally before being promoted again.
-

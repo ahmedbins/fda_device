@@ -9,8 +9,6 @@ flowchart LR
   R["GitHub repository"] --> B["Static Pages build"]
   B --> M["Main Pages project"]
   B --> I["Internal Use Only Pages project"]
-  R --> V["vinext full-stack build"]
-  V --> S["Owner-only Sites mirror"]
 ```
 
 There is intentionally no `main-site/` and `internal-site/` duplication. Environment-specific behavior is limited to the deployment command and hosting access policy. UI, routes, data normalization, tests, and assets are shared.
@@ -27,10 +25,6 @@ There is intentionally no `main-site/` and `internal-site/` duplication. Environ
 - Confirmed FCC scopes resolve from the bundled official snapshot.
 - The app attempts the live FCC endpoint where the browser supports it.
 - Uncovered FCC scopes can be imported from the official FCC XML/JSON response.
-
-### Sites mirror
-
-The root vinext build produces a Cloudflare Worker-compatible full-stack application. It includes `/api/fcc/search`, which can proxy the FCC endpoint when the upstream service permits server-side access. Sites controls the mirror's owner-only access policy.
 
 ## Route composition
 
@@ -98,4 +92,3 @@ Equipment descriptions, RF characteristics, and equipment class are not invented
 - route server rendering;
 - FDA Explorer and Monitoring regression checks;
 - API input validation.
-
