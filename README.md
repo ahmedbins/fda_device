@@ -10,7 +10,6 @@ A searchable regulatory-data workspace for exploring FDA medical-device records 
 | --- | --- | --- |
 | Main | [fda-device-index.pages.dev](https://fda-device-index.pages.dev/) | Stable public-facing deployment |
 | Internal Use Only | [fda-device-internaluseonly.pages.dev](https://fda-device-internaluseonly.pages.dev/) | Internal validation and release-candidate deployment |
-| Owner-only mirror | [fda-device-index.ahmeds.chatgpt.site](https://fda-device-index.ahmeds.chatgpt.site/) | Private Sites-hosted mirror |
 
 The Main and Internal deployments are not separate applications or duplicated folders. They are two Cloudflare Pages projects built from this repository. This keeps fixes and features consistent and makes promotion explicit: verify a commit internally, then deploy that same commit to Main.
 
@@ -98,5 +97,5 @@ docs/                 Architecture, data-source, and deployment guides
 
 - This repository must not contain API keys, GitHub tokens, Cloudflare credentials, or personal environment files.
 - `.env*`, build output, Wrangler state, and dependencies are ignored.
-- The regulatory sources used here are public, but the Internal and owner-only deployments may contain work-in-progress features. Do not treat an "Internal Use Only" hostname as an authentication boundary.
+- The regulatory sources used here are public, but the Internal deployment may contain work-in-progress features. Do not treat an "Internal Use Only" hostname as an authentication boundary.
 - Regulatory data can change. Verify material decisions against the linked official record.
