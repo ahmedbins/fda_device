@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import SourceNav from "./source-nav";
 import {
+  FCC_EAS_API,
   FCC_SEARCH_URL,
   FCC_SOURCE_LABEL,
   fccLocation,
@@ -309,7 +310,7 @@ export default function FccExplorerPage() {
             </div>
           </div>
 
-          {error && <div className="error-banner"><CircleAlert size={18} /><div><b>FCC service unavailable</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
+          {error && <div className="error-banner"><CircleAlert size={18} /><div><b>FCC service unavailable</b><span>{error}</span>{effectiveScopes[0] && <a className="source-fallback-link" href={`${FCC_EAS_API}?fccId=${encodeURIComponent(effectiveScopes[0])}`} target="_blank" rel="noreferrer">Open this query in the official FCC service <ExternalLink size={12} /></a>}</div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
           {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting the FCC Equipment Authorization source…</div>}
 
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p></div>

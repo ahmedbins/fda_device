@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { FCC_SEARCH_URL, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, parseFccScopes, type NormalizedFccRecord } from "./fcc-core";
+import { FCC_EAS_API, FCC_SEARCH_URL, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, parseFccScopes, type NormalizedFccRecord } from "./fcc-core";
 import { clearFccCache, searchFcc } from "./fcc-service";
 import { downloadCsv } from "./fda-shared";
 
@@ -149,7 +149,7 @@ export default function FccMonitorPage() {
         <small className="monitor-refreshed">Source: {FCC_SOURCE_LABEL}{retrievedAt ? ` · Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : ""} · activity is based on FCC grant dates, not snapshot change detection</small>
       </section>
 
-      {error && <div className="error-banner"><CircleAlert size={18} /><div><b>{status === "error" ? "FCC service unavailable" : "Monitoring scope needed"}</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
+      {error && <div className="error-banner"><CircleAlert size={18} /><div><b>{status === "error" ? "FCC service unavailable" : "Monitoring scope needed"}</b><span>{error}</span>{status === "error" && scopes[0] && <a className="source-fallback-link" href={`${FCC_EAS_API}?fccId=${encodeURIComponent(scopes[0])}`} target="_blank" rel="noreferrer">Open this query in the official FCC service <ExternalLink size={12} /></a>}</div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
 
       <section className="stat-tiles fcc-stat-tiles" aria-label="FCC monitoring summary">
         <article className="stat-tile"><CalendarClock size={21} /><div><b>{status === "loading" ? "…" : recent.length.toLocaleString()}</b><span>Recent authorizations</span></div></article>

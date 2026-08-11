@@ -50,6 +50,51 @@ export function isoFccDate(value?: string) {
   return iso || undefined;
 }
 
+function decodeXml(value: string) {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+function parseFccXml(body: string): RawFccRecord[] {
+  const rows: RawFccRecord[] = [];
+  const rowPattern = /<fccidInfo\b[^>]*>([\s\S]*?)<\/fccidInfo>/gi;
+  const fields = ["address", "applicationPurpose", "city", "country", "FCCId", "grantDate", "grantee", "state", "zipCode"];
+  let match: RegExpExecArray | null;
+
+  while ((match = rowPattern.exec(body))) {
+    const raw: RawFccRecord = {};
+    for (const field of fields) {
+      const fieldPattern = new RegExp(`<${field}\\b[^>]*>([\\s\\S]*?)<\\/${field}>`, "i");
+      const value = fieldPattern.exec(match[1])?.[1];
+      if (value !== undefined) raw[field] = decodeXml(value);
+    }
+    if (Object.keys(raw).length) rows.push(raw);
+  }
+
+  return rows;
+}
+
+export function parseFccPayload(body: string, contentType = ""): unknown {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+  if (contentType.toLowerCase().includes("json") || /^[{[]/.test(trimmed)) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      // Some FCC responses are labeled JSON while containing XML.
+    }
+  }
+  return parseFccXml(trimmed);
+}
+
 export function extractRawFccRecords(payload: unknown): RawFccRecord[] {
   if (Array.isArray(payload)) return payload.filter((item): item is RawFccRecord => !!item && typeof item === "object");
   if (!payload || typeof payload !== "object") return [];

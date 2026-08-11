@@ -165,6 +165,7 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .error-banner b { font-size: 12px; }
 .error-banner span { font-size: 11px; line-height: 1.4; }
 .error-banner button { background: none; border: 0; color: inherit; }
+.error-banner .source-fallback-link { width: max-content; display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; color: inherit; font-size: 11px; font-weight: 700; text-underline-offset: 2px; }
 .loading-layer { position: absolute; inset: 86px 0 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(255,255,255,.82); backdrop-filter: blur(2px); color: var(--ink); font: 11px var(--font-roboto), sans-serif; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -6,6 +6,7 @@ import {
   isoFccDate,
   normalizeFccRecord,
   normalizeFccScope,
+  parseFccPayload,
   parseFccScopes,
   uniqueFccRecords,
 } from "../app/fcc-core.ts";
@@ -14,6 +15,26 @@ test("normalizes complete and partial FCC-ID search values", () => {
   assert.equal(normalizeFccScope(" 2aa22-demo  "), "2AA22-DEMO");
   assert.deepEqual(parseFccScopes("OPS, 2aa22-demo; OPS"), ["OPS", "2AA22-DEMO"]);
   assert.deepEqual(parseFccScopes("AB"), []);
+});
+
+test("parses the FCC XML response returned by the public endpoint", () => {
+  const payload = parseFccPayload(`<?xml version="1.0" encoding="UTF-8"?>
+    <fccIDInfoes><fccidInfo>
+      <address>7435 Oakland Mills Road N/A</address>
+      <applicationPurpose>Original Equipment</applicationPurpose>
+      <city>Columbia</city><country>United States</country><FCCId>OPS10</FCCId>
+      <grantDate>08/01/2017</grantDate>
+      <grantee>FCC Laboratory Test Grantee Company JS 20260709</grantee>
+      <state>MD</state><zipCode>21046</zipCode>
+    </fccidInfo></fccIDInfoes>`, "application/xml");
+  const rows = extractRawFccRecords(payload);
+  assert.equal(rows.length, 1);
+  const record = normalizeFccRecord(rows[0], "2026-08-11T00:00:00.000Z");
+  assert.equal(record?.fccId, "OPS10");
+  assert.equal(record?.authorizationDate, "2017-08-01");
+  assert.equal(record?.granteeName, "FCC Laboratory Test Grantee Company JS 20260709");
+  assert.equal(record?.address, "7435 Oakland Mills Road N/A");
+  assert.equal(record?.zipCode, "21046");
 });
 
 test("normalizes only FCC fields actually returned by getFCCIDList", () => {

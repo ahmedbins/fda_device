@@ -1,7 +1,9 @@
 import {
+  FCC_EAS_API,
   extractRawFccRecords,
   normalizeFccRecord,
   normalizeFccScope,
+  parseFccPayload,
   uniqueFccRecords,
   type NormalizedFccRecord,
 } from "./fcc-core";
@@ -9,6 +11,7 @@ import {
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map<string, { expires: number; records: NormalizedFccRecord[] }>();
 const inflight = new Map<string, Promise<NormalizedFccRecord[]>>();
+let directBrowserSupport: boolean | null = null;
 
 function requestSignal(signal?: AbortSignal) {
   const controller = new AbortController();
@@ -24,6 +27,45 @@ function requestSignal(signal?: AbortSignal) {
   };
 }
 
+function recordsFromPayload(payload: unknown, retrievedAt: string) {
+  return extractRawFccRecords(payload)
+    .map((raw) => normalizeFccRecord(raw, retrievedAt))
+    .filter((record): record is NormalizedFccRecord => record !== null);
+}
+
+async function fetchDirect(normalized: string, signal: AbortSignal) {
+  const response = await fetch(`${FCC_EAS_API}?fccId=${encodeURIComponent(normalized)}`, { signal });
+  if (!response.ok && response.status !== 204) throw new Error(`FCC direct request returned ${response.status}.`);
+  directBrowserSupport = true;
+  if (response.status === 204) return [];
+  const body = await response.text();
+  return recordsFromPayload(parseFccPayload(body, response.headers.get("content-type") || ""), new Date().toISOString());
+}
+
+async function fetchProxy(normalized: string, signal: AbortSignal) {
+  let response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
+    signal,
+    headers: { accept: "application/json" },
+  });
+  if (response.status === 204) return [];
+  if ([502, 503, 504].includes(response.status)) {
+    response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
+      signal,
+      headers: { accept: "application/json" },
+    });
+    if (response.status === 204) return [];
+  }
+  const body = await response.text();
+  const payload = parseFccPayload(body, response.headers.get("content-type") || "");
+  if (!response.ok) {
+    const message = payload && typeof payload === "object" && !Array.isArray(payload) && "error" in payload && typeof payload.error === "string"
+      ? payload.error
+      : "The FCC Equipment Authorization source could not be reached.";
+    throw new Error(message);
+  }
+  return recordsFromPayload(payload, new Date().toISOString());
+}
+
 async function fetchScope(scope: string, signal?: AbortSignal): Promise<NormalizedFccRecord[]> {
   const normalized = normalizeFccScope(scope);
   if (normalized.length < 3) throw new Error("Enter at least three FCC-ID characters or a complete grantee code.");
@@ -36,29 +78,16 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<Normaliz
   const request = (async () => {
     const timed = requestSignal(signal);
     try {
-      let response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
-        signal: timed.signal,
-        headers: { accept: "application/json" },
-      });
-      if (response.status === 204) return [];
-      if ([502, 503, 504].includes(response.status) && !signal?.aborted) {
-        response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
-          signal: timed.signal,
-          headers: { accept: "application/json" },
-        });
-        if (response.status === 204) return [];
+      let records: NormalizedFccRecord[] | undefined;
+      if (typeof window !== "undefined" && directBrowserSupport !== false) {
+        try {
+          records = await fetchDirect(normalized, timed.signal);
+        } catch (error) {
+          if (timed.signal.aborted) throw error;
+          directBrowserSupport = false;
+        }
       }
-      const payload = await response.json().catch(() => null) as { error?: string } | unknown;
-      if (!response.ok) {
-        const message = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
-          ? payload.error
-          : "The FCC Equipment Authorization source could not be reached.";
-        throw new Error(message);
-      }
-      const retrievedAt = new Date().toISOString();
-      const records = extractRawFccRecords(payload)
-        .map((raw) => normalizeFccRecord(raw, retrievedAt))
-        .filter((record): record is NormalizedFccRecord => record !== null);
+      records ??= await fetchProxy(normalized, timed.signal);
       cache.set(normalized, { expires: Date.now() + CACHE_MS, records });
       return records;
     } catch (error) {
