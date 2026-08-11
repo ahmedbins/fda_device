@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   extractRawFccRecords,
+  categorizeFccPurpose,
+  fccIdParts,
+  groupFccRecordsByGrantee,
   fccRecordsInWindow,
   isoFccDate,
   normalizeFccRecord,
@@ -54,13 +57,16 @@ test("normalizes only FCC fields actually returned by getFCCIDList", () => {
     granteeName: "FCC Laboratory Test Grantee Company",
     authorizationDate: "2017-08-01",
     applicationPurpose: "Original Equipment",
+    purposeCategory: "Original authorization",
     address: undefined,
     city: "Columbia",
     state: "MD",
     country: "United States",
     zipCode: undefined,
-    sourceUrl: "https://www.fcc.gov/oet/ea/fccid",
+    sourceUrl: "https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=OPS10",
     retrievedAt,
+    sourceMode: undefined,
+    snapshotCapturedAt: undefined,
     raw: {
       fccid: "OPS10",
       grantee: "FCC Laboratory Test Grantee Company",
@@ -94,4 +100,24 @@ test("deduplicates overlapping prefix results and filters monitoring windows", (
   const unique = uniqueFccRecords(records);
   assert.equal(unique.length, 2);
   assert.deepEqual(fccRecordsInWindow(unique, "2026-05-01").map((row) => row.fccId), ["OPS10"]);
+});
+
+test("derives identity only from confirmed grantee scopes and preserves purpose wording", () => {
+  assert.deepEqual(fccIdParts("2A3ULM5AEBT", ["KWC", "2A3UL"]), { granteeCode: "2A3UL", fccProductCode: "M5AEBT" });
+  assert.deepEqual(fccIdParts("UNKNOWN", ["KWC", "2A3UL"]), {});
+  assert.equal(categorizeFccPurpose("Class II Permissive Change"), "Class II permissive change");
+  assert.equal(categorizeFccPurpose("Change in Identification"), "Change in FCC ID");
+  assert.equal(categorizeFccPurpose("Original Equipment"), "Original authorization");
+});
+
+test("groups records by confirmed grantee identity", () => {
+  const base = { source: "FCC", sourceUrl: "https://apps.fcc.gov", retrievedAt: "2026-08-11T00:00:00.000Z", raw: {} };
+  const groups = groupFccRecordsByGrantee([
+    { ...base, fccId: "KWC-A", granteeCode: "KWC", granteeName: "Sonova USA Inc.", authorizationDate: "2024-01-01" },
+    { ...base, fccId: "KWC-B", granteeCode: "KWC", granteeName: "Sonova USA Inc.", authorizationDate: "2025-01-01" },
+    { ...base, fccId: "2A3UL-X", granteeCode: "2A3UL", granteeName: "Sonova Consumer Hearing GmbH", authorizationDate: "2026-04-01" },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].granteeCode, "2A3UL");
+  assert.equal(groups[1].fccIds, 2);
 });

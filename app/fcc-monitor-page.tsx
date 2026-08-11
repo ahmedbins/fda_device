@@ -14,26 +14,32 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { FCC_EAS_API, FCC_SEARCH_URL, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, parseFccScopes, type NormalizedFccRecord } from "./fcc-core";
+import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
+import { FCC_EAS_API, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, parseFccScopes, type FccSearchResult, type NormalizedFccRecord } from "./fcc-core";
 import { clearFccCache, searchFcc } from "./fcc-service";
 import { downloadCsv } from "./fda-shared";
 
-const WINDOWS = [30, 90, 180, 365];
+const WINDOWS = [30, 90, 180, 365, 730];
 
 function initialMonitorState() {
-  const fallback = { scopes: [] as string[], days: 90 };
+  const preset = getFccPreset(DEFAULT_FCC_PRESET);
+  const fallback = { scopes: preset?.granteeCodes || [] as string[], days: 180, presetId: preset?.id || "" };
   if (typeof window === "undefined") return fallback;
   const params = new URLSearchParams(window.location.search);
-  const scopes = parseFccScopes(params.get("ids") || "");
+  const urlScopes = parseFccScopes(params.get("ids") || "");
+  const requestedPreset = getFccPreset(params.get("preset"));
+  const activePreset = requestedPreset || (!urlScopes.length && !params.has("ids") ? preset : undefined);
+  const scopes = urlScopes.length ? urlScopes : activePreset?.granteeCodes || [];
   const requestedDays = Number(params.get("days"));
-  return { scopes, days: WINDOWS.includes(requestedDays) ? requestedDays : 90 };
+  return { scopes, days: WINDOWS.includes(requestedDays) ? requestedDays : 180, presetId: activePreset?.id || "" };
 }
 
-function syncMonitorUrl(scopes: string[], days: number) {
+function syncMonitorUrl(scopes: string[], days: number, presetId = "") {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
   if (scopes.length) params.set("ids", scopes.join(","));
   params.set("days", String(days));
+  if (presetId) params.set("preset", presetId);
   window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
 }
 
@@ -51,7 +57,10 @@ export default function FccMonitorPage() {
   const [scopes, setScopes] = useState<string[]>(initial.scopes);
   const [scopeDraft, setScopeDraft] = useState("");
   const [days, setDays] = useState(initial.days);
+  const [presetId, setPresetId] = useState(initial.presetId);
   const [records, setRecords] = useState<NormalizedFccRecord[]>([]);
+  const [searchMeta, setSearchMeta] = useState<FccSearchResult | null>(null);
+  const [coverageNote, setCoverageNote] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [error, setError] = useState("");
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
@@ -61,6 +70,8 @@ export default function FccMonitorPage() {
 
   const cutoff = useMemo(() => cutoffIso(days), [days]);
   const recent = useMemo(() => fccRecordsInWindow(records, cutoff), [records, cutoff]);
+  const originalRecent = useMemo(() => recent.filter((record) => record.purposeCategory === "Original authorization"), [recent]);
+  const changedRecent = useMemo(() => recent.filter((record) => record.purposeCategory === "Class II permissive change" || record.purposeCategory === "Change in FCC ID"), [recent]);
   const mostRecentOutside = useMemo(() => records
     .filter((record) => !!record.authorizationDate && record.authorizationDate < cutoff)
     .sort((a, b) => (b.authorizationDate || "").localeCompare(a.authorizationDate || ""))[0], [records, cutoff]);
@@ -76,13 +87,16 @@ export default function FccMonitorPage() {
     request.current = controller;
     setStatus("loading");
     setError("");
-    syncMonitorUrl(nextScopes, days);
+    setCoverageNote("");
+    syncMonitorUrl(nextScopes, days, presetId);
     if (force) clearFccCache(nextScopes);
     try {
       const next = await searchFcc(nextScopes, controller.signal);
       if (controller.signal.aborted) return;
-      setRecords(next);
-      setRetrievedAt(new Date());
+      setRecords(next.records);
+      setSearchMeta(next);
+      setRetrievedAt(new Date(next.retrievedAt));
+      if (next.unresolvedScopes.length) setCoverageNote(`The official bundled snapshot does not cover ${next.unresolvedScopes.join(", ")}. Open the official FCC response from Explorer and import it there to analyze that scope.`);
       setStatus("done");
     } catch (caught) {
       if (controller.signal.aborted) return;
@@ -90,7 +104,7 @@ export default function FccMonitorPage() {
       setError(caught instanceof Error ? caught.message : "The FCC Equipment Authorization source could not be reached.");
       setStatus("error");
     }
-  }, [days, scopes]);
+  }, [days, presetId, scopes]);
 
   useEffect(() => {
     if (initial.scopes.length) queueMicrotask(() => update(false, initial.scopes));
@@ -113,46 +127,49 @@ export default function FccMonitorPage() {
   };
 
   const exportCsv = () => downloadCsv([
-    ["fcc_authorization_date", "fcc_id", "fcc_grantee", "fcc_application_purpose", "fcc_grantee_location", "source", "retrieved_at"],
-    ...recent.map((record) => [record.authorizationDate || "", record.fccId, record.granteeName || "", record.applicationPurpose || "", fccLocation(record) === "—" ? "" : fccLocation(record), "FCC", record.retrievedAt]),
+    ["monitoring_window_days", "query_scope", "fcc_authorization_date", "fcc_id", "fcc_grantee", "fcc_grantee_code_derived", "normalized_activity_category", "fcc_reported_application_purpose", "fcc_grantee_location", "source", "source_mode", "snapshot_captured_at", "retrieved_at"],
+    ...recent.map((record) => [days, scopes.join("|"), record.authorizationDate || "", record.fccId, record.granteeName || "", record.granteeCode || "", record.purposeCategory || "", record.applicationPurpose || "", fccLocation(record) === "—" ? "" : fccLocation(record), "FCC", record.sourceMode || "", record.snapshotCapturedAt || "", record.retrievedAt]),
   ], `fcc-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.csv`);
 
   const copyLink = async () => {
-    syncMonitorUrl(scopes, days);
+    syncMonitorUrl(scopes, days, presetId);
     await navigator.clipboard.writeText(window.location.href);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 1600);
   };
 
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
-  const navStatus = status === "error" ? "FCC SOURCE UNAVAILABLE" : retrievedAt ? "FCC API CONNECTED" : "FCC SOURCE READY";
+  const navStatus = retrievedAt ? searchMeta?.sourceMode === "live" ? "FCC API CONNECTED" : "FCC OFFICIAL SNAPSHOT" : "FCC SOURCE READY";
 
   return (
     <main>
-      <SourceNav source="fcc" view="monitoring" status={navStatus} statusState={status === "error" ? "error" : retrievedAt ? "connected" : "ready"} />
+      <SourceNav source="fcc" view="monitoring" status={navStatus} statusState={retrievedAt ? "connected" : "ready"} />
 
       <section className="hero monitor-hero" id="top">
         <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
-        <div className="hero-grid"><div><h1>What changed.<br /><em>At a glance.</em></h1><p>Recent FCC equipment authorization activity for your monitored FCC IDs and grantees.</p></div><div className="dataset-note"><RadioTower size={20} /><div><b>FCC equipment authorization</b><span>Recent authorization activity</span><span>{retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span></div></div></div>
+        <div className="hero-grid"><div><h1>What changed.<br /><em>At a glance.</em></h1><p>Recent FCC equipment authorization activity for your monitored FCC IDs and grantees.</p></div><div className="dataset-note"><RadioTower size={20} /><div><b>FCC equipment authorization</b><span>{retrievedAt ? searchMeta?.sourceMode === "live" ? "API response" : "Official EAS snapshot" : "Recent authorization activity"}</span><span>{searchMeta?.snapshotCapturedAt ? `Captured ${new Date(searchMeta.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span></div></div></div>
       </section>
 
       <section className="monitor-controls" aria-label="FCC monitoring controls">
+        <label className="field monitor-window"><span>Watchlist</span><select value={presetId} onChange={(event) => { const nextPreset = getFccPreset(event.target.value); if (nextPreset) window.location.assign(`${window.location.pathname}?preset=${encodeURIComponent(nextPreset.id)}&days=${days}`); else setPresetId(""); }}><option value="">Custom</option>{FCC_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
         <div className="field monitor-codes">
           <span>FCC IDs, prefixes or grantee codes</span>
           <div className="chip-input" onClick={() => input.current?.focus()}>
-            {scopes.map((scope) => <span key={scope} className="chip">{scope}<button type="button" onClick={(event) => { event.stopPropagation(); setScopes((current) => current.filter((item) => item !== scope)); }} aria-label={`Remove ${scope}`}><X size={11} /></button></span>)}
+            {scopes.map((scope) => <span key={scope} className="chip">{scope}<button type="button" onClick={(event) => { event.stopPropagation(); setScopes((current) => current.filter((item) => item !== scope)); setPresetId(""); }} aria-label={`Remove ${scope}`}><X size={11} /></button></span>)}
             <input ref={input} value={scopeDraft} onChange={(event) => { const value = event.target.value; if (/[,;\s]/.test(value)) commitScopes(value); else setScopeDraft(value.toUpperCase().replace(/\s+/g, "").replace(/[^A-Z0-9-]/g, "").slice(0, 19)); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); updateNow(); } }} placeholder="Add FCC ID or prefix…" />
           </div>
         </div>
-        <label className="field monitor-window"><span>Window</span><select value={days} onChange={(event) => { const next = Number(event.target.value); setDays(next); syncMonitorUrl(scopes, next); }}>{WINDOWS.map((window) => <option key={window} value={window}>Last {window} days</option>)}</select></label>
+        <label className="field monitor-window"><span>Window</span><select value={days} onChange={(event) => { const next = Number(event.target.value); setDays(next); syncMonitorUrl(scopes, next, presetId); }}>{WINDOWS.map((window) => <option key={window} value={window}>{window === 730 ? "Last 2 years" : `Last ${window} days`}</option>)}</select></label>
         <div className="monitor-actions"><button className="primary" onClick={updateNow} disabled={status === "loading"}><RefreshCw className={status === "loading" ? "spin" : ""} size={15} /> Update</button><button className="icon-button" onClick={copyLink} aria-label="Copy shareable FCC monitoring URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button></div>
-        <small className="monitor-refreshed">Source: {FCC_SOURCE_LABEL}{retrievedAt ? ` · Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : ""} · activity is based on FCC grant dates, not snapshot change detection</small>
+        <small className="monitor-refreshed">Source: {FCC_SOURCE_LABEL}{searchMeta?.snapshotCapturedAt ? ` · official snapshot captured ${new Date(searchMeta.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}` : retrievedAt ? ` · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : ""} · activity is based on FCC grant dates, not snapshot change detection</small>
       </section>
 
-      {error && <div className="error-banner"><CircleAlert size={18} /><div><b>{status === "error" ? "FCC service unavailable" : "Monitoring scope needed"}</b><span>{error}</span>{status === "error" && scopes[0] && <a className="source-fallback-link" href={`${FCC_EAS_API}?fccId=${encodeURIComponent(scopes[0])}`} target="_blank" rel="noreferrer">Open this query in the official FCC service <ExternalLink size={12} /></a>}</div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
+      {error && <div className="error-banner"><CircleAlert size={18} /><div><b>Monitoring scope needs attention</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
+      {coverageNote && <div className="coverage-banner"><RadioTower size={18} /><div><b>Official source coverage</b><span>{coverageNote}</span>{searchMeta?.unresolvedScopes[0] && <a href={`${FCC_EAS_API}?fccId=${encodeURIComponent(searchMeta.unresolvedScopes[0])}`} target="_blank" rel="noreferrer">Open official FCC response <ExternalLink size={12} /></a>}</div></div>}
 
       <section className="stat-tiles fcc-stat-tiles" aria-label="FCC monitoring summary">
-        <article className="stat-tile"><CalendarClock size={21} /><div><b>{status === "loading" ? "…" : recent.length.toLocaleString()}</b><span>Recent authorizations</span></div></article>
+        <article className="stat-tile"><CalendarClock size={21} /><div><b>{status === "loading" ? "…" : originalRecent.length.toLocaleString()}</b><span>Original authorizations</span></div></article>
+        <article className="stat-tile"><RefreshCw size={21} /><div><b>{status === "loading" ? "…" : changedRecent.length.toLocaleString()}</b><span>Authorization changes</span></div></article>
       </section>
 
       <section className="monitor-section" aria-label="Recent FCC authorizations">
@@ -162,8 +179,14 @@ export default function FccMonitorPage() {
         {status === "loading" && <div className="section-empty"><LoaderCircle className="spin" size={14} /> Checking approved FCC authorization records…</div>}
         {status === "error" && <div className="section-error"><CircleAlert size={15} /> {error}</div>}
         {status === "done" && !recent.length && <div className="section-empty"><b>None in the last {days} days.</b>{mostRecentOutside ? ` Most recent: ${displayDate(mostRecentOutside.authorizationDate)} — ${mostRecentOutside.fccId} — ${mostRecentOutside.granteeName || "grantee unavailable"}.` : " No dated authorization activity was returned for this scope."}</div>}
-        {recent.length > 0 && <div className="table-wrap"><table className="m-table"><thead><tr><th>Date</th><th>FCC ID</th><th>Grantee</th><th>Application purpose</th><th>Source</th></tr></thead><tbody>{recent.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${index}`}><td className="date-cell">{displayDate(record.authorizationDate)}</td><td><b className="fcc-id">{record.fccId}</b></td><td><b>{record.granteeName || "—"}</b><span>{fccLocation(record)}</span></td><td className="wrap-cell">{record.applicationPurpose || "—"}</td><td><a className="ext-link" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">FCC EAS <ExternalLink size={11} /></a></td></tr>)}</tbody></table></div>}
+        {recent.length > 0 && <div className="table-wrap"><table className="m-table"><thead><tr><th>Date</th><th>FCC ID</th><th>Grantee</th><th>Activity</th><th>Source</th></tr></thead><tbody>{recent.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${index}`}><td className="date-cell">{displayDate(record.authorizationDate)}</td><td><a href={`/fcc/explorer?q=${encodeURIComponent(record.fccId)}`} className="fcc-id">{record.fccId}</a></td><td><a href={`/fcc/explorer?ids=${encodeURIComponent(record.granteeCode || record.fccId)}`}>{record.granteeName || "—"}</a><span>{record.granteeCode || fccLocation(record)}</span></td><td className="wrap-cell"><b>{record.purposeCategory || "Authorization activity"}</b><span>FCC: {record.applicationPurpose || "—"}</span></td><td><a className="ext-link" href={record.sourceUrl} target="_blank" rel="noreferrer">FCC EAS <ExternalLink size={11} /></a></td></tr>)}</tbody></table></div>}
         <div className="section-note">Recent activity means records with an FCC-reported grant date inside the selected window. This MVP does not claim to detect modifications or changes between snapshots.</div>
+      </section>
+
+      <section className="monitor-section" aria-label="FCC authorization changes">
+        <div className="section-head"><h2><RefreshCw size={17} /> Authorization changes</h2><div className="section-tools"><span className="section-count">{changedRecent.length} in window</span></div></div>
+        {!changedRecent.length ? <div className="section-empty"><b>No FCC-reported changes in this window.</b> This section only includes records explicitly labeled by the FCC as a Class II permissive change or change in identification.</div> : <div className="table-wrap"><table className="m-table"><thead><tr><th>Date</th><th>FCC ID</th><th>Grantee</th><th>FCC-reported purpose</th></tr></thead><tbody>{changedRecent.map((record, index) => <tr key={`${record.fccId}-change-${index}`}><td>{displayDate(record.authorizationDate)}</td><td><a href={`/fcc/explorer?q=${encodeURIComponent(record.fccId)}`} className="fcc-id">{record.fccId}</a></td><td>{record.granteeName || "—"}</td><td>{record.applicationPurpose || "—"}</td></tr>)}</tbody></table></div>}
+        <div className="section-note">Categories are normalized from the FCC-reported application-purpose value; the original FCC wording remains visible.</div>
       </section>
     </main>
   );
