@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowDownToLine,
   BadgeCheck,
-  Bell,
   Check,
   ChevronDown,
   CircleAlert,
@@ -30,8 +29,8 @@ import {
   locationSummary,
   parseCodes,
   quote,
-  useDevHost,
 } from "./fda-shared";
+import SourceNav from "./source-nav";
 
 const API_510K = "https://api.fda.gov/device/510k.json";
 const API_RECALL = "https://api.fda.gov/device/recall.json";
@@ -260,7 +259,6 @@ export default function MonitorPage() {
   const codeInput = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
 
-  const devHost = useDevHost();
   const anyLoading = [listings, clearances, recalls, events].some((s) => s.status === "loading");
   const presetActive = codes.length === PRESET_CODES.length && PRESET_CODES.every((code) => codes.includes(code));
 
@@ -375,22 +373,7 @@ export default function MonitorPage() {
 
   return (
     <main>
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="FDA Device Explorer home">
-          <span className="brand-mark"><Bell size={18} /></span>
-          <span><b>SONOVA</b> / DEVICE MONITORING</span>
-          {devHost && <span className="dev-badge">DEV</span>}
-        </a>
-        <div className="topbar-right">
-          <nav className="top-nav" aria-label="Pages">
-            <a href="/">Explorer</a>
-            <a className="current" href="/monitor">Monitoring</a>
-          </nav>
-          <div className="source-status">
-            <span className="pulse" /> openFDA live
-          </div>
-        </div>
-      </header>
+      <SourceNav source="fda" view="monitoring" status="openFDA live" statusState="connected" />
 
       <section className="hero monitor-hero" id="top">
         <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>

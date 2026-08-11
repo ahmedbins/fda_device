@@ -9,7 +9,7 @@
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
     "build:pages": "vite build --config cloudflare-spa/vite.config.ts",
     "deploy:pages": "npm run build:pages && wrangler pages deploy work/cloudflare-pages --project-name=fda-device-index --commit-dirty=true",
     "deploy:dev": "npm run build:pages && wrangler pages deploy work/cloudflare-pages --project-name=fda-device-internaluseonly --commit-dirty=true",

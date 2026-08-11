@@ -39,8 +39,8 @@ import {
   locationSummary,
   parseCodes,
   quote,
-  useDevHost,
 } from "./fda-shared";
+import SourceNav from "./source-nav";
 
 type MatrixRow = {
   key: string;
@@ -365,7 +365,6 @@ export default function Home() {
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const searchSeq = useRef(0);
 
-  const devHost = useDevHost();
   const countryOptions = useMemo(() => {
     if (mode !== "files" || !localRecords.length) return apiCountries;
     const counts = new Map<string, number>();
@@ -829,22 +828,7 @@ export default function Home() {
 
   return (
     <main>
-      <header className="topbar">
-        <a className="brand" href="#top" aria-label="FDA Device Explorer home">
-          <span className="brand-mark"><PackageSearch size={19} /></span>
-          <span><b>SONOVA</b> / DEVICE DATA</span>
-          {devHost && <span className="dev-badge">DEV</span>}
-        </a>
-        <div className="topbar-right">
-          <nav className="top-nav" aria-label="Pages">
-            <a className="current" href="/">Explorer</a>
-            <a href="/monitor">Monitoring</a>
-          </nav>
-          <div className="source-status" title={freshnessHint}>
-            <span className="pulse" /> openFDA live{datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}
-          </div>
-        </div>
-      </header>
+      <SourceNav source="fda" view="explorer" status={`openFDA live${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`} statusState="connected" />
 
       <section className="hero" id="top">
         <div className="eyebrow"><span>01</span> FDA DEVICE DATA</div>

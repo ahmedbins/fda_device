@@ -2,10 +2,21 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 
-// Cloudflare Pages serves /monitor for monitor.html in production; mirror that locally.
+// Cloudflare Pages serves extensionless HTML routes in production; mirror that locally.
 function cleanUrls(): Plugin {
-  const rewrite = (url?: string) =>
-    url && url.split("?")[0] === "/monitor" ? url.replace("/monitor", "/monitor.html") : url;
+  const routeFiles = new Map([
+    ["/monitor", "/monitor.html"],
+    ["/fda/explorer", "/fda/explorer.html"],
+    ["/fda/monitoring", "/fda/monitoring.html"],
+    ["/fcc/explorer", "/fcc/explorer.html"],
+    ["/fcc/monitoring", "/fcc/monitoring.html"],
+  ]);
+  const rewrite = (url?: string) => {
+    if (!url) return url;
+    const [pathname, query] = url.split("?");
+    const target = routeFiles.get(pathname);
+    return target ? `${target}${query ? `?${query}` : ""}` : url;
+  };
   return {
     name: "clean-urls",
     configureServer(server) {
@@ -34,6 +45,10 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         monitor: resolve(__dirname, "monitor.html"),
+        "fda/explorer": resolve(__dirname, "fda/explorer.html"),
+        "fda/monitoring": resolve(__dirname, "fda/monitoring.html"),
+        "fcc/explorer": resolve(__dirname, "fcc/explorer.html"),
+        "fcc/monitoring": resolve(__dirname, "fcc/monitoring.html"),
       },
     },
   },

@@ -10,11 +10,11 @@ export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") || "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
-  const socialImage = `${protocol}://${host}/og.png`;
+  const socialImage = `${protocol}://${host}/og-regulatory.png`;
   return {
-    title: "FDA Device Explorer — Registrations + Listings",
-    description: "Search, filter, inspect, and export openFDA medical device registration and listing records.",
-    openGraph: { title: "FDA Device Explorer", description: "Find the device. Trace the maker.", images: [{ url: socialImage, width: 1200, height: 630 }] },
+    title: "Sonova Regulatory Data — FDA + FCC",
+    description: "Explore and monitor authoritative FDA device data and FCC equipment authorization records.",
+    openGraph: { title: "Sonova Regulatory Data", description: "FDA and FCC regulatory records in one internal workspace.", images: [{ url: socialImage, width: 1200, height: 630 }] },
     twitter: { card: "summary_large_image", images: [socialImage] },
   };
 }
