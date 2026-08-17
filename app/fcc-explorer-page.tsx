@@ -43,7 +43,7 @@ import {
 } from "./fcc-core";
 import { fccPublicRecordUrl } from "./fcc-index";
 import { clearFccCache, fetchFccExhibits, importOfficialFccResponse, searchFcc } from "./fcc-service";
-import { downloadCsv } from "./fda-shared";
+import { downloadExcel } from "./excel-export";
 
 type SortKey = "date-desc" | "date-asc" | "fcc-id" | "grantee";
 type ColumnKey = "fccId" | "grantee" | "granteeCode" | "authorizationDate" | "purpose" | "description" | "equipmentClass" | "rf" | "location" | "source" | "open";
@@ -134,6 +134,7 @@ export default function FccExplorerPage() {
   const [grantees, setGrantees] = useState<FccGranteeRegistration[]>([]);
   const [searchMeta, setSearchMeta] = useState<FccSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [coverageNote, setCoverageNote] = useState("");
   const [importText, setImportText] = useState("");
@@ -277,52 +278,70 @@ export default function FccExplorerPage() {
     setTimeout(() => setLinkCopied(false), 1600);
   };
 
-  const exportCsv = async () => {
-    const stamp = new Date().toISOString().slice(0, 10);
-    const rows = filteredRecords.map((record) => [
-      record.fccId,
-      record.granteeName || "",
-      record.granteeCode || "",
-      record.fccProductCode || "",
-      record.authorizationDate || "",
-      record.purposeCategory || "",
-      record.applicationPurpose || "",
-      record.equipmentDescription || "",
-      (record.equipmentClasses || []).join("; "),
-      formatFccRfBands(record.rfBands),
-      fccLocation(record) === "—" ? "" : fccLocation(record),
-      fccPublicRecordUrl(record.fccId),
-      FCC_SEARCH_URL,
-      "FCC",
-      record.sourceMode || "",
-      record.snapshotCapturedAt || "",
-      record.retrievedAt,
-    ]);
-    downloadCsv([
-      ["fcc_id", "fcc_grantee", "fcc_grantee_code_derived_from_confirmed_scope", "fcc_product_code_component_derived", "fcc_authorization_date", "normalized_activity_category", "fcc_reported_application_purpose", "fcc_grant_equipment_description", "fcc_grant_equipment_class", "fcc_eas_frequency_mhz", "fcc_grantee_location", "public_record_url", "official_fcc_search_url", "source", "source_mode", "snapshot_captured_at", "retrieved_at"],
-      ...rows,
-    ], `fcc-authorizations-${stamp}.csv`);
-
-    const uniqueIds = [...new Set(filteredRecords.map((record) => record.fccId))].slice(0, 40);
-    const exhibitRows: string[][] = [];
-    for (const fccId of uniqueIds) {
-      const cached = filteredRecords.find((record) => record.fccId === fccId && record.exhibits?.length)?.exhibits || [];
-      const exhibits = cached.length ? cached : await fetchFccExhibits(fccId).catch(() => []);
-      exhibits.forEach((exhibit) => exhibitRows.push([
-        exhibit.fccId,
-        exhibit.name,
-        exhibit.exhibitType,
-        exhibit.submittedAt || "",
-        exhibit.availableAt || "",
-        exhibit.confidentiality || "",
-        exhibit.url || "",
-        fccPublicRecordUrl(exhibit.fccId),
-      ]));
+  const exportWorkbook = async () => {
+    setExporting(true);
+    try {
+      const uniqueIds = [...new Set(filteredRecords.map((record) => record.fccId))].slice(0, 40);
+      const exhibitsById = new Map<string, NonNullable<NormalizedFccRecord["exhibits"]>>();
+      for (const fccId of uniqueIds) {
+        const cached = filteredRecords.find((record) => record.fccId === fccId && record.exhibits?.length)?.exhibits || [];
+        exhibitsById.set(fccId, cached.length ? cached : await fetchFccExhibits(fccId).catch(() => []));
+      }
+      downloadExcel({
+        filename: `fcc-authorizations-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        sheetName: "FCC authorizations",
+        columns: [
+          { header: "FCC ID", width: 16 },
+          { header: "Grantee", width: 28 },
+          { header: "Grantee code", width: 14 },
+          { header: "Product code", width: 16 },
+          { header: "Authorization date", type: "date", width: 16 },
+          { header: "Activity category", width: 24 },
+          { header: "FCC-reported purpose", width: 26 },
+          { header: "Equipment description", width: 36 },
+          { header: "Equipment class", width: 28 },
+          { header: "RF characteristics", width: 28 },
+          { header: "Grantee location", width: 22 },
+          { header: "Public FCC ID page", type: "link", width: 22 },
+          { header: "Exhibit count", type: "number", width: 14 },
+          { header: "Exhibit types", width: 32 },
+          { header: "Exhibit documents", width: 42 },
+          { header: "First exhibit", type: "link", width: 22 },
+          { header: "Confidential / metadata-only", width: 24 },
+          { header: "Source", width: 14 },
+          { header: "Source mode", width: 16 },
+          { header: "Retrieved at", width: 22 },
+        ],
+        rows: filteredRecords.map((record) => {
+          const exhibits = exhibitsById.get(record.fccId) || record.exhibits || [];
+          const firstPublic = exhibits.find((exhibit) => exhibit.url && !/metadata only/i.test(exhibit.confidentiality || ""));
+          return [
+            record.fccId,
+            record.granteeName || "",
+            record.granteeCode || "",
+            record.fccProductCode || "",
+            record.authorizationDate || "",
+            record.purposeCategory || "",
+            record.applicationPurpose || "",
+            record.equipmentDescription || "",
+            (record.equipmentClasses || []).join("; "),
+            formatFccRfBands(record.rfBands),
+            fccLocation(record) === "—" ? "" : fccLocation(record),
+            { text: record.fccId, url: fccPublicRecordUrl(record.fccId) },
+            exhibits.length,
+            [...new Set(exhibits.map((exhibit) => exhibit.exhibitType))].join("; "),
+            exhibits.map((exhibit) => exhibit.name).join("; "),
+            firstPublic?.url ? { text: firstPublic.name, url: firstPublic.url } : "",
+            exhibits.filter((exhibit) => exhibit.confidentiality).map((exhibit) => `${exhibit.name}: ${exhibit.confidentiality}`).join("; "),
+            "FCC",
+            record.sourceMode || "",
+            record.retrievedAt,
+          ];
+        }),
+      });
+    } finally {
+      setExporting(false);
     }
-    downloadCsv([
-      ["fcc_id", "exhibit_name", "exhibit_type", "submitted_to_fcc", "available_to_public", "confidentiality_status", "document_url", "public_record_url"],
-      ...exhibitRows,
-    ], `fcc-exhibits-${stamp}.csv`);
   };
 
   const toggleColumn = (key: ColumnKey) => setColumns((current) => current.includes(key)
@@ -449,7 +468,7 @@ export default function FccExplorerPage() {
               {resultView === "records" && <label className="page-size">Rows <select value={pageSize} onChange={(event) => { const next = Number(event.target.value); setPageSize(next); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, next, resultView, presetId); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>}
               <button className="icon-button" onClick={copyLink} aria-label="Copy shareable FCC URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
               <button className="icon-button" onClick={() => runSearch(true)} disabled={!effectiveScopes.length || loading} aria-label="Refresh FCC results" title="Refresh"><RefreshCw className={loading ? "spin" : ""} size={16} /></button>
-              <button className="secondary export-button" onClick={() => void exportCsv()} disabled={!filteredRecords.length}><ArrowDownToLine size={14} /> CSV</button>
+              <button className="secondary export-button" onClick={() => void exportWorkbook()} disabled={!filteredRecords.length || exporting}><ArrowDownToLine size={14} /> {exporting ? "Excel…" : "Excel"}</button>
               <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><Filter size={17} /></button>
             </div>
           </div>

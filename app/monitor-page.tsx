@@ -25,12 +25,12 @@ import {
   PRESET_CODES,
   type RecordItem,
   companyName,
-  downloadCsv,
   locationSummary,
   parseCodes,
   quote,
 } from "./fda-shared";
 import SourceNav from "./source-nav";
+import { downloadExcel } from "./excel-export";
 
 const API_510K = "https://api.fda.gov/device/510k.json";
 const API_RECALL = "https://api.fda.gov/device/recall.json";
@@ -340,30 +340,58 @@ export default function MonitorPage() {
   const stamp = () => new Date().toISOString().slice(0, 10);
   const codesPart = () => codes.join("+") || "all";
 
-  const exportListings = () =>
-    downloadCsv(
-      [["Created", "Product code", "Device type", "Company", "Location", "Registration #"],
-        ...newListings.map((r) => [r.createdDate, r.code, r.deviceName, r.company, r.location, r.regNumber])],
-      `fda-monitor-new-listings-${codesPart()}-${stamp()}.csv`,
-    );
-  const exportClearances = () =>
-    downloadCsv(
-      [["Decision date", "K number", "Applicant", "Device", "Product code", "Decision", "Type"],
-        ...newClearances.map((r) => [r.decisionDate, r.kNumber, r.applicant, r.deviceName, r.code, r.decision, r.clearanceType])],
-      `fda-monitor-510k-${codesPart()}-${stamp()}.csv`,
-    );
-  const exportRecalls = () =>
-    downloadCsv(
-      [["Initiated", "Product code", "Recalling firm", "Product", "Reason", "Status"],
-        ...newRecalls.map((r) => [r.initiated, r.code, r.firm, r.product, r.reason, r.status])],
-      `fda-monitor-recalls-${codesPart()}-${stamp()}.csv`,
-    );
-  const exportEvents = () =>
-    downloadCsv(
-      [["Received", "Event type", "Brand", "Manufacturer", "Product code"],
-        ...newEvents.map((r) => [r.received, r.eventType, r.brand, r.manufacturer, r.code])],
-      `fda-monitor-events-${codesPart()}-${stamp()}.csv`,
-    );
+  const exportListings = () => downloadExcel({
+    filename: `fda-monitor-new-listings-${codesPart()}-${stamp()}.xlsx`,
+    sheetName: "New listings",
+    columns: [
+      { header: "Created", type: "date", width: 14 },
+      { header: "Product code", width: 14 },
+      { header: "Device type", width: 32 },
+      { header: "Company", width: 28 },
+      { header: "Location", width: 22 },
+      { header: "Registration #", width: 16 },
+    ],
+    rows: newListings.map((row) => [row.createdDate, row.code, row.deviceName, row.company, row.location, row.regNumber]),
+  });
+  const exportClearances = () => downloadExcel({
+    filename: `fda-monitor-510k-${codesPart()}-${stamp()}.xlsx`,
+    sheetName: "510k",
+    columns: [
+      { header: "Decision date", type: "date", width: 14 },
+      { header: "K number", width: 14 },
+      { header: "Applicant", width: 28 },
+      { header: "Device", width: 32 },
+      { header: "Product code", width: 14 },
+      { header: "Decision", width: 18 },
+      { header: "Type", width: 18 },
+    ],
+    rows: newClearances.map((row) => [row.decisionDate, row.kNumber, row.applicant, row.deviceName, row.code, row.decision, row.clearanceType]),
+  });
+  const exportRecalls = () => downloadExcel({
+    filename: `fda-monitor-recalls-${codesPart()}-${stamp()}.xlsx`,
+    sheetName: "Recalls",
+    columns: [
+      { header: "Initiated", type: "date", width: 14 },
+      { header: "Product code", width: 14 },
+      { header: "Recalling firm", width: 28 },
+      { header: "Product", width: 32 },
+      { header: "Reason", width: 40 },
+      { header: "Status", width: 16 },
+    ],
+    rows: newRecalls.map((row) => [row.initiated, row.code, row.firm, row.product, row.reason, row.status]),
+  });
+  const exportEvents = () => downloadExcel({
+    filename: `fda-monitor-events-${codesPart()}-${stamp()}.xlsx`,
+    sheetName: "Adverse events",
+    columns: [
+      { header: "Received", type: "date", width: 14 },
+      { header: "Event type", width: 16 },
+      { header: "Brand", width: 24 },
+      { header: "Manufacturer", width: 28 },
+      { header: "Product code", width: 14 },
+    ],
+    rows: newEvents.map((row) => [row.received, row.eventType, row.brand, row.manufacturer, row.code]),
+  });
 
   const sectionMeta = (section: Section<unknown>, windowed: number, plus = false) => {
     if (section.status === "loading") return <span className="section-count loading"><LoaderCircle className="spin" size={12} /></span>;

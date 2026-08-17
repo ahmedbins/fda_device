@@ -34,13 +34,14 @@ import {
   mdallSearchUrl,
   mdallSourcePresentation,
   parseMdallQuery,
+  type MdallDevice,
   type MdallLicence,
   type MdallLicenceState,
   type MdallSearchMode,
   type MdallSearchResult,
 } from "./mdall-core";
 import { clearMdallCache, fetchMdallDevicesForLicence, searchMdall } from "./mdall-service";
-import { downloadCsv } from "./fda-shared";
+import { downloadExcel } from "./excel-export";
 
 type SortKey = "date-desc" | "date-asc" | "licence" | "company" | "name";
 type ColumnKey = "licenceNo" | "licenceName" | "company" | "class" | "type" | "status" | "issued" | "endDate" | "open";
@@ -144,6 +145,7 @@ export default function MdallExplorerPage() {
   const [licences, setLicences] = useState<MdallLicence[]>([]);
   const [searchMeta, setSearchMeta] = useState<MdallSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
@@ -243,44 +245,62 @@ export default function MdallExplorerPage() {
     window.location.assign(`${window.location.pathname}?preset=${encodeURIComponent(preset.id)}`);
   };
 
-  const exportCsv = async () => {
-    const stamp = new Date().toISOString().slice(0, 10);
-    downloadCsv([
-      ["licence_number", "licence_name", "licence_status", "licence_status_label", "risk_class", "licence_type", "first_issued", "end_date", "company_id", "company_name", "company_location", "mdall_search_url", "source", "last_refresh_dt", "retrieved_at"],
-      ...filteredLicences.map((licence) => [
-        licence.licenceNumber,
-        licence.licenceName,
-        licence.licenceStatus,
-        licence.licenceStatusLabel,
-        licence.riskClassLabel,
-        licence.licenceType || "",
-        licence.issuedAt || "",
-        licence.endDate || "",
-        licence.companyId || "",
-        licence.companyName || "",
-        mdallLocation(licence.company) === "—" ? "" : mdallLocation(licence.company),
-        officialSearch,
-        "Health Canada MDALL",
-        licence.lastRefreshAt || "",
-        licence.retrievedAt,
-      ]),
-    ], `mdall-licences-${stamp}.csv`);
-
-    const deviceRows: string[][] = [];
-    for (const licence of filteredLicences.slice(0, 25)) {
-      const devices = licence.devices?.length ? licence.devices : await fetchMdallDevicesForLicence(licence).catch(() => []);
-      devices.forEach((device) => {
-        if (device.identifiers.length) {
-          device.identifiers.forEach((identifier) => deviceRows.push([licence.licenceNumber, licence.licenceName, device.deviceId, device.tradeName, identifier, device.firstLicensedAt || "", device.endDate || ""]));
-        } else {
-          deviceRows.push([licence.licenceNumber, licence.licenceName, device.deviceId, device.tradeName, "", device.firstLicensedAt || "", device.endDate || ""]);
-        }
+  const exportWorkbook = async () => {
+    setExporting(true);
+    try {
+      const withDevices: { licence: MdallLicence; devices: MdallDevice[] }[] = [];
+      for (const licence of filteredLicences.slice(0, 25)) {
+        const devices = licence.devices?.length ? licence.devices : await fetchMdallDevicesForLicence(licence).catch(() => []);
+        withDevices.push({ licence, devices });
+      }
+      const rest = filteredLicences.slice(25).map((licence) => ({ licence, devices: licence.devices || [] }));
+      downloadExcel({
+        filename: `mdall-licences-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        sheetName: "MDALL licences",
+        columns: [
+          { header: "Licence number", type: "number", width: 16 },
+          { header: "Licence name", width: 36 },
+          { header: "Status", width: 22 },
+          { header: "Status code", width: 12 },
+          { header: "Risk class", width: 12 },
+          { header: "Licence type", width: 18 },
+          { header: "First issued", type: "date", width: 14 },
+          { header: "End date", type: "date", width: 14 },
+          { header: "Company ID", type: "number", width: 14 },
+          { header: "Company", width: 28 },
+          { header: "Company location", width: 22 },
+          { header: "Device count", type: "number", width: 14 },
+          { header: "Trade names", width: 40 },
+          { header: "Device identifiers", width: 36 },
+          { header: "MDALL search", type: "link", width: 20 },
+          { header: "Source", width: 22 },
+          { header: "MDALL last refresh", type: "date", width: 16 },
+          { header: "Retrieved at", width: 22 },
+        ],
+        rows: [...withDevices, ...rest].map(({ licence, devices }) => [
+          licence.licenceNumber,
+          licence.licenceName,
+          licence.licenceStatusLabel,
+          licence.licenceStatus,
+          licence.riskClassLabel,
+          licence.licenceType || "",
+          licence.issuedAt || "",
+          licence.endDate || "",
+          licence.companyId || "",
+          licence.companyName || "",
+          mdallLocation(licence.company) === "—" ? "" : mdallLocation(licence.company),
+          devices.length,
+          [...new Set(devices.map((device) => device.tradeName))].join("; "),
+          [...new Set(devices.flatMap((device) => device.identifiers))].join("; "),
+          { text: "Open MDALL", url: officialSearch },
+          "Health Canada MDALL",
+          licence.lastRefreshAt || "",
+          licence.retrievedAt,
+        ]),
       });
+    } finally {
+      setExporting(false);
     }
-    downloadCsv([
-      ["licence_number", "licence_name", "device_id", "trade_name", "device_identifier", "first_licensed", "end_date"],
-      ...deviceRows,
-    ], `mdall-devices-${stamp}.csv`);
   };
 
   const renderCell = (licence: MdallLicence, column: ColumnKey) => {
@@ -394,7 +414,7 @@ export default function MdallExplorerPage() {
               {resultView === "licences" && <label className="page-size">Rows <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>}
               <button className="icon-button" onClick={async () => { await navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1600); }} aria-label="Copy shareable MDALL URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
               <button className="icon-button" onClick={() => runSearch(true)} disabled={loading} aria-label="Refresh MDALL results" title="Refresh"><RefreshCw className={loading ? "spin" : ""} size={16} /></button>
-              <button className="secondary export-button" onClick={() => void exportCsv()} disabled={!filteredLicences.length}><ArrowDownToLine size={14} /> CSV</button>
+              <button className="secondary export-button" onClick={() => void exportWorkbook()} disabled={!filteredLicences.length || exporting}><ArrowDownToLine size={14} /> {exporting ? "Excel…" : "Excel"}</button>
               <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><Filter size={17} /></button>
             </div>
           </div>

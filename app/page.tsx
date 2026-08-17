@@ -31,13 +31,13 @@ import {
   PRESET_CODES,
   type RecordItem,
   companyName,
-  downloadCsv,
   firmName,
   locationSummary,
   parseCodes,
   quote,
 } from "./fda-shared";
 import SourceNav from "./source-nav";
+import { downloadExcel } from "./excel-export";
 
 type MatrixRow = {
   key: string;
@@ -613,10 +613,12 @@ export default function Home() {
         })[column];
         const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
           .map((row) => matrixColumns.map((column) => value(row, column)));
-        downloadCsv(
-          [matrixColumns.map((column) => labels[column]), ...rows],
-          `fda-devices-matrix-${codesPart}-${stamp}.csv`,
-        );
+        downloadExcel({
+          filename: `fda-devices-matrix-${codesPart}-${stamp}.xlsx`,
+          sheetName: "Company + devices",
+          columns: matrixColumns.map((column) => ({ header: labels[column], width: 22 })),
+          rows,
+        });
       } else {
         const labels: Record<RecordColumn, string> = {
           establishment: "Establishment", ownerOperator: "Owner / operator", primaryDevice: "Primary device",
@@ -643,10 +645,12 @@ export default function Home() {
           };
           return recordColumns.map((column) => values[column]);
         });
-        downloadCsv(
-          [recordColumns.map((column) => labels[column]), ...rows],
-          `fda-devices-${codesPart}-${stamp}.csv`,
-        );
+        downloadExcel({
+          filename: `fda-devices-${codesPart}-${stamp}.xlsx`,
+          sheetName: "FDA records",
+          columns: recordColumns.map((column) => ({ header: labels[column], width: 22 })),
+          rows,
+        });
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The export could not be completed.");
@@ -870,9 +874,9 @@ export default function Home() {
                 className="secondary export-button"
                 onClick={exportCsv}
                 disabled={!total || loading || !!exportProgress}
-                title={total > EXPORT_CAP ? `Exports the first ${EXPORT_CAP.toLocaleString()} matching records (openFDA limit)` : "Download every matching record as CSV"}
+                title={total > EXPORT_CAP ? `Exports the first ${EXPORT_CAP.toLocaleString()} matching records (openFDA limit)` : "Download matching records as Excel"}
               >
-                <ArrowDownToLine size={15} /> CSV{total ? ` · ${exportCount.toLocaleString()}` : ""}
+                <ArrowDownToLine size={15} /> Excel{total ? ` · ${exportCount.toLocaleString()}` : ""}
               </button>
               <button className="icon-button" onClick={copyLink} disabled={!fetchedAt} aria-label="Copy shareable link" title="Copy a shareable link to this exact view">{linkCopied ? <Check size={17} /> : <Link2 size={17} />}</button>
               <button className="icon-button" onClick={() => runSearch(skip, viewMode, appliedFilters)} disabled={loading} aria-label="Refresh results" title="Re-run this search"><RefreshCw className={loading ? "spin" : ""} size={18} /></button>

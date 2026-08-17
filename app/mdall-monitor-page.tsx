@@ -26,7 +26,7 @@ import {
   type MdallSearchResult,
 } from "./mdall-core";
 import { clearMdallCache, searchMdall } from "./mdall-service";
-import { downloadCsv } from "./fda-shared";
+import { downloadExcel } from "./excel-export";
 
 const WINDOWS = [30, 90, 180, 365, 730];
 
@@ -121,10 +121,36 @@ export default function MdallMonitorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const exportCsv = () => downloadCsv([
-    ["monitoring_window_days", "first_issued", "end_date", "licence_number", "licence_name", "company_name", "company_id", "risk_class", "licence_status", "licence_type", "source", "retrieved_at"],
-    ...recentIssued.map((licence) => [days, licence.issuedAt || "", licence.endDate || "", licence.licenceNumber, licence.licenceName, licence.companyName || "", licence.companyId || "", licence.riskClassLabel, licence.licenceStatusLabel, licence.licenceType || "", "Health Canada MDALL", licence.retrievedAt]),
-  ], `mdall-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.csv`);
+  const exportWorkbook = () => downloadExcel({
+    filename: `mdall-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    sheetName: "MDALL monitoring",
+    columns: [
+      { header: "Window (days)", type: "number", width: 14 },
+      { header: "First issued", type: "date", width: 14 },
+      { header: "End date", type: "date", width: 14 },
+      { header: "Licence number", type: "number", width: 16 },
+      { header: "Licence name", width: 36 },
+      { header: "Company", width: 28 },
+      { header: "Company ID", type: "number", width: 14 },
+      { header: "Risk class", width: 12 },
+      { header: "Status", width: 22 },
+      { header: "Licence type", width: 18 },
+      { header: "Source", width: 22 },
+    ],
+    rows: recentIssued.map((licence) => [
+      days,
+      licence.issuedAt || "",
+      licence.endDate || "",
+      licence.licenceNumber,
+      licence.licenceName,
+      licence.companyName || "",
+      licence.companyId || "",
+      licence.riskClassLabel,
+      licence.licenceStatusLabel,
+      licence.licenceType || "",
+      "Health Canada MDALL",
+    ]),
+  });
 
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const sourcePresentation = mdallSourcePresentation(!!retrievedAt);
@@ -167,7 +193,7 @@ export default function MdallMonitorPage() {
       </section>
 
       <section className="monitor-section" aria-label="Recent MDALL licences">
-        <div className="section-head"><h2><Landmark size={17} /> Recent MDALL licences</h2><div className="section-tools"><span className={`section-count ${status === "loading" ? "loading" : status === "error" ? "error" : ""}`}>{status === "loading" ? <LoaderCircle className="spin" size={12} /> : status === "error" ? "error" : `${recentIssued.length} in window`}</span>{retrievedAt && <span className="dataset-date">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</span>}<button className="icon-button small" onClick={exportCsv} disabled={!recentIssued.length} aria-label="Download recent MDALL licences"><ArrowDownToLine size={14} /></button></div></div>
+        <div className="section-head"><h2><Landmark size={17} /> Recent MDALL licences</h2><div className="section-tools"><span className={`section-count ${status === "loading" ? "loading" : status === "error" ? "error" : ""}`}>{status === "loading" ? <LoaderCircle className="spin" size={12} /> : status === "error" ? "error" : `${recentIssued.length} in window`}</span>{retrievedAt && <span className="dataset-date">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</span>}<button className="icon-button small" onClick={exportWorkbook} disabled={!recentIssued.length} aria-label="Download recent MDALL licences as Excel" title="Download Excel"><ArrowDownToLine size={14} /></button></div></div>
         {status === "idle" && !companyIds.length && !query && <div className="section-empty"><b>Add a Health Canada monitoring scope.</b> Use a company name or the Sonova MDALL preset, then select Update.</div>}
         {status === "loading" && <div className="section-empty"><LoaderCircle className="spin" size={14} /> Checking Health Canada MDALL licences…</div>}
         {status === "error" && <div className="section-error"><CircleAlert size={15} /> {error}</div>}

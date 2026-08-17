@@ -18,7 +18,7 @@ import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
 import { FCC_EAS_API, FCC_SEARCH_URL, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, fccSourcePresentation, parseFccScopes, type FccSearchResult, type NormalizedFccRecord } from "./fcc-core";
 import { fccPublicRecordUrl } from "./fcc-index";
 import { clearFccCache, searchFcc } from "./fcc-service";
-import { downloadCsv } from "./fda-shared";
+import { downloadExcel } from "./excel-export";
 
 const WINDOWS = [30, 90, 180, 365, 730];
 
@@ -127,10 +127,38 @@ export default function FccMonitorPage() {
     update(false, next);
   };
 
-  const exportCsv = () => downloadCsv([
-    ["monitoring_window_days", "query_scope", "fcc_authorization_date", "fcc_id", "fcc_grantee", "fcc_grantee_code_derived", "normalized_activity_category", "fcc_reported_application_purpose", "fcc_grantee_location", "source", "source_mode", "snapshot_captured_at", "retrieved_at"],
-    ...recent.map((record) => [days, scopes.join("|"), record.authorizationDate || "", record.fccId, record.granteeName || "", record.granteeCode || "", record.purposeCategory || "", record.applicationPurpose || "", fccLocation(record) === "—" ? "" : fccLocation(record), "FCC", record.sourceMode || "", record.snapshotCapturedAt || "", record.retrievedAt]),
-  ], `fcc-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.csv`);
+  const exportWorkbook = () => downloadExcel({
+    filename: `fcc-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    sheetName: "FCC monitoring",
+    columns: [
+      { header: "Window (days)", type: "number", width: 14 },
+      { header: "Query scope", width: 18 },
+      { header: "Authorization date", type: "date", width: 16 },
+      { header: "FCC ID", width: 16 },
+      { header: "Grantee", width: 28 },
+      { header: "Grantee code", width: 14 },
+      { header: "Activity category", width: 24 },
+      { header: "FCC-reported purpose", width: 26 },
+      { header: "Location", width: 22 },
+      { header: "Public FCC ID page", type: "link", width: 20 },
+      { header: "Source", width: 12 },
+      { header: "Source mode", width: 16 },
+    ],
+    rows: recent.map((record) => [
+      days,
+      scopes.join("|"),
+      record.authorizationDate || "",
+      record.fccId,
+      record.granteeName || "",
+      record.granteeCode || "",
+      record.purposeCategory || "",
+      record.applicationPurpose || "",
+      fccLocation(record) === "—" ? "" : fccLocation(record),
+      { text: record.fccId, url: fccPublicRecordUrl(record.fccId) },
+      "FCC",
+      record.sourceMode || "",
+    ]),
+  });
 
   const copyLink = async () => {
     syncMonitorUrl(scopes, days, presetId);
@@ -174,7 +202,7 @@ export default function FccMonitorPage() {
       </section>
 
       <section className="monitor-section" aria-label="Recent FCC authorizations">
-        <div className="section-head"><h2><RadioTower size={17} /> Recent FCC authorizations</h2><div className="section-tools"><span className={`section-count ${status === "loading" ? "loading" : status === "error" ? "error" : ""}`}>{status === "loading" ? <LoaderCircle className="spin" size={12} /> : status === "error" ? "error" : `${recent.length} in window`}</span>{retrievedAt && <span className="dataset-date">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</span>}<button className="icon-button small" onClick={exportCsv} disabled={!recent.length} aria-label="Download recent FCC authorizations"><ArrowDownToLine size={14} /></button></div></div>
+        <div className="section-head"><h2><RadioTower size={17} /> Recent FCC authorizations</h2><div className="section-tools"><span className={`section-count ${status === "loading" ? "loading" : status === "error" ? "error" : ""}`}>{status === "loading" ? <LoaderCircle className="spin" size={12} /> : status === "error" ? "error" : `${recent.length} in window`}</span>{retrievedAt && <span className="dataset-date">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</span>}<button className="icon-button small" onClick={exportWorkbook} disabled={!recent.length} aria-label="Download recent FCC authorizations as Excel" title="Download Excel"><ArrowDownToLine size={14} /></button></div></div>
 
         {status === "idle" && !scopes.length && <div className="section-empty"><b>Add an FCC monitoring scope.</b> Use a complete FCC ID, an FCC-ID prefix, or a complete grantee code, then select Update.</div>}
         {status === "loading" && <div className="section-empty"><LoaderCircle className="spin" size={14} /> Checking approved FCC authorization records…</div>}
