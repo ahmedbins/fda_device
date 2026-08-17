@@ -121,14 +121,12 @@ FDA Explorer uses the Registration & Listing API. FDA Monitoring uses the 510(k)
 
 ```mermaid
 flowchart TD
-  U["FCC search or watchlist"] --> C{"Covered by verified snapshot?"}
-  C -->|Yes| S["Load official snapshot records"]
-  C -->|No| L["Try live FCC EAS request"]
+  U["FCC search or watchlist"] --> L["Try live official FCC API"]
   L -->|Available| N["Normalize records"]
-  L -->|Blocked| P["Try server proxy"]
-  P -->|Still unavailable| I["Show official link + import control"]
+  L -->|Blocked| P["App proxy: official API, then fccid.io"]
+  P -->|Index available| N
+  P -->|Still unavailable| S["Bundled official snapshot"]
   S --> N
-  I --> N
   N --> V["Explorer or Monitoring view"]
 ```
 

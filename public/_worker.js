@@ -1,7 +1,15 @@
 const FCC_API = "https://apps.fcc.gov/OETLabServices/getFCCIDList";
+const JINA = "https://r.jina.ai/";
+const FCCID_IO = "https://fccid.io";
 
 function cleanFccId(value) {
   return value.toUpperCase().replace(/\s+/g, "").replace(/[^A-Z0-9-]/g, "").slice(0, 19);
+}
+
+function isGranteeOnly(fccId) {
+  if (/^[A-Z]/.test(fccId)) return fccId.length === 3;
+  if (/^[2-9]/.test(fccId)) return fccId.length === 5;
+  return false;
 }
 
 async function fetchFcc(fccId, retry = true) {
@@ -19,21 +27,58 @@ async function fetchFcc(fccId, retry = true) {
   }
 }
 
+async function fetchText(url, timeoutMs = 14000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { accept: "text/plain,text/html,application/json", "user-agent": "Sonova-Regulatory-Data/1.0" },
+    });
+    if (!response.ok) return "";
+    return await response.text();
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchFccidIndex(fccId) {
+  const pages = [];
+  const maxPages = isGranteeOnly(fccId) ? 3 : 1;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const target = page === 1 ? `${FCCID_IO}/${encodeURIComponent(fccId)}` : `${FCCID_IO}/${encodeURIComponent(fccId)}?page=${page}`;
+    const markdown = await fetchText(`${JINA}${target}`);
+    if (!markdown || /Security check/i.test(markdown)) break;
+    pages.push(markdown);
+    const rows = markdown.match(/\*\*\[[A-Z0-9-]+\]/g) || [];
+    if (!isGranteeOnly(fccId) || rows.length < 80) break;
+  }
+  return pages;
+}
+
 async function fccSearch(request) {
   const fccId = cleanFccId(new URL(request.url).searchParams.get("fccId") || "");
   if (fccId.length < 3) return Response.json({ error: "Enter at least three FCC-ID characters or a complete grantee code." }, { status: 400 });
   try {
     const response = await fetchFcc(fccId);
     if (response.status === 204) return new Response(null, { status: 204 });
-    if (!response.ok) {
-      return Response.json({ error: response.status === 400 ? "The FCC rejected this search. Check the FCC ID or prefix." : "The FCC Equipment Authorization source could not be reached." }, { status: response.status === 400 ? 400 : 502 });
+    if (response.ok) {
+      return new Response(await response.text(), {
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=60, s-maxage=300", "x-fcc-source": "official" },
+      });
     }
-    return new Response(await response.text(), {
-      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=60, s-maxage=300" },
-    });
   } catch {
-    return Response.json({ error: "The FCC Equipment Authorization source could not be reached." }, { status: 502 });
+    // Official FCC endpoint is often blocked; fall through to the public index.
   }
+  const pages = await fetchFccidIndex(fccId);
+  if (pages.length) {
+    return Response.json({ source: "fccid.io", pages }, {
+      headers: { "cache-control": "public, max-age=60, s-maxage=300", "x-fcc-source": "fccid.io" },
+    });
+  }
+  return Response.json({ error: "The FCC Equipment Authorization source could not be reached." }, { status: 502 });
 }
 
 export default {

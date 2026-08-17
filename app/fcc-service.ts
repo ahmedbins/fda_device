@@ -12,11 +12,12 @@ import {
   type NormalizedFccRecord,
   type RawFccRecord,
 } from "./fcc-core";
+import { parseFccidMarkdown } from "./fcc-index";
 import { FCC_OFFICIAL_SNAPSHOT } from "./fcc-official-snapshot";
 import { FCC_OFFICIAL_GRANTS } from "./fcc-official-grants";
 
 const CACHE_MS = 5 * 60 * 1000;
-type ScopeResult = { records: NormalizedFccRecord[]; resolved: boolean; sourceMode?: "live" | "official_snapshot" };
+type ScopeResult = { records: NormalizedFccRecord[]; resolved: boolean; sourceMode?: "live" | "official_snapshot" | "public_index" };
 
 const cache = new Map<string, { expires: number; result: ScopeResult }>();
 const inflight = new Map<string, Promise<ScopeResult>>();
@@ -28,9 +29,9 @@ function applyOfficialGrantFields(record: NormalizedFccRecord): NormalizedFccRec
   if (!extra) return record;
   return {
     ...record,
-    equipmentClasses: extra.equipmentClasses.length ? extra.equipmentClasses : record.equipmentClasses,
-    equipmentDescription: extra.descriptions[0] || record.equipmentDescription,
-    rfBands: extra.bands.length ? extra.bands : record.rfBands,
+    equipmentClasses: record.equipmentClasses?.length ? record.equipmentClasses : extra.equipmentClasses.length ? extra.equipmentClasses : record.equipmentClasses,
+    equipmentDescription: record.equipmentDescription || extra.descriptions[0] || record.equipmentDescription,
+    rfBands: record.rfBands?.length ? record.rfBands : extra.bands.length ? extra.bands : record.rfBands,
   };
 }
 
@@ -72,28 +73,40 @@ async function fetchDirect(normalized: string, signal: AbortSignal) {
   return recordsFromPayload(parseFccPayload(body, response.headers.get("content-type") || ""), new Date().toISOString());
 }
 
-async function fetchProxy(normalized: string, signal: AbortSignal) {
+async function fetchProxy(normalized: string, signal: AbortSignal): Promise<{ records: NormalizedFccRecord[]; sourceMode: "live" | "public_index" }> {
   let response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
     signal,
     headers: { accept: "application/json" },
   });
-  if (response.status === 204) return [];
+  if (response.status === 204) return { records: [], sourceMode: "live" };
   if ([502, 503, 504].includes(response.status)) {
     response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
       signal,
       headers: { accept: "application/json" },
     });
-    if (response.status === 204) return [];
+    if (response.status === 204) return { records: [], sourceMode: "live" };
   }
   const body = await response.text();
-  const payload = parseFccPayload(body, response.headers.get("content-type") || "");
   if (!response.ok) {
+    const payload = parseFccPayload(body, response.headers.get("content-type") || "");
     const message = payload && typeof payload === "object" && !Array.isArray(payload) && "error" in payload && typeof payload.error === "string"
       ? payload.error
       : "The FCC Equipment Authorization source could not be reached.";
     throw new Error(message);
   }
-  return recordsFromPayload(payload, new Date().toISOString());
+  const retrievedAt = new Date().toISOString();
+  try {
+    const parsed = JSON.parse(body) as { source?: string; pages?: string[] };
+    if (parsed?.source === "fccid.io" && Array.isArray(parsed.pages)) {
+      return {
+        records: uniqueFccRecords(parsed.pages.flatMap((page) => parseFccidMarkdown(page, retrievedAt, confirmedCodes))),
+        sourceMode: "public_index",
+      };
+    }
+  } catch {
+    // Official XML/JSON payload.
+  }
+  return { records: recordsFromPayload(parseFccPayload(body, response.headers.get("content-type") || ""), retrievedAt), sourceMode: "live" };
 }
 
 async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeResult> {
@@ -108,18 +121,8 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
   const request = (async () => {
     const timed = requestSignal(signal);
     try {
-      const local = snapshotRecords.filter((record) => record.fccId.startsWith(normalized));
-      if (local.length) {
-        const retrievedAt = new Date().toISOString();
-        const result: ScopeResult = {
-          records: local.map((record) => ({ ...record, retrievedAt })),
-          resolved: true,
-          sourceMode: "official_snapshot",
-        };
-        cache.set(normalized, { expires: Date.now() + CACHE_MS, result });
-        return result;
-      }
       let records: NormalizedFccRecord[] | undefined;
+      let sourceMode: ScopeResult["sourceMode"] = "live";
       if (typeof window !== "undefined" && directBrowserSupport !== false) {
         try {
           records = await fetchDirect(normalized, timed.signal);
@@ -128,15 +131,32 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
           directBrowserSupport = false;
         }
       }
-      try {
-        records ??= await fetchProxy(normalized, timed.signal);
-      } catch (error) {
-        if (timed.signal.aborted) throw error;
+      if (!records) {
+        try {
+          const proxied = await fetchProxy(normalized, timed.signal);
+          records = proxied.records;
+          sourceMode = proxied.sourceMode;
+        } catch (error) {
+          if (timed.signal.aborted) throw error;
+        }
+      }
+      if (!records?.length) {
+        const local = snapshotRecords.filter((record) => record.fccId.startsWith(normalized));
+        if (local.length) {
+          const retrievedAt = new Date().toISOString();
+          const result: ScopeResult = {
+            records: local.map((record) => ({ ...record, retrievedAt })),
+            resolved: true,
+            sourceMode: "official_snapshot",
+          };
+          cache.set(normalized, { expires: Date.now() + CACHE_MS, result });
+          return result;
+        }
         const result: ScopeResult = { records: [], resolved: false };
         cache.set(normalized, { expires: Date.now() + 30_000, result });
         return result;
       }
-      const result: ScopeResult = { records, resolved: true, sourceMode: "live" };
+      const result: ScopeResult = { records, resolved: true, sourceMode };
       cache.set(normalized, { expires: Date.now() + CACHE_MS, result });
       return result;
     } catch (error) {
@@ -194,7 +214,11 @@ export async function searchFcc(scopes: string[], signal?: AbortSignal): Promise
     ? "limited"
     : modes.size > 1
       ? "mixed"
-      : modes.has("live") ? "live" : "official_snapshot";
+      : modes.has("live")
+        ? "live"
+        : modes.has("public_index")
+          ? "public_index"
+          : "official_snapshot";
   return {
     records,
     grantees,

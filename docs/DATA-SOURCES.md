@@ -60,14 +60,14 @@ The snapshot is a reliability layer for the confirmed internal watchlist, not a 
 
 The FCC Open Data dataset is an older registry snapshot. A grantee absent there may still be confirmed by a newer official EAS authorization response. The UI states which source established the identity.
 
-## FCC fallback order
+## FCC live lookup order
 
-1. Search the bundled official snapshot for confirmed scopes.
-2. Attempt the live FCC endpoint where the runtime supports it.
-3. Attempt the app proxy in the full-stack build.
-4. For an uncovered scope, show a direct official FCC link and allow the user to import that response's XML or JSON.
+1. Official `getFCCIDList` when the browser or server proxy can reach it.
+2. The public [fccid.io](https://fccid.io/) index of FCC filings, retrieved through the app proxy. This is how Explorer and Monitoring stay current without a weekly snapshot recapture.
+3. The bundled official snapshot for confirmed scopes, if both live sources fail.
+4. Manual import of an official FCC XML/JSON response.
 
-The app uses a neutral coverage message when an uncovered source cannot be retrieved. It does not present an upstream request-policy block as proof that no FCC record exists.
+fccid.io is a third-party index of public FCC grants, not the FCC itself. The UI labels that source when it is used. Official FCC search links remain available on each record.
 
 ## Derived FCC fields
 
