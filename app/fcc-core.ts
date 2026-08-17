@@ -1,5 +1,6 @@
 export const FCC_EAS_API = "https://apps.fcc.gov/OETLabServices/getFCCIDList";
 export const FCC_SEARCH_URL = "https://www.fcc.gov/oet/ea/fccid";
+export const FCC_EAS_SEARCH_ACTION = "https://apps.fcc.gov/oetcf/eas/reports/GenericSearchResult.cfm?RequestTimeout=500";
 export const FCC_SOURCE_LABEL = "FCC Equipment Authorization System";
 export const FCC_GRANTEE_API = "https://opendata.fcc.gov/resource/3b3k-34jp.json";
 export const FCC_GRANTEE_DATASET = "https://opendata.fcc.gov/Engineering-Technology/EAS-Equipment-Authorization-Grantee-Registrations/3b3k-34jp";
@@ -115,6 +116,46 @@ export function fccIdParts(fccId: string, confirmedCodes: string[] = []) {
     .find((candidate) => normalized.startsWith(candidate));
   if (!code) return {};
   return { granteeCode: code, fccProductCode: normalized.slice(code.length).replace(/^-/, "") || undefined };
+}
+
+/** Split an FCC ID the way the official EAS search form expects. */
+export function fccOfficialIdParts(fccId: string) {
+  const normalized = normalizeFccScope(fccId);
+  const granteeLength = /^[A-Z]/.test(normalized) ? 3 : /^[2-9]/.test(normalized) ? 5 : 0;
+  if (!granteeLength || normalized.length < granteeLength) return {};
+  const granteeCode = normalized.slice(0, granteeLength);
+  const productCode = normalized.slice(granteeLength);
+  return productCode ? { granteeCode, productCode } : { granteeCode };
+}
+
+export function openFccEasRecord(fccId: string) {
+  if (typeof document === "undefined") return;
+  const parts = fccOfficialIdParts(fccId);
+  if (!parts.granteeCode) {
+    window.open(FCC_SEARCH_URL, "_blank", "noopener,noreferrer");
+    return;
+  }
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = FCC_EAS_SEARCH_ACTION;
+  form.target = "_blank";
+  const fields: Record<string, string> = {
+    grantee_code: parts.granteeCode,
+    product_code: parts.productCode || "",
+    fetchfrom: "0",
+    calledFromFrame: "N",
+    show_records: "25",
+  };
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
 }
 
 function decodeXml(value: string) {

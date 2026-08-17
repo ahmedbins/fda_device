@@ -297,6 +297,7 @@ td > span:not(.code-pill):not(.class-badge) { display: block; max-width: 280px; 
 .fcc-detail-list dt { color: var(--muted); text-transform: uppercase; font: 600 8px/1.4 var(--font-roboto), sans-serif; letter-spacing: .09em; }
 .fcc-detail-list dd { margin: 0; font-size: 11px; line-height: 1.45; }
 .official-record-link { width: max-content; margin-top: 18px; text-decoration: none; }
+.official-record-link + .official-record-link { margin-top: 10px; }
 .fcc-stat-tiles { grid-template-columns: minmax(220px, 320px); }
 .section-empty > .spin { vertical-align: middle; margin-right: 7px; }
 .fcc-import { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }

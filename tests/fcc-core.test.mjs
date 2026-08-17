@@ -6,6 +6,7 @@ import {
   cleanFccDisplayValue,
   fccIdParts,
   fccLocation,
+  fccOfficialIdParts,
   fccSourcePresentation,
   groupFccRecordsByGrantee,
   fccRecordsInWindow,
@@ -112,6 +113,13 @@ test("derives identity only from confirmed grantee scopes and preserves purpose 
   assert.equal(categorizeFccPurpose("Class II Permissive Change"), "Class II permissive change");
   assert.equal(categorizeFccPurpose("Change in Identification"), "Change in FCC ID");
   assert.equal(categorizeFccPurpose("Original Equipment"), "Original authorization");
+});
+
+test("splits FCC IDs the way the official EAS search form expects", () => {
+  assert.deepEqual(fccOfficialIdParts("KWC-ERF"), { granteeCode: "KWC", productCode: "-ERF" });
+  assert.deepEqual(fccOfficialIdParts("2A3ULM5AEBT"), { granteeCode: "2A3UL", productCode: "M5AEBT" });
+  assert.deepEqual(fccOfficialIdParts("KWC"), { granteeCode: "KWC" });
+  assert.deepEqual(fccOfficialIdParts("AB"), {});
 });
 
 test("omits FCC placeholder N/A values from displayed location fields", () => {
