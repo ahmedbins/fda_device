@@ -30,6 +30,7 @@ import {
   FCC_EAS_API,
   FCC_SOURCE_LABEL,
   fccLocation,
+  fccSourcePresentation,
   groupFccRecordsByGrantee,
   normalizeFccScope,
   parseFccScopes,
@@ -134,7 +135,17 @@ export default function FccExplorerPage() {
   const [selectedGrantee, setSelectedGrantee] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
-  const [columns, setColumns] = useState<ColumnKey[]>(DEFAULT_COLUMNS);
+  const [columns, setColumns] = useState<ColumnKey[]>(() => {
+    if (typeof window === "undefined") return DEFAULT_COLUMNS;
+    const saved = localStorage.getItem("fcc-explorer-columns");
+    if (!saved) return DEFAULT_COLUMNS;
+    try {
+      const parsed = (JSON.parse(saved) as ColumnKey[]).filter((key) => COLUMN_OPTIONS.some((option) => option.key === key));
+      return parsed.length ? parsed : DEFAULT_COLUMNS;
+    } catch {
+      return DEFAULT_COLUMNS;
+    }
+  });
   const [linkCopied, setLinkCopied] = useState(false);
   const [idCopied, setIdCopied] = useState(false);
   const scopeInput = useRef<HTMLInputElement>(null);
@@ -195,15 +206,6 @@ export default function FccExplorerPage() {
     if (initial.autorun) queueMicrotask(() => runSearch());
     return () => request.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("fcc-explorer-columns");
-    if (!saved) return;
-    try {
-      const parsed = (JSON.parse(saved) as ColumnKey[]).filter((key) => COLUMN_OPTIONS.some((option) => option.key === key));
-      if (parsed.length) setColumns(parsed);
-    } catch { /* keep defaults */ }
   }, []);
 
   useEffect(() => {
@@ -285,7 +287,8 @@ export default function FccExplorerPage() {
     return <span className="source-cell">FCC EAS</span>;
   };
 
-  const status = retrievedAt ? searchMeta?.sourceMode === "live" ? "FCC API CONNECTED" : "FCC OFFICIAL SNAPSHOT" : "FCC SOURCE READY";
+  const sourcePresentation = fccSourcePresentation(searchMeta?.sourceMode, !!retrievedAt);
+  const limitedCoverage = !!searchMeta?.unresolvedScopes.length && !records.length;
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const selectedHistory = selected ? sortRecords(records.filter((record) => record.fccId === selected.fccId), "date-desc") : [];
   const selectedGranteeGroup = selectedGrantee ? groupedRecords.find((group) => group.key === selectedGrantee) : undefined;
@@ -293,7 +296,7 @@ export default function FccExplorerPage() {
 
   return (
     <main>
-      <SourceNav source="fcc" view="explorer" status={status} statusState={retrievedAt ? "connected" : "ready"} />
+      <SourceNav source="fcc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"} />
 
       <section className="hero" id="top">
         <div className="eyebrow"><span>01</span> FCC EQUIPMENT DATA</div>
@@ -306,7 +309,7 @@ export default function FccExplorerPage() {
             <RadioTower size={20} />
             <div>
               <b>FCC equipment authorization</b>
-              <span>{retrievedAt ? searchMeta?.sourceMode === "live" ? "API response" : "Official EAS snapshot" : "Ready for FCC-ID search"}</span>
+              <span>{retrievedAt ? sourcePresentation.note : "Ready for FCC-ID search"}</span>
               <span>{searchMeta?.snapshotCapturedAt ? `Captured ${new Date(searchMeta.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span>
             </div>
           </div>
@@ -325,7 +328,7 @@ export default function FccExplorerPage() {
 
           <div className="fcc-source-block"><Database size={15} /><div><b>Official FCC sources</b><span>EAS authorizations + FCC Open Data grantees</span></div></div>
 
-          <div className="filter-group-heading"><span>Preset</span><small>Confirmed internal scope</small></div>
+          <div className="filter-group-heading"><span>Preset</span><small>Confirmed watch scope</small></div>
           <label className="field">
             <span>FCC watch scope</span>
             <select value={presetId} onChange={(event) => event.target.value ? applyPreset(event.target.value) : setPresetId("")}>
@@ -396,7 +399,7 @@ export default function FccExplorerPage() {
           {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting the FCC Equipment Authorization source…</div>}
 
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p></div>
-          : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No approved FCC IDs matched.</h3><p>Check the FCC ID, use a shorter prefix, or remove the date filters.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button><button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
+          : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>{limitedCoverage ? "This FCC scope is not in the bundled snapshot." : "No approved FCC IDs matched."}</h3><p>{limitedCoverage ? "The live FCC source is unavailable from this app, so an empty result here does not mean the FCC ID is unapproved. Open the official response and import it below." : "Check the FCC ID, use a shorter prefix, or remove the date filters."}</p><div className="empty-actions">{!limitedCoverage && <button className="secondary" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}<button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
           : resultView === "records" && filteredRecords.length > 0 && <>
             <div className="table-wrap"><table className="fcc-table"><thead><tr>{columns.map((column) => <th key={column}>{COLUMN_OPTIONS.find((option) => option.key === column)?.label}</th>)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
             <div className="pagination"><span>{filteredRecords.length.toLocaleString()} matching authorization record{filteredRecords.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}</span><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>

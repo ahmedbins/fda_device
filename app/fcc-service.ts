@@ -97,7 +97,12 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
     try {
       const local = snapshotRecords.filter((record) => record.fccId.startsWith(normalized));
       if (local.length) {
-        const result: ScopeResult = { records: local, resolved: true, sourceMode: "official_snapshot" };
+        const retrievedAt = new Date().toISOString();
+        const result: ScopeResult = {
+          records: local.map((record) => ({ ...record, retrievedAt })),
+          resolved: true,
+          sourceMode: "official_snapshot",
+        };
         cache.set(normalized, { expires: Date.now() + CACHE_MS, result });
         return result;
       }

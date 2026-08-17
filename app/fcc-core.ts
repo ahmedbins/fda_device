@@ -60,6 +60,22 @@ function text(raw: RawFccRecord, ...keys: string[]) {
   return undefined;
 }
 
+export function cleanFccDisplayValue(value?: string) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || /^(n\/a|n\.a\.|na|none|null|-)$/i.test(trimmed)) return undefined;
+  const cleaned = trimmed.replace(/(?:^|[\s,;]+)n\/a(?=$|[\s,;])/gi, "").replace(/[,\s;]+$/g, "").trim();
+  return cleaned || undefined;
+}
+
+export function fccSourcePresentation(sourceMode?: FccSearchResult["sourceMode"] | null, retrieved = false) {
+  if (!retrieved) return { status: "FCC SOURCE READY", note: "Ready for FCC-ID search" };
+  if (sourceMode === "live") return { status: "FCC API CONNECTED", note: "API response" };
+  if (sourceMode === "mixed") return { status: "FCC MIXED SOURCE", note: "Official snapshot plus live response" };
+  if (sourceMode === "limited") return { status: "FCC COVERAGE LIMITED", note: "Limited official coverage" };
+  return { status: "FCC OFFICIAL SNAPSHOT", note: "Official EAS snapshot" };
+}
+
 export function normalizeFccScope(value: string) {
   return value.toUpperCase().replace(/\s+/g, "").replace(/[^A-Z0-9-]/g, "").slice(0, 19);
 }
@@ -177,11 +193,11 @@ export function normalizeFccRecord(raw: RawFccRecord, retrievedAt: string, optio
     authorizationDate: isoFccDate(text(raw, "grantDate", "grant_date", "statusDate")),
     applicationPurpose,
     purposeCategory: categorizeFccPurpose(applicationPurpose),
-    address: text(raw, "address", "mailingAddress"),
-    city: text(raw, "city"),
-    state: text(raw, "state"),
-    country: text(raw, "country"),
-    zipCode: text(raw, "zipCode", "zip_code"),
+    address: cleanFccDisplayValue(text(raw, "address", "mailingAddress")),
+    city: cleanFccDisplayValue(text(raw, "city")),
+    state: cleanFccDisplayValue(text(raw, "state")),
+    country: cleanFccDisplayValue(text(raw, "country")),
+    zipCode: cleanFccDisplayValue(text(raw, "zipCode", "zip_code")),
     sourceUrl: `${FCC_EAS_API}?fccId=${encodeURIComponent(normalizedId)}`,
     retrievedAt,
     sourceMode: options.sourceMode,
@@ -191,7 +207,7 @@ export function normalizeFccRecord(raw: RawFccRecord, retrievedAt: string, optio
 }
 
 export function fccLocation(record: NormalizedFccRecord) {
-  return [record.city, record.state, record.country].filter(Boolean).join(", ") || "—";
+  return [record.city, record.state, record.country].map(cleanFccDisplayValue).filter(Boolean).join(", ") || "—";
 }
 
 export function uniqueFccRecords(records: NormalizedFccRecord[]) {

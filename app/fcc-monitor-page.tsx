@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import SourceNav from "./source-nav";
 import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
-import { FCC_EAS_API, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, parseFccScopes, type FccSearchResult, type NormalizedFccRecord } from "./fcc-core";
+import { FCC_EAS_API, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, fccSourcePresentation, parseFccScopes, type FccSearchResult, type NormalizedFccRecord } from "./fcc-core";
 import { clearFccCache, searchFcc } from "./fcc-service";
 import { downloadCsv } from "./fda-shared";
 
@@ -139,15 +139,15 @@ export default function FccMonitorPage() {
   };
 
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
-  const navStatus = retrievedAt ? searchMeta?.sourceMode === "live" ? "FCC API CONNECTED" : "FCC OFFICIAL SNAPSHOT" : "FCC SOURCE READY";
+  const sourcePresentation = fccSourcePresentation(searchMeta?.sourceMode, !!retrievedAt);
 
   return (
     <main>
-      <SourceNav source="fcc" view="monitoring" status={navStatus} statusState={retrievedAt ? "connected" : "ready"} />
+      <SourceNav source="fcc" view="monitoring" status={sourcePresentation.status} statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"} />
 
       <section className="hero monitor-hero" id="top">
         <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
-        <div className="hero-grid"><div><h1>What changed.<br /><em>At a glance.</em></h1><p>Recent FCC equipment authorization activity for your monitored FCC IDs and grantees.</p></div><div className="dataset-note"><RadioTower size={20} /><div><b>FCC equipment authorization</b><span>{retrievedAt ? searchMeta?.sourceMode === "live" ? "API response" : "Official EAS snapshot" : "Recent authorization activity"}</span><span>{searchMeta?.snapshotCapturedAt ? `Captured ${new Date(searchMeta.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span></div></div></div>
+        <div className="hero-grid"><div><h1>What changed.<br /><em>At a glance.</em></h1><p>Recent FCC equipment authorization activity for your monitored FCC IDs and grantees.</p></div><div className="dataset-note"><RadioTower size={20} /><div><b>FCC equipment authorization</b><span>{retrievedAt ? sourcePresentation.note : "Recent authorization activity"}</span><span>{searchMeta?.snapshotCapturedAt ? `Captured ${new Date(searchMeta.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span></div></div></div>
       </section>
 
       <section className="monitor-controls" aria-label="FCC monitoring controls">
@@ -178,7 +178,7 @@ export default function FccMonitorPage() {
         {status === "idle" && !scopes.length && <div className="section-empty"><b>Add an FCC monitoring scope.</b> Use a complete FCC ID, an FCC-ID prefix, or a complete grantee code, then select Update.</div>}
         {status === "loading" && <div className="section-empty"><LoaderCircle className="spin" size={14} /> Checking approved FCC authorization records…</div>}
         {status === "error" && <div className="section-error"><CircleAlert size={15} /> {error}</div>}
-        {status === "done" && !recent.length && <div className="section-empty"><b>None in the last {days} days.</b>{mostRecentOutside ? ` Most recent: ${displayDate(mostRecentOutside.authorizationDate)} — ${mostRecentOutside.fccId} — ${mostRecentOutside.granteeName || "grantee unavailable"}.` : " No dated authorization activity was returned for this scope."}</div>}
+        {status === "done" && !recent.length && <div className="section-empty"><b>{searchMeta?.unresolvedScopes.length && !records.length ? "This scope is not in the bundled official snapshot." : `None in the last ${days} days.`}</b>{searchMeta?.unresolvedScopes.length && !records.length ? " An empty window here does not mean the FCC has no activity — import the official response in Explorer to analyze that scope." : mostRecentOutside ? ` Most recent: ${displayDate(mostRecentOutside.authorizationDate)} — ${mostRecentOutside.fccId} — ${mostRecentOutside.granteeName || "grantee unavailable"}.` : " No dated authorization activity was returned for this scope."}</div>}
         {recent.length > 0 && <div className="table-wrap"><table className="m-table"><thead><tr><th>Date</th><th>FCC ID</th><th>Grantee</th><th>Activity</th><th>Source</th></tr></thead><tbody>{recent.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${index}`}><td className="date-cell">{displayDate(record.authorizationDate)}</td><td><a href={`/fcc/explorer?q=${encodeURIComponent(record.fccId)}`} className="fcc-id">{record.fccId}</a></td><td><a href={`/fcc/explorer?ids=${encodeURIComponent(record.granteeCode || record.fccId)}`}>{record.granteeName || "—"}</a><span>{record.granteeCode || fccLocation(record)}</span></td><td className="wrap-cell"><b>{record.purposeCategory || "Authorization activity"}</b><span>FCC: {record.applicationPurpose || "—"}</span></td><td><a className="ext-link" href={record.sourceUrl} target="_blank" rel="noreferrer">FCC EAS <ExternalLink size={11} /></a></td></tr>)}</tbody></table></div>}
         <div className="section-note">Recent activity means records with an FCC-reported grant date inside the selected window. This MVP does not claim to detect modifications or changes between snapshots.</div>
       </section>

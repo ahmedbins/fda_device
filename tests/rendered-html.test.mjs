@@ -44,6 +44,8 @@ test("renders FCC Explorer and conservative FCC Monitoring language", async () =
   assert.match(explorer, /FCC-ID search/);
   assert.match(explorer, /Authorization records/);
   assert.match(explorer, /official FCC Equipment Authorization service/i);
+  assert.match(explorer, /Confirmed watch scope/);
+  assert.doesNotMatch(explorer, /Confirmed internal scope/);
 
   const monitoring = await (await render("/fcc/monitoring")).text();
   assert.match(monitoring, /Recent FCC authorizations/);

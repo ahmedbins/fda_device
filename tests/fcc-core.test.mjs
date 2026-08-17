@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   extractRawFccRecords,
   categorizeFccPurpose,
+  cleanFccDisplayValue,
   fccIdParts,
+  fccLocation,
+  fccSourcePresentation,
   groupFccRecordsByGrantee,
   fccRecordsInWindow,
   isoFccDate,
@@ -36,7 +39,8 @@ test("parses the FCC XML response returned by the public endpoint", () => {
   assert.equal(record?.fccId, "OPS10");
   assert.equal(record?.authorizationDate, "2017-08-01");
   assert.equal(record?.granteeName, "FCC Laboratory Test Grantee Company JS 20260709");
-  assert.equal(record?.address, "7435 Oakland Mills Road N/A");
+  assert.equal(record?.address, "7435 Oakland Mills Road");
+  assert.equal(record?.raw.address, "7435 Oakland Mills Road N/A");
   assert.equal(record?.zipCode, "21046");
 });
 
@@ -108,6 +112,30 @@ test("derives identity only from confirmed grantee scopes and preserves purpose 
   assert.equal(categorizeFccPurpose("Class II Permissive Change"), "Class II permissive change");
   assert.equal(categorizeFccPurpose("Change in Identification"), "Change in FCC ID");
   assert.equal(categorizeFccPurpose("Original Equipment"), "Original authorization");
+});
+
+test("omits FCC placeholder N/A values from displayed location fields", () => {
+  assert.equal(cleanFccDisplayValue("N/A"), undefined);
+  assert.equal(cleanFccDisplayValue("444 Commerce St. N/A"), "444 Commerce St.");
+  const record = normalizeFccRecord({
+    FCCId: "2A3ULM5AEBT",
+    city: "Hannover",
+    state: "N/A",
+    country: "Germany",
+    zipCode: "N/A",
+    address: "444 Commerce St. N/A",
+  }, "2026-08-17T00:00:00.000Z");
+  assert.equal(record?.state, undefined);
+  assert.equal(record?.zipCode, undefined);
+  assert.equal(record?.address, "444 Commerce St.");
+  assert.equal(fccLocation(record), "Hannover, Germany");
+});
+
+test("labels limited FCC coverage instead of an official snapshot", () => {
+  assert.equal(fccSourcePresentation("limited", true).status, "FCC COVERAGE LIMITED");
+  assert.equal(fccSourcePresentation("official_snapshot", true).status, "FCC OFFICIAL SNAPSHOT");
+  assert.equal(fccSourcePresentation("live", true).status, "FCC API CONNECTED");
+  assert.equal(fccSourcePresentation(undefined, false).status, "FCC SOURCE READY");
 });
 
 test("groups records by confirmed grantee identity", () => {
