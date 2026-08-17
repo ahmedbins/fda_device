@@ -13,6 +13,15 @@ export type FccRfBand = {
   ruleParts?: string;
 };
 
+export type FccExhibit = {
+  fccId: string;
+  name: string;
+  exhibitType: string;
+  submittedAt?: string;
+  availableAt?: string;
+  confidentiality?: string;
+};
+
 export type NormalizedFccRecord = {
   source: "FCC";
   fccId: string;
@@ -22,6 +31,7 @@ export type NormalizedFccRecord = {
   equipmentDescription?: string;
   equipmentClasses?: string[];
   rfBands?: FccRfBand[];
+  exhibits?: FccExhibit[];
   authorizationDate?: string;
   applicationPurpose?: string;
   purposeCategory?: "Original authorization" | "Class II permissive change" | "Change in FCC ID" | "Other authorization activity";

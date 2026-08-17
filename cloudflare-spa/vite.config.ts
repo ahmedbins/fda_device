@@ -10,6 +10,8 @@ function cleanUrls(): Plugin {
     ["/fda/monitoring", "/fda/monitoring.html"],
     ["/fcc/explorer", "/fcc/explorer.html"],
     ["/fcc/monitoring", "/fcc/monitoring.html"],
+    ["/hc/explorer", "/hc/explorer.html"],
+    ["/hc/monitoring", "/hc/monitoring.html"],
   ]);
   const rewrite = (url?: string) => {
     if (!url) return url;
@@ -49,6 +51,8 @@ export default defineConfig({
         "fda/monitoring": resolve(__dirname, "fda/monitoring.html"),
         "fcc/explorer": resolve(__dirname, "fcc/explorer.html"),
         "fcc/monitoring": resolve(__dirname, "fcc/monitoring.html"),
+        "hc/explorer": resolve(__dirname, "hc/explorer.html"),
+        "hc/monitoring": resolve(__dirname, "hc/monitoring.html"),
       },
     },
   },

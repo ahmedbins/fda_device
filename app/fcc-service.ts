@@ -12,7 +12,8 @@ import {
   type NormalizedFccRecord,
   type RawFccRecord,
 } from "./fcc-core";
-import { parseFccidMarkdown } from "./fcc-index";
+import { parseFccidExhibits, parseFccidMarkdown } from "./fcc-index";
+import type { FccExhibit } from "./fcc-core";
 import { FCC_OFFICIAL_SNAPSHOT } from "./fcc-official-snapshot";
 import { FCC_OFFICIAL_GRANTS } from "./fcc-official-grants";
 
@@ -242,4 +243,22 @@ export function importOfficialFccResponse(body: string, scopes: string[] = []): 
 export function clearFccCache(scopes?: string[]) {
   if (!scopes) cache.clear();
   else scopes.forEach((scope) => cache.delete(normalizeFccScope(scope)));
+}
+
+export async function fetchFccExhibits(fccId: string, signal?: AbortSignal): Promise<FccExhibit[]> {
+  const response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalizeFccScope(fccId))}&exhibits=1`, {
+    signal,
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) return [];
+  const body = await response.text();
+  try {
+    const parsed = JSON.parse(body) as { source?: string; pages?: string[] };
+    if (parsed.source === "fccid.io" && Array.isArray(parsed.pages)) {
+      return parsed.pages.flatMap((page) => parseFccidExhibits(page, normalizeFccScope(fccId)));
+    }
+  } catch {
+    // raw markdown / official payload
+  }
+  return parseFccidExhibits(body, normalizeFccScope(fccId));
 }

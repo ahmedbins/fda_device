@@ -12,8 +12,8 @@ async function render(pathname) {
   );
 }
 
-test("server-renders all four source and view routes", async () => {
-  for (const pathname of ["/fda/explorer", "/fda/monitoring", "/fcc/explorer", "/fcc/monitoring"]) {
+test("server-renders all source and view routes", async () => {
+  for (const pathname of ["/fda/explorer", "/fda/monitoring", "/fcc/explorer", "/fcc/monitoring", "/hc/explorer", "/hc/monitoring"]) {
     const response = await render(pathname);
     assert.equal(response.status, 200, pathname);
     assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -21,6 +21,7 @@ test("server-renders all four source and view routes", async () => {
     assert.match(html, /SONOVA/);
     assert.match(html, />FDA</);
     assert.match(html, />FCC</);
+    assert.match(html, />HC</);
     assert.match(html, />Explorer</i);
     assert.match(html, />Monitoring</i);
   }
@@ -51,6 +52,18 @@ test("renders FCC Explorer and conservative FCC Monitoring language", async () =
   assert.match(monitoring, /Recent FCC authorizations/);
   assert.match(monitoring, /not snapshot change detection/i);
   assert.doesNotMatch(monitoring, /Modified authorization/);
+});
+
+test("renders Health Canada MDALL Explorer and Monitoring", async () => {
+  const explorer = await (await render("/hc/explorer")).text();
+  assert.match(explorer, /HEALTH CANADA \/ MDALL/);
+  assert.match(explorer, /MDALL search/);
+  assert.match(explorer, /official MDALL/i);
+  assert.match(explorer, /Class II, III and IV/i);
+
+  const monitoring = await (await render("/hc/monitoring")).text();
+  assert.match(monitoring, /HEALTH CANADA MDALL|Recent MDALL licences/i);
+  assert.match(monitoring, /not snapshot change detection/i);
 });
 
 test("rejects invalid FCC API scope without contacting the upstream source", async () => {

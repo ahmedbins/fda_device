@@ -17,7 +17,7 @@ There is intentionally no `main-site/` and `internal-site/` duplication. Environ
 
 ### Cloudflare Pages: Main and Internal
 
-`cloudflare-spa/vite.config.ts` produces static HTML and JavaScript entry points for all FDA and FCC routes. Both Pages projects deploy the output from `work/cloudflare-pages/`.
+`cloudflare-spa/vite.config.ts` produces static HTML and JavaScript entry points for all FDA, FCC and Health Canada routes. Both Pages projects deploy the output from `work/cloudflare-pages/`.
 
 - Main project: `fda-device-index`
 - Internal project: `fda-device-internaluseonly`
@@ -35,12 +35,17 @@ app/page.tsx                  FDA Explorer implementation
 app/monitor-page.tsx          FDA Monitoring implementation
 app/fcc-explorer-page.tsx     FCC Explorer implementation
 app/fcc-monitor-page.tsx      FCC Monitoring implementation
-app/source-nav.tsx            FDA/FCC and Explorer/Monitoring navigation
+app/mdall-explorer-page.tsx   Health Canada MDALL Explorer
+app/mdall-monitor-page.tsx    Health Canada MDALL Monitoring
+app/source-nav.tsx            FDA/FCC/HC and Explorer/Monitoring navigation
 app/fda-shared.ts             FDA normalization and export helpers
 app/fcc-core.ts               FCC parsing, normalization, grouping, provenance
 app/fcc-service.ts            FCC snapshot/live/import orchestration
 app/fcc-config.ts             Confirmed FCC presets and watchlists
 app/fcc-official-snapshot.ts  Provenance-labelled official FCC response snapshot
+app/mdall-core.ts             MDALL parsing, status labels, grouping
+app/mdall-service.ts          Official Health Canada MDALL API orchestration
+app/mdall-config.ts           Confirmed MDALL company watchlists
 ```
 
 ## Data flow
@@ -50,6 +55,8 @@ flowchart TD
   UI["Explorer or Monitoring UI"] --> S{"Selected source"}
   S -->|FDA| F["openFDA APIs"]
   F --> FN["FDA normalization"]
+  S -->|HC| H["Health Canada MDALL API"]
+  H --> HN["MDALL normalization"]
   S -->|FCC| C{"Scope covered by official snapshot?"}
   C -->|Yes| SN["Snapshot records"]
   C -->|No| L["Live FCC request"]
@@ -59,6 +66,7 @@ flowchart TD
   LN --> N
   IM --> N
   FN --> UI
+  HN --> UI
   N --> UI
 ```
 

@@ -3,12 +3,19 @@
 import { PackageSearch } from "lucide-react";
 import { useDevHost } from "./fda-shared";
 
-export type RegulatorySource = "fda" | "fcc";
+export type RegulatorySource = "fda" | "fcc" | "hc";
 export type RegulatoryView = "explorer" | "monitoring";
 
 const ROUTES: Record<RegulatorySource, Record<RegulatoryView, string>> = {
   fda: { explorer: "/fda/explorer", monitoring: "/fda/monitoring" },
   fcc: { explorer: "/fcc/explorer", monitoring: "/fcc/monitoring" },
+  hc: { explorer: "/hc/explorer", monitoring: "/hc/monitoring" },
+};
+
+const SOURCE_LABEL: Record<RegulatorySource, string> = {
+  fda: "FDA",
+  fcc: "FCC",
+  hc: "HC",
 };
 
 type SourceNavProps = {
@@ -48,9 +55,9 @@ export default function SourceNav({ source, view, status, statusState = "ready" 
         <div className="nav-dimension">
           <span>Source</span>
           <nav className="top-nav" aria-label="Regulatory source">
-            {(["fda", "fcc"] as const).map((item) => (
-              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view)} aria-current={source === item ? "page" : undefined}>
-                {item.toUpperCase()}
+            {(["fda", "fcc", "hc"] as const).map((item) => (
+              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view)} aria-current={source === item ? "page" : undefined} title={item === "hc" ? "Health Canada MDALL" : item === "fcc" ? "FCC Equipment Authorization" : "FDA openFDA"}>
+                {SOURCE_LABEL[item]}
               </button>
             ))}
           </nav>

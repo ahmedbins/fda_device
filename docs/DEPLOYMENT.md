@@ -30,6 +30,8 @@ Before a release, manually verify:
 
 - FDA Explorer loads and filters records.
 - FDA Monitoring loads 510(k), recall and adverse-event sections.
+- Health Canada / MDALL Explorer loads SONOVA AG licences from the official API.
+- Health Canada / MDALL Monitoring shows first-issued and ended licences for the selected window.
 - FCC Explorer defaults to verified records rather than a blank state.
 - Complete and partial FCC-ID searches work for covered scopes.
 - Grantee cards, profiles and authorization dossiers open.
@@ -62,7 +64,7 @@ The working tree should be clean, and the SHA should match the internally tested
 
 ### 3. Verify Main
 
-Smoke-test all four regulatory routes and confirm that the deployed source/provenance labels match the validated Internal deployment.
+Smoke-test all six regulatory routes and confirm that the deployed source/provenance labels match the validated Internal deployment.
 
 ## Build details
 

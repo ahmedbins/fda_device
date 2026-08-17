@@ -79,6 +79,52 @@ fccid.io is a third-party index of public FCC grants, not the FCC itself. The UI
 
 Normalized activity categories are `Original authorization`, `Class II permissive change`, `Change in FCC ID`, and `Other authorization activity`. The original FCC wording remains visible and is included in CSV exports.
 
+## FCC public record links
+
+The official FCC ID Search at [fcc.gov/oet/ea/fccid](https://www.fcc.gov/oet/ea/fccid) is a form. Official grant and exhibit pages need an internal `application_id` and are POST-driven; they cannot be opened as a stable GET URL for a specific FCC ID. Other public indexes such as fcc.report are behind bot challenges.
+
+The app therefore:
+
+- keeps a prominent **Official FCC Search** button at the top of Explorer and Monitoring;
+- links each FCC ID to its public [fccid.io](https://fccid.io/) page, which is a GET URL of the form `https://fccid.io/{FCCID}`;
+- still labels fccid.io as a third-party index, not the FCC.
+
+## FCC exhibits / supporting documents
+
+fccid.io publishes an exhibit table for each FCC ID: document name, exhibit type, public availability date, and a "Metadata only" marker when the file is not yet public. The official FCC exhibit report is not available as a documented GET API.
+
+Explorer exports two CSVs:
+
+- authorization records;
+- exhibit metadata for the first 40 unique FCC IDs in the current result set (name, type, application/submitted date when present, public date, confidentiality status).
+
+The app does not need to open the PDF itself. The export is a list of what supporting documents exist.
+
+## Health Canada / MDALL
+
+Health Canada publishes a documented JSON API for the Medical Devices Active Licence Listing:
+
+- Documentation: [MDALL API Guide](https://health-products.canada.ca/api/documentation/mdall-documentation-en.html)
+- Base URI: `https://health-products.canada.ca/api/medical-devices/`
+- Browser CORS: `Access-Control-Allow-Origin: *`
+
+| Endpoint | Useful for |
+| --- | --- |
+| `/licence/` | Licence number, name, status, risk class, type, first issued date, end date, company ID |
+| `/company/` | Company name, ID, address, country |
+| `/device/` | Trade names on a licence (search by device name, then match `original_licence_no`) |
+| `/deviceidentifier/` | Catalogue / device identifiers |
+| `/licencetype/` | Licence type codes |
+| `/sbdlocation/` | Summary Basis of Decision URLs, when present |
+
+MDALL covers licensed Class II, III and IV devices. Class I devices, investigational testing, and special-access authorizations are not in this listing.
+
+The official MDALL HTML search is POST-only (`/mdall-limh/search`). There is no stable official GET page for a specific licence number. The dashboard therefore uses the JSON API and keeps a prominent link to the official search form.
+
+The `licence` endpoint does **not** accept `company_name`. Company searches resolve `company_id` first, then request `/licence/?company_id=`. The `device` endpoint does **not** accept a licence-number filter; device names for a licence are recovered by searching distinctive tokens from the licence name.
+
+Confirmed watch scope: SONOVA AG, company ID `113080`.
+
 ## Refreshing FCC data
 
 When the official snapshot is refreshed:

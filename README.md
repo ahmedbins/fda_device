@@ -1,6 +1,6 @@
-# FDA + FCC Device Regulatory Explorer
+# FDA + FCC + Health Canada Device Regulatory Explorer
 
-One workspace for searching and monitoring public FDA medical-device records and FCC equipment authorizations.
+One workspace for searching and monitoring public FDA medical-device records, FCC equipment authorizations, and Health Canada MDALL licences.
 
 ![FDA + FCC Device Regulatory Explorer](public/og-regulatory.png)
 
@@ -19,17 +19,19 @@ One workspace for searching and monitoring public FDA medical-device records and
 
 The top navigation has two independent choices:
 
-1. **Source:** FDA or FCC
+1. **Source:** FDA, FCC, or HC (Health Canada / MDALL)
 2. **View:** Explorer or Monitoring
 
-That creates four main workflows:
+That creates six main workflows:
 
 | Workflow | What it is for |
 | --- | --- |
 | **FDA Explorer** | Search registration and listing records; filter establishments and products; customize columns; inspect record details; export CSVs. |
 | **FDA Monitoring** | Review recent 510(k), recall, and adverse-event activity. |
-| **FCC Explorer** | Search complete or partial FCC IDs; group results by confirmed grantee; inspect authorization history and evidence. |
+| **FCC Explorer** | Search complete or partial FCC IDs; group results by confirmed grantee; inspect authorization history, exhibits, and evidence. |
 | **FCC Monitoring** | Review recent original authorizations and FCC-labelled authorization changes for configured scopes. |
+| **HC Explorer** | Search Health Canada MDALL licences, companies, device names, and identifiers. |
+| **HC Monitoring** | Review recently issued and ended Canadian medical device licences. |
 
 Every workflow keeps source links and timestamps visible. FCC views also distinguish official source fields from app-derived labels and preserve the raw FCC record.
 
@@ -49,7 +51,7 @@ The normal release path is:
 
 1. Build and test a commit.
 2. Deploy it to Internal Use Only.
-3. Verify all FDA and FCC routes.
+3. Verify all FDA, FCC and Health Canada routes.
 4. Deploy that exact commit to Main.
 
 This keeps the two sites consistent while giving unfinished changes a safe validation target.
@@ -79,7 +81,7 @@ That command creates a production build and runs the parsing, provenance, render
 
 ### 1. Routes stay small
 
-The route files under `app/fda/` and `app/fcc/` select shared page components. Most feature code lives in a small number of clearly named modules:
+The route files under `app/fda/`, `app/fcc/` and `app/hc/` select shared page components. Most feature code lives in a small number of clearly named modules:
 
 | File | Responsibility |
 | --- | --- |
@@ -87,7 +89,9 @@ The route files under `app/fda/` and `app/fcc/` select shared page components. M
 | `app/monitor-page.tsx` | FDA Monitoring queries and the 510(k), recall, and adverse-event sections. |
 | `app/fcc-explorer-page.tsx` | FCC search UI, filters, grouped grantees, authorization dossiers, imports, sharing, and CSV export. |
 | `app/fcc-monitor-page.tsx` | FCC watchlists, date windows, activity summaries, authorization tables, and change categories. |
-| `app/source-nav.tsx` | Shared FDA/FCC and Explorer/Monitoring navigation. |
+| `app/mdall-explorer-page.tsx` | Health Canada MDALL search, licence dossiers, company profiles, and CSV export. |
+| `app/mdall-monitor-page.tsx` | Health Canada watchlists and recent issued/ended licences. |
+| `app/source-nav.tsx` | Shared FDA/FCC/HC and Explorer/Monitoring navigation. |
 | `app/globals.css` | Shared responsive visual system for every route. |
 
 ### 2. Data logic is separate from the UI
@@ -101,6 +105,8 @@ The page components do not need to understand every source-specific detail:
 | `app/fcc-service.ts` | Orchestrates the FCC snapshot, live request, server proxy, cache, grantee registry, and manual official-response import. |
 | `app/fcc-config.ts` | Explicitly confirmed FCC presets and watchlist scopes. |
 | `app/fcc-official-snapshot.ts` | Exact provenance-labelled FCC EAS records used for reliable covered-scope startup. |
+| `app/mdall-core.ts` | Health Canada MDALL normalization, status labels, and grouping. |
+| `app/mdall-service.ts` | Official MDALL API search, company joins, and device lookup. |
 | `app/api/fcc/search/route.ts` | Server-side FCC proxy used by the full-stack build when the upstream service permits it. |
 
 The separation matters: parsing and source rules can be tested without rendering React, while UI work can consume one normalized record shape.
@@ -147,6 +153,7 @@ app/
   api/fcc/search/        FCC server-proxy route
   fda/                   FDA route entry points
   fcc/                   FCC route entry points
+  hc/                    Health Canada MDALL route entry points
   *-page.tsx             Shared Explorer and Monitoring page components
   fda-shared.ts          FDA helpers
   fcc-core.ts            FCC parsing and normalization
@@ -181,6 +188,7 @@ Cloudflare deployment requires an authenticated Wrangler session with access to 
 | [openFDA Device Adverse Events](https://open.fda.gov/apis/device/event/) | FDA Monitoring |
 | [FCC Equipment Authorization System](https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=KWC) | FCC Explorer and Monitoring |
 | [FCC Open Data grantee registrations](https://opendata.fcc.gov/Engineering-Technology/EAS-Equipment-Authorization-Grantee-Registrations/3b3k-34jp) | Confirmed FCC grantee profiles |
+| [Health Canada MDALL API](https://health-products.canada.ca/api/documentation/mdall-documentation-en.html) | HC Explorer and Monitoring |
 
 Read [Data sources and provenance](docs/DATA-SOURCES.md) before changing source mappings, FCC presets, normalized categories, or snapshot records.
 
