@@ -20,6 +20,7 @@ export type FccExhibit = {
   submittedAt?: string;
   availableAt?: string;
   confidentiality?: string;
+  url?: string;
 };
 
 export type NormalizedFccRecord = {

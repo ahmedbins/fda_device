@@ -74,6 +74,7 @@ test("parses fccid.io exhibit tables for document name, type, dates and confiden
   assert.equal(exhibits.length, 3);
   assert.equal(exhibits[0].name, "12-PDL-29575 - Labelling.pdf");
   assert.equal(exhibits[0].exhibitType, "ID Label/Location Info");
+  assert.equal(exhibits[0].url, "https://fccid.io/KWC-ERF/Label/label-pdf-1");
   assert.equal(exhibits[0].availableAt, "2026-06-11");
   assert.equal(exhibits[0].submittedAt, "2026-06-11");
   assert.equal(exhibits[1].exhibitType, "Cover Letter(s)");
@@ -86,5 +87,6 @@ test("parses jina exhibit-selector markdown into the same document list", () => 
   const exhibits = parseFccidExhibits(exhibitMarkdown, "KWC-ERF");
   assert.ok(exhibits.length >= 2);
   assert.equal(exhibits[0].exhibitType, "ID Label/Location Info");
+  assert.equal(exhibits[0].url, "https://fccid.io/KWC-ERF/Label/12-PDL-29575-Labelling-pdf-9379994");
   assert.equal(exhibits[1].exhibitType, "Cover Letter(s)");
 });

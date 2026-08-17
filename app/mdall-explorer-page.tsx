@@ -28,7 +28,6 @@ import SourceNav from "./source-nav";
 import { DEFAULT_MDALL_PRESET, MDALL_PRESETS, getMdallPreset } from "./mdall-config";
 import {
   MDALL_DOCS_URL,
-  MDALL_HOME_URL,
   MDALL_SOURCE_LABEL,
   groupMdallLicencesByCompany,
   mdallLocation,
@@ -304,15 +303,14 @@ export default function MdallExplorerPage() {
     <main>
       <SourceNav source="hc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? "connected" : "ready"} />
 
-      <section className="hero" id="top">
+      <section className="hero hero-compact" id="top">
         <div className="eyebrow"><span>01</span> HEALTH CANADA / MDALL</div>
         <div className="hero-grid">
           <div>
-            <h1>Canadian device licences.<br /><em>Made searchable.</em></h1>
-            <p>Search Class II, III and IV medical device licences from Health Canada’s Medical Devices Active Licence Listing.</p>
-            <div className="hero-actions">
-              <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL search <ExternalLink size={14} /></a>
-              <a className="secondary" href={MDALL_HOME_URL} target="_blank" rel="noreferrer">MDALL home <ExternalLink size={14} /></a>
+            <h1>Canadian device licences. <em>Made searchable.</em></h1>
+            <div className="hero-inline">
+              <p>Search Class II, III and IV medical device licences from Health Canada’s Medical Devices Active Licence Listing.</p>
+              <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open MDALL Search <ExternalLink size={14} /></a>
             </div>
           </div>
           <div className="dataset-note">
@@ -396,23 +394,17 @@ export default function MdallExplorerPage() {
               {resultView === "licences" && <label className="page-size">Rows <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>}
               <button className="icon-button" onClick={async () => { await navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1600); }} aria-label="Copy shareable MDALL URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
               <button className="icon-button" onClick={() => runSearch(true)} disabled={loading} aria-label="Refresh MDALL results" title="Refresh"><RefreshCw className={loading ? "spin" : ""} size={16} /></button>
-              <a className="primary export-button" href={officialSearch} target="_blank" rel="noreferrer">Open MDALL Search <ExternalLink size={14} /></a>
               <button className="secondary export-button" onClick={() => void exportCsv()} disabled={!filteredLicences.length}><ArrowDownToLine size={14} /> CSV</button>
               <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><Filter size={17} /></button>
             </div>
           </div>
 
-          {searched && <div className="source-jump">
-            <div><b>Continue this search on Health Canada MDALL</b><span>The official MDALL HTML search is a separate form. Licence numbers and company IDs from these results can be pasted there.</span></div>
-            <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL <ExternalLink size={14} /></a>
-          </div>}
-
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>MDALL search needs attention</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
           {!!searchMeta?.notes.length && <div className="coverage-banner"><Database size={17} /><div><b>MDALL result note</b><span>{searchMeta.notes.join(" ")}</span></div></div>}
           {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting Health Canada MDALL…</div>}
 
-          {!searched && !loading ? <div className="empty-state"><div className="empty-number">HC</div><Landmark size={34} /><h3>Start with a Canadian licence search.</h3><p>Search a company, licence name, licence number, device trade name, or device identifier in the official Health Canada MDALL API.</p><div className="empty-actions"><a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL Search <ExternalLink size={14} /></a></div></div>
-          : searched && !loading && !error && !filteredLicences.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No MDALL licences matched.</h3><p>Try a company name, a shorter licence name, or switch between active and archived licences. Class I devices are not listed in MDALL.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); setRiskClass(""); }}>Clear narrow filters</button><a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL <ExternalLink size={14} /></a></div></div>
+          {!searched && !loading ? <div className="empty-state"><div className="empty-number">HC</div><Landmark size={34} /><h3>Start with a Canadian licence search.</h3><p>Search a company, licence name, licence number, device trade name, or device identifier in the official Health Canada MDALL API.</p></div>
+          : searched && !loading && !error && !filteredLicences.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No MDALL licences matched.</h3><p>Try a company name, a shorter licence name, or switch between active and archived licences. Class I devices are not listed in MDALL.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); setRiskClass(""); }}>Clear narrow filters</button></div></div>
           : resultView === "licences" && filteredLicences.length > 0 && <>
             <div className="table-wrap"><table className="fcc-table"><thead><tr>{columns.map((column) => <th key={column}>{COLUMN_OPTIONS.find((option) => option.key === column)?.label}</th>)}</tr></thead><tbody>{visibleLicences.map((licence) => <tr key={`${licence.licenceNumber}-${licence.licenceStatus}-${licence.endDate || "open"}`} tabIndex={0} onClick={() => setSelected(licence)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(licence); } }}>{columns.map((column) => <td key={column}>{renderCell(licence, column)}</td>)}</tr>)}</tbody></table></div>
             <div className="pagination"><span>{filteredLicences.length.toLocaleString()} matching MDALL licence{filteredLicences.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}</span><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>

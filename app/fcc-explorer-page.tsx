@@ -315,11 +315,12 @@ export default function FccExplorerPage() {
         exhibit.submittedAt || "",
         exhibit.availableAt || "",
         exhibit.confidentiality || "",
+        exhibit.url || "",
         fccPublicRecordUrl(exhibit.fccId),
       ]));
     }
     downloadCsv([
-      ["fcc_id", "exhibit_name", "exhibit_type", "submitted_to_fcc", "available_to_public", "confidentiality_status", "public_record_url"],
+      ["fcc_id", "exhibit_name", "exhibit_type", "submitted_to_fcc", "available_to_public", "confidentiality_status", "document_url", "public_record_url"],
       ...exhibitRows,
     ], `fcc-exhibits-${stamp}.csv`);
   };
@@ -354,15 +355,14 @@ export default function FccExplorerPage() {
     <main>
       <SourceNav source="fcc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"} />
 
-      <section className="hero" id="top">
+      <section className="hero hero-compact" id="top">
         <div className="eyebrow"><span>01</span> FCC EQUIPMENT DATA</div>
         <div className="hero-grid">
           <div>
-            <h1>Equipment authorizations.<br /><em>Made searchable.</em></h1>
-            <p>Search approved FCC IDs and authorization records.</p>
-            <div className="hero-actions">
-              <a className="primary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open official FCC Search <ExternalLink size={14} /></a>
-              <a className="secondary" href="https://fccid.io" target="_blank" rel="noreferrer">Open public FCC ID index <ExternalLink size={14} /></a>
+            <h1>Equipment authorizations. <em>Made searchable.</em></h1>
+            <div className="hero-inline">
+              <p>Search approved FCC IDs and authorization records.</p>
+              <a className="primary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open FCC Search <ExternalLink size={14} /></a>
             </div>
           </div>
           <div className="dataset-note">
@@ -449,27 +449,16 @@ export default function FccExplorerPage() {
               {resultView === "records" && <label className="page-size">Rows <select value={pageSize} onChange={(event) => { const next = Number(event.target.value); setPageSize(next); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, next, resultView, presetId); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>}
               <button className="icon-button" onClick={copyLink} aria-label="Copy shareable FCC URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
               <button className="icon-button" onClick={() => runSearch(true)} disabled={!effectiveScopes.length || loading} aria-label="Refresh FCC results" title="Refresh"><RefreshCw className={loading ? "spin" : ""} size={16} /></button>
-              <a className="primary export-button" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open FCC Search <ExternalLink size={14} /></a>
               <button className="secondary export-button" onClick={() => void exportCsv()} disabled={!filteredRecords.length}><ArrowDownToLine size={14} /> CSV</button>
               <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><Filter size={17} /></button>
             </div>
           </div>
 
-          {searched && <div className="source-jump">
-            <div>
-              <b>Continue this search on the FCC website</b>
-              <span>The official FCC ID Search is the Equipment Authorization form. Each row also has a public page for that specific FCC ID.</span>
-            </div>
-            <div className="source-jump-actions">
-              <a className="primary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Official FCC Search <ExternalLink size={14} /></a>
-              {filteredRecords[0] && <a className="secondary" href={fccPublicRecordUrl(filteredRecords[0].fccId)} target="_blank" rel="noreferrer">Public page for {filteredRecords[0].fccId} <ExternalLink size={14} /></a>}
-            </div>
-          </div>}
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>FCC search needs attention</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
           {coverageNote && <div className="coverage-banner"><Database size={17} /><div><b>Official source coverage</b><span>{coverageNote}</span>{searchMeta?.unresolvedScopes[0] && <a href={`${FCC_EAS_API}?fccId=${encodeURIComponent(searchMeta.unresolvedScopes[0])}`} target="_blank" rel="noreferrer">Open the official FCC response <ExternalLink size={12} /></a>}</div></div>}
           {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting the FCC Equipment Authorization source…</div>}
 
-          {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p><div className="empty-actions"><a className="primary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open official FCC Search <ExternalLink size={14} /></a></div></div>
+          {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p></div>
           : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>{limitedCoverage ? "This FCC scope is not in the bundled snapshot." : "No approved FCC IDs matched."}</h3><p>{limitedCoverage ? "The live FCC source is unavailable from this app, so an empty result here does not mean the FCC ID is unapproved. Open the official response and import it below." : "Check the FCC ID, use a shorter prefix, or remove the date filters."}</p><div className="empty-actions">{!limitedCoverage && <button className="secondary" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}<button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
           : resultView === "records" && filteredRecords.length > 0 && <>
             <div className="table-wrap"><table className="fcc-table"><thead><tr>{columns.map((column) => <th key={column}>{COLUMN_OPTIONS.find((option) => option.key === column)?.label}</th>)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
@@ -482,11 +471,11 @@ export default function FccExplorerPage() {
       {selected && <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
         <aside className="drawer" aria-label="FCC Authorization Dossier">
           <div className="drawer-top"><span>FCC AUTHORIZATION DOSSIER</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
-          <div className="drawer-hero"><span className="record-id">FCC ID</span><h2 className="fcc-drawer-id">{selected.fccId}</h2><p><MapPin size={15} /> {fccLocation(selected)}</p><a className="primary official-record-link" href={fccPublicRecordUrl(selected.fccId)} target="_blank" rel="noreferrer">Open this FCC ID <ExternalLink size={14} /></a><a className="secondary official-record-link" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Official FCC ID Search <ExternalLink size={14} /></a><button className="secondary copy-id" onClick={async () => { await navigator.clipboard.writeText(selected.fccId); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); }}>{idCopied ? <Check size={14} /> : <Clipboard size={14} />} {idCopied ? "Copied" : "Copy FCC ID"}</button></div>
+          <div className="drawer-hero"><span className="record-id">FCC ID</span><h2 className="fcc-drawer-id">{selected.fccId}</h2><p><MapPin size={15} /> {fccLocation(selected)}</p><a className="primary official-record-link" href={fccPublicRecordUrl(selected.fccId)} target="_blank" rel="noreferrer">Open this FCC ID <ExternalLink size={14} /></a><button className="secondary copy-id" onClick={async () => { await navigator.clipboard.writeText(selected.fccId); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); }}>{idCopied ? <Check size={14} /> : <Clipboard size={14} />} {idCopied ? "Copied" : "Copy FCC ID"}</button></div>
           <div className="detail-stats"><div><span>Authorization date</span><b>{displayDate(selected.authorizationDate)}</b></div><div><span>Activity category</span><b>{selected.purposeCategory || "—"}</b></div><div><span>History entries</span><b>{selectedHistory.length}</b></div></div>
           <section className="detail-section"><h3><RadioTower size={16} /> Identity</h3><dl className="fcc-detail-list"><div><dt>FCC ID <small>FCC source</small></dt><dd>{selected.fccId}</dd></div><div><dt>Grantee <small>FCC source</small></dt><dd>{selected.granteeName || "—"}</dd></div><div><dt>Grantee code <small>derived from confirmed FCC scope</small></dt><dd>{selected.granteeCode || "Not available from current FCC source"}</dd></div><div><dt>FCC equipment product-code component <small>derived</small></dt><dd>{selected.fccProductCode || "Not available from current FCC source"}</dd></div><div><dt>Equipment description <small>official FCC grant notes</small></dt><dd>{selected.equipmentDescription || "Not on the official grant snapshot. Open the official FCC ID Search to read the grant notes."}</dd></div></dl>{selected.granteeCode && <button className="secondary official-record-link" onClick={() => { setSelected(null); setSelectedGrantee(selected.granteeCode || selected.granteeName || null); }}><Users size={14} /> Open grantee profile</button>}</section>
           <section className="detail-section"><h3><CalendarDays size={16} /> Authorization</h3><dl className="fcc-detail-list"><div><dt>Grant date <small>FCC source</small></dt><dd>{displayDate(selected.authorizationDate)}</dd></div><div><dt>Normalized activity category <small>derived from FCC purpose</small></dt><dd>{selected.purposeCategory || "—"}</dd></div><div><dt>FCC-reported application purpose</dt><dd>{selected.applicationPurpose || "—"}</dd></div><div><dt>Equipment class <small>official FCC grant</small></dt><dd>{selected.equipmentClasses?.length ? selected.equipmentClasses.join("; ") : "Not on the official grant snapshot. Open the official FCC ID Search to read the grant."}</dd></div><div><dt>RF characteristics <small>official EAS search / grant</small></dt><dd>{formatFccRfBands(selected.rfBands) || "Not returned by getFCCIDList and not present in the official EAS search snapshot."}</dd></div></dl></section>
-          {!!selected.exhibits?.length && <section className="detail-section"><h3><Database size={16} /> Submitted exhibits</h3><dl className="fcc-detail-list">{selected.exhibits.slice(0, 40).map((exhibit, index) => <div key={`${exhibit.name}-${index}`}><dt>{exhibit.exhibitType}<small>{[exhibit.submittedAt, exhibit.confidentiality].filter(Boolean).join(" · ")}</small></dt><dd>{exhibit.name}{exhibit.availableAt ? ` · public ${exhibit.availableAt}` : ""}</dd></div>)}</dl></section>}
+          {!!selected.exhibits?.length && <section className="detail-section"><h3><Database size={16} /> Submitted exhibits</h3><dl className="fcc-detail-list">{selected.exhibits.slice(0, 40).map((exhibit, index) => <div key={`${exhibit.name}-${index}`}><dt>{exhibit.exhibitType}<small>{[exhibit.submittedAt, exhibit.confidentiality].filter(Boolean).join(" · ")}</small></dt><dd>{exhibit.url ? <a className="ext-link exhibit-link" href={exhibit.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{exhibit.name} <ExternalLink size={11} /></a> : exhibit.name}{exhibit.availableAt ? ` · public ${exhibit.availableAt}` : ""}</dd></div>)}</dl></section>}
           <section className="detail-section"><h3><RefreshCw size={16} /> Authorization history</h3>{selectedHistory.map((record, index) => <div className="history-row" key={`${record.fccId}-${record.authorizationDate}-${index}`}><time>{displayDate(record.authorizationDate)}</time><div><b>{record.purposeCategory || "Authorization activity"}</b><span>FCC-reported purpose: {record.applicationPurpose || "—"}</span></div></div>)}</section>
           <section className="detail-section"><h3><Database size={16} /> Evidence / source</h3><dl className="fcc-detail-list"><div><dt>Regulatory source</dt><dd>{selected.sourceMode === "public_index" ? "fccid.io public index of FCC filings" : FCC_SOURCE_LABEL}</dd></div><div><dt>Source mode</dt><dd>{selected.sourceMode === "official_snapshot" ? "Official EAS snapshot" : selected.sourceMode === "official_import" ? "Imported official EAS response" : selected.sourceMode === "public_index" ? "Live public FCC ID index" : "Live FCC response"}</dd></div>{selected.snapshotCapturedAt && <div><dt>Snapshot captured</dt><dd>{new Date(selected.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}</dd></div>}<div><dt>Loaded in app</dt><dd>{new Date(selected.retrievedAt).toLocaleString([], dateTimeFormat)}</dd></div>{selectedEasParts.granteeCode && <div><dt>Official EAS search fields</dt><dd>Grantee {selectedEasParts.granteeCode}{selectedEasParts.productCode ? ` · product ${selectedEasParts.productCode}` : ""}</dd></div>}</dl><a className="primary official-record-link" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open official FCC ID Search <ExternalLink size={14} /></a><a className="secondary official-record-link" href={selected.sourceUrl} target="_blank" rel="noreferrer">View raw API response <ExternalLink size={14} /></a></section>
           <section className="detail-section raw-section"><details><summary>View raw FCC response <ChevronDown size={15} /></summary><pre>{JSON.stringify(selected.raw, null, 2)}</pre></details></section>

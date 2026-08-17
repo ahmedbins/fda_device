@@ -12,7 +12,6 @@ import {
   Columns3,
   Database,
   Ear,
-  FileArchive,
   Filter,
   Link2,
   LoaderCircle,
@@ -23,10 +22,8 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
-  Upload,
   X,
 } from "lucide-react";
-import { unzip } from "fflate";
 import {
   API,
   CODE_NAMES,
@@ -262,38 +259,6 @@ function sortMatrixRows(rows: MatrixRow[], sort: MatrixSort) {
   });
 }
 
-function localMatches(item: RecordItem, filters: Filters) {
-  const haystack = [
-    firmName(item),
-    ...(item.proprietary_name || []),
-    ...(item.products || []).flatMap((p) => [p.product_code, p.openfda?.device_name]),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  const r = item.registration;
-  const codeSet = new Set(filters.productCodes.map((code) => code.toUpperCase()));
-  return (
-    (!filters.keyword || haystack.includes(filters.keyword.toLowerCase())) &&
-    (!codeSet.size ||
-      !!item.products?.some((p) => p.product_code && codeSet.has(p.product_code.toUpperCase()))) &&
-    (!filters.country || r?.iso_country_code?.toLowerCase() === filters.country.toLowerCase()) &&
-    (!filters.state || r?.state_code?.toLowerCase() === filters.state.toLowerCase()) &&
-    (!filters.deviceClass || !!item.products?.some((p) => p.openfda?.device_class === filters.deviceClass)) &&
-    (!filters.establishment || !!item.establishment_type?.includes(filters.establishment))
-  );
-}
-
-function localCodeCounts(items: RecordItem[], codes: string[]) {
-  if (!codes.length) return null;
-  return codes.map((code) => ({
-    code,
-    count: items.filter((item) =>
-      item.products?.some((p) => p.product_code?.toUpperCase() === code),
-    ).length,
-  }));
-}
-
 function syncUrl(filters: Filters, view: ViewMode) {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
@@ -330,21 +295,17 @@ function initialStateFromUrl() {
 
 export default function Home() {
   const [initial] = useState(initialStateFromUrl);
-  const [mode, setMode] = useState<"api" | "files">("api");
   const [viewMode, setViewMode] = useState<ViewMode>(initial.view);
   const [filters, setFilters] = useState<Filters>(initial.filters);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [codeDraft, setCodeDraft] = useState("");
   const [records, setRecords] = useState<RecordItem[]>([]);
-  const [localRecords, setLocalRecords] = useState<RecordItem[]>([]);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(25);
   const [skip, setSkip] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RecordItem | null>(null);
-  const [fileNames, setFileNames] = useState<string[]>([]);
-  const [importProgress, setImportProgress] = useState("");
   const [exportProgress, setExportProgress] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [datasetUpdated, setDatasetUpdated] = useState("");
@@ -360,22 +321,11 @@ export default function Home() {
   const [matrixSort, setMatrixSort] = useState<MatrixSort>("code");
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [filterPanelPrefsReady, setFilterPanelPrefsReady] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
   const codeInput = useRef<HTMLInputElement>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const searchSeq = useRef(0);
 
-  const countryOptions = useMemo(() => {
-    if (mode !== "files" || !localRecords.length) return apiCountries;
-    const counts = new Map<string, number>();
-    localRecords.forEach((record) => {
-      const code = record.registration?.iso_country_code?.toUpperCase();
-      if (code) counts.set(code, (counts.get(code) || 0) + 1);
-    });
-    return [...counts.entries()]
-      .map(([code, count]) => ({ code, count, name: regionName(code) }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [apiCountries, localRecords, mode]);
+  const countryOptions = apiCountries;
   const topCountries = countryOptions.slice(0, 4);
   const activeFilters = [
     filters.keyword.trim(),
@@ -401,17 +351,6 @@ export default function Home() {
       const seq = ++searchSeq.current;
       setError("");
       setSelected(null);
-      if (mode === "files") {
-        const filtered = localRecords.filter((record) => localMatches(record, nextFilters));
-        setSkip(nextSkip);
-        setTotal(filtered.length);
-        setRecords(requestedView === "matrix" ? filtered.slice(0, 1000) : filtered.slice(nextSkip, nextSkip + limit));
-        setAppliedFilters(nextFilters);
-        setFetchedAt(new Date());
-        setCodeCounts(localCodeCounts(filtered, nextFilters.productCodes));
-        syncUrl(nextFilters, requestedView);
-        return;
-      }
       setLoading(true);
       try {
         const params = new URLSearchParams({
@@ -462,7 +401,7 @@ export default function Home() {
         if (seq === searchSeq.current) setLoading(false);
       }
     },
-    [filters, limit, localRecords, mode, viewMode],
+    [filters, limit, viewMode],
   );
 
   useEffect(() => {
@@ -610,86 +549,19 @@ export default function Home() {
     setFiltersOpen(false);
   };
 
-  const importFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setLoading(true);
-    setError("");
-    const collected: RecordItem[] = [];
-    const names: string[] = [];
-    try {
-      for (let index = 0; index < files.length; index++) {
-        const file = files[index];
-        names.push(file.name);
-        setImportProgress(`Parsing ${index + 1} of ${files.length}: ${file.name}`);
-        let jsonText = "";
-        if (file.name.toLowerCase().endsWith(".zip")) {
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          const unzipped = await new Promise<Record<string, Uint8Array>>((resolve, reject) =>
-            unzip(bytes, (err, output) => (err ? reject(err) : resolve(output))),
-          );
-          const jsonEntry = Object.entries(unzipped).find(([name]) => name.toLowerCase().endsWith(".json"));
-          if (!jsonEntry) throw new Error(`${file.name} does not contain a JSON file.`);
-          jsonText = new TextDecoder().decode(jsonEntry[1]);
-        } else {
-          jsonText = await file.text();
-        }
-        const parsed = JSON.parse(jsonText) as RecordItem[] | { results?: RecordItem[] };
-        const batch = Array.isArray(parsed) ? parsed : parsed.results;
-        if (!Array.isArray(batch)) throw new Error(`${file.name} is not an openFDA results file.`);
-        collected.push(...batch);
-      }
-      setLocalRecords(collected);
-      setFileNames(names);
-      setMode("files");
-      const filtered = collected.filter((record) => localMatches(record, filters));
-      setRecords(viewMode === "matrix" ? filtered.slice(0, 1000) : filtered.slice(0, limit));
-      setTotal(filtered.length);
-      setSkip(0);
-      setAppliedFilters(filters);
-      setFetchedAt(new Date());
-      setCodeCounts(localCodeCounts(filtered, filters.productCodes));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Those files could not be parsed.");
-    } finally {
-      setImportProgress("");
-      setLoading(false);
-      if (fileInput.current) fileInput.current.value = "";
-    }
-  };
-
-  const setSource = (next: "api" | "files") => {
-    setMode(next);
-    setSkip(0);
-    setSelected(null);
-    setError("");
-    if (next === "files" && localRecords.length) {
-      const filtered = localRecords.filter((record) => localMatches(record, filters));
-      setRecords(viewMode === "matrix" ? filtered.slice(0, 1000) : filtered.slice(0, limit));
-      setTotal(filtered.length);
-      setAppliedFilters(filters);
-      setFetchedAt(new Date());
-      setCodeCounts(localCodeCounts(filtered, filters.productCodes));
-    } else {
-      setRecords([]);
-      setTotal(0);
-      setCodeCounts(null);
-    }
-  };
-
   const reset = () => {
     setFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
     setCodeDraft("");
     setCodeCounts(null);
-    setRecords(mode === "files" ? localRecords.slice(0, limit) : []);
-    setTotal(mode === "files" ? localRecords.length : 0);
+    setRecords([]);
+    setTotal(0);
     setSkip(0);
     setError("");
     syncUrl(EMPTY_FILTERS, viewMode);
   };
 
   const fetchAllMatching = async () => {
-    if (mode === "files") return localRecords.filter((record) => localMatches(record, appliedFilters));
     const cap = Math.min(total, EXPORT_CAP);
     const all: RecordItem[] = [];
     const search = buildSearch(appliedFilters);
@@ -821,8 +693,7 @@ export default function Home() {
     }
   };
 
-  const exportCount = Math.min(total, mode === "files" ? total : EXPORT_CAP);
-  const timeFormat: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  const exportCount = Math.min(total, EXPORT_CAP);
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const freshnessHint = "\"FDA data as of\" is the date openFDA last rebuilt this dataset — records newer than that aren't published yet. \"Pulled\" is when this page last called the live API.";
 
@@ -856,11 +727,6 @@ export default function Home() {
               <button className="icon-button collapse-filter-panel" onClick={() => setFiltersCollapsed((current) => !current)} aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"} aria-expanded={!filtersCollapsed} title={filtersCollapsed ? "Expand filters" : "Collapse filters"}>{filtersCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
               <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
             </div>
-          </div>
-
-          <div className="source-switch" role="group" aria-label="Data source">
-            <button className={mode === "api" ? "active" : ""} onClick={() => setSource("api")}><Database size={15} /> Live API</button>
-            <button className={mode === "files" ? "active" : ""} onClick={() => setSource("files")} disabled={!localRecords.length}><FileArchive size={15} /> Local files</button>
           </div>
 
           <div className="filter-group-heading"><span>Find</span><small>Name or code</small></div>
@@ -946,14 +812,6 @@ export default function Home() {
             <button className="primary" onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} Search records</button>
             <button className="text-button" onClick={reset}>Clear all</button>
           </div>
-
-          <div className="import-box">
-            <div className="import-copy"><Upload size={18} /><div><b>Local files</b><span>Import JSON or ZIP.</span></div></div>
-            <input ref={fileInput} type="file" accept=".json,.zip,application/json,application/zip" multiple hidden onChange={(e) => importFiles(e.target.files)} />
-            <button className="secondary" onClick={() => fileInput.current?.click()} disabled={loading}><FileArchive size={15} /> Choose files</button>
-            {importProgress && <small><LoaderCircle className="spin" size={12} /> {importProgress}</small>}
-            {!!fileNames.length && <small className="success"><Check size={12} /> {fileNames.length} file{fileNames.length > 1 ? "s" : ""} · {localRecords.length.toLocaleString()} records</small>}
-          </div>
         </aside>
 
         <section className="results-panel">
@@ -964,10 +822,8 @@ export default function Home() {
                 <span>03 / RESULTS</span>
                 <h2>{records.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : "Search records"}</h2>
                 {fetchedAt && (
-                  <small className="fetch-meta" title={mode === "api" ? freshnessHint : undefined}>
-                    {mode === "api"
-                      ? `Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`
-                      : `Filtered ${fetchedAt.toLocaleTimeString([], timeFormat)} · local import`}
+                  <small className="fetch-meta" title={freshnessHint}>
+                    {`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`}
                   </small>
                 )}
               </div>
@@ -1014,7 +870,7 @@ export default function Home() {
                 className="secondary export-button"
                 onClick={exportCsv}
                 disabled={!total || loading || !!exportProgress}
-                title={total > EXPORT_CAP && mode === "api" ? `Exports the first ${EXPORT_CAP.toLocaleString()} matching records (openFDA limit)` : "Download every matching record as CSV"}
+                title={total > EXPORT_CAP ? `Exports the first ${EXPORT_CAP.toLocaleString()} matching records (openFDA limit)` : "Download every matching record as CSV"}
               >
                 <ArrowDownToLine size={15} /> CSV{total ? ` · ${exportCount.toLocaleString()}` : ""}
               </button>
@@ -1030,7 +886,7 @@ export default function Home() {
               <div className="empty-number">{datasetTotal ? `${Math.round(datasetTotal / 1000)}K` : "FDA"}</div>
               <PackageSearch size={34} />
               <h3>Search the FDA<br />device registry.</h3>
-              <p>Use live data or import the two files.</p>
+              <p>Search live openFDA registration and listing records.</p>
               <div className="empty-actions">
                 <button className="primary" onClick={() => runSearch(0)}><Database size={16} /> View records</button>
                 <button className="secondary" onClick={applyPreset}><Ear size={15} /> Load the 6 hearing-aid codes</button>
@@ -1143,7 +999,7 @@ export default function Home() {
               </div>}
             </>
           )}
-          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || importProgress || "Searching openFDA…"}</span></div>}
+          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || "Searching openFDA…"}</span></div>}
         </section>
       </section>
 

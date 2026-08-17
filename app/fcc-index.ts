@@ -217,9 +217,21 @@ function confidentialityFromText(value: string, availableAt?: string, submittedA
   return undefined;
 }
 
+export function fccExhibitUrl(href?: string) {
+  if (!href) return undefined;
+  if (/^https?:\/\//i.test(href)) return href;
+  if (href.startsWith("/")) return `${FCCID_IO}${href}`;
+  return `${FCCID_IO}/${href}`;
+}
+
 function pushExhibit(exhibits: FccExhibit[], seen: Set<string>, exhibit: FccExhibit) {
   const key = `${exhibit.exhibitType}|${exhibit.name}|${exhibit.availableAt || exhibit.submittedAt || ""}`;
-  if (seen.has(key) || !exhibit.name || !exhibit.exhibitType) return;
+  if (!exhibit.name || !exhibit.exhibitType) return;
+  const existing = exhibits.find((item) => `${item.exhibitType}|${item.name}|${item.availableAt || item.submittedAt || ""}` === key);
+  if (existing) {
+    if (!existing.url && exhibit.url) existing.url = exhibit.url;
+    return;
+  }
   seen.add(key);
   exhibits.push(exhibit);
 }
@@ -236,6 +248,7 @@ export function parseFccidExhibits(page: string, fccId: string): FccExhibit[] {
     const documentHtml = match[1];
     const type = exhibitTypeFromText(decodeHtml(match[2].replace(/<[^>]+>/g, " ")));
     const name = decodeHtml((documentHtml.match(/<a[^>]*>([\s\S]*?)<\/a>/i)?.[1] || documentHtml).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").replace(/Metadata only/i, "").trim();
+    const href = documentHtml.match(/href=["']([^"']+)["']/i)?.[1];
     const availableAt = decodeHtml(match[3].replace(/<[^>]+>/g, " ")).match(/\d{4}-\d{2}-\d{2}/)?.[0];
     if (!type || !name) continue;
     pushExhibit(exhibits, seen, {
@@ -245,6 +258,7 @@ export function parseFccidExhibits(page: string, fccId: string): FccExhibit[] {
       submittedAt: submittedFallback,
       availableAt,
       confidentiality: confidentialityFromText(documentHtml, availableAt, submittedFallback),
+      url: fccExhibitUrl(href),
     });
   }
 
@@ -259,6 +273,7 @@ export function parseFccidExhibits(page: string, fccId: string): FccExhibit[] {
       submittedAt: submittedFallback,
       availableAt: match[5],
       confidentiality: confidentialityFromText(match[3] || "", match[5], submittedFallback),
+      url: fccExhibitUrl(match[2]),
     });
   }
 
@@ -284,7 +299,7 @@ export function parseFccidExhibits(page: string, fccId: string): FccExhibit[] {
   for (const link of pathLinks) {
     const type = EXHIBIT_PATH_TYPES[link[1].toLowerCase()] || link[1];
     const name = decodeURIComponent(link[2]).replace(/[-_]+/g, " ");
-    pushExhibit(exhibits, seen, { fccId, name, exhibitType: type, submittedAt: submittedFallback });
+    pushExhibit(exhibits, seen, { fccId, name, exhibitType: type, submittedAt: submittedFallback, url: fccExhibitUrl(link[0]) });
   }
 
   return exhibits;

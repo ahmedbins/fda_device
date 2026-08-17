@@ -133,14 +133,14 @@ export default function MdallMonitorPage() {
     <main>
       <SourceNav source="hc" view="monitoring" status={sourcePresentation.status} statusState={retrievedAt ? "connected" : "ready"} />
 
-      <section className="hero monitor-hero" id="top">
+      <section className="hero hero-compact monitor-hero" id="top">
         <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
         <div className="hero-grid">
           <div>
-            <h1>What changed.<br /><em>In Canada.</em></h1>
-            <p>Recent Health Canada MDALL licence activity for a company or watch scope.</p>
-            <div className="hero-actions">
-              <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL search <ExternalLink size={14} /></a>
+            <h1>What changed. <em>In Canada.</em></h1>
+            <div className="hero-inline">
+              <p>Recent Health Canada MDALL licence activity for a company or watch scope.</p>
+              <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open MDALL Search <ExternalLink size={14} /></a>
             </div>
           </div>
           <div className="dataset-note"><Landmark size={20} /><div><b>Health Canada MDALL</b><span>{retrievedAt ? sourcePresentation.note : "Recent licence activity"}</span><span>{searchMeta?.lastRefreshAt ? `MDALL last refreshed ${displayDate(searchMeta.lastRefreshAt)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${MDALL_SOURCE_LABEL}`}</span></div></div>
@@ -154,7 +154,6 @@ export default function MdallMonitorPage() {
         <div className="monitor-actions">
           <button className="primary" onClick={() => update()} disabled={status === "loading"}><RefreshCw className={status === "loading" ? "spin" : ""} size={15} /> Update</button>
           <button className="icon-button" onClick={async () => { await navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1600); }} aria-label="Copy shareable MDALL monitoring URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
-          <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open MDALL <ExternalLink size={14} /></a>
         </div>
         <small className="monitor-refreshed">Source: {MDALL_SOURCE_LABEL}{searchMeta?.lastRefreshAt ? ` · MDALL last refreshed ${displayDate(searchMeta.lastRefreshAt)}` : retrievedAt ? ` · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : ""} · activity uses first-issued and end dates, not snapshot change detection</small>
       </section>
