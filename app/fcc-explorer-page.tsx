@@ -62,7 +62,7 @@ const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "source", label: "Source", hint: "Authoritative regulatory source" },
   { key: "open", label: "Open record", hint: "Direct public page for this FCC ID" },
 ];
-const DEFAULT_COLUMNS: ColumnKey[] = ["fccId", "grantee", "authorizationDate", "purpose", "open"];
+const DEFAULT_COLUMNS: ColumnKey[] = ["fccId", "grantee", "granteeCode", "authorizationDate", "purpose", "location", "source", "open"];
 const PAGE_SIZES = [10, 25, 50, 100];
 
 function initialState() {
@@ -149,7 +149,15 @@ export default function FccExplorerPage() {
     if (!saved) return DEFAULT_COLUMNS;
     try {
       const parsed = (JSON.parse(saved) as ColumnKey[]).filter((key) => COLUMN_OPTIONS.some((option) => option.key === key));
-      return parsed.length ? parsed : DEFAULT_COLUMNS;
+      if (!parsed.length) return DEFAULT_COLUMNS;
+      const shortened = parsed.filter((key) => key !== "open");
+      const looksLikeReplacedDefault = shortened.length === 4
+        && shortened[0] === "fccId"
+        && shortened[1] === "grantee"
+        && shortened[2] === "authorizationDate"
+        && shortened[3] === "purpose";
+      if (looksLikeReplacedDefault) return DEFAULT_COLUMNS;
+      return parsed.includes("open") ? parsed : [...parsed, "open"];
     } catch {
       return DEFAULT_COLUMNS;
     }
