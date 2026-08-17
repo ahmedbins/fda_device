@@ -44,7 +44,7 @@ import {
 import { fccPublicRecordUrl } from "./fcc-index";
 import { clearFccCache, fetchFccExhibits, importOfficialFccResponse, searchFcc } from "./fcc-service";
 import { downloadExcel, type ExcelColumn, type ExcelValue } from "./excel-export";
-import { ExportDialog, loadExportToggles, saveExportToggles } from "./export-dialog";
+import { ExportDialog, asExportLink, defaultExportFilename, loadExportSettings, sanitizeExportFilename, saveExportSettings } from "./export-dialog";
 
 type SortKey = "date-desc" | "date-asc" | "fcc-id" | "grantee";
 type ColumnKey = "fccId" | "grantee" | "granteeCode" | "authorizationDate" | "purpose" | "description" | "equipmentClass" | "rf" | "location" | "source" | "open";
@@ -66,15 +66,41 @@ const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
 const DEFAULT_COLUMNS: ColumnKey[] = ["fccId", "grantee", "granteeCode", "authorizationDate", "purpose", "location", "source", "open"];
 const PAGE_SIZES = [10, 25, 50, 100];
 const FCC_EXPORT_TOGGLES = [
-  { id: "identity", label: "Identity", hint: "FCC ID, grantee and codes", required: true },
-  { id: "authorization", label: "Authorization", hint: "Grant date and application purpose" },
-  { id: "equipment", label: "Equipment", hint: "Description, class and RF" },
-  { id: "location", label: "Location", hint: "Grantee city, state and country" },
-  { id: "links", label: "Public links", hint: "Clickable FCC ID page" },
-  { id: "exhibits", label: "Exhibits", hint: "Document names, types and first PDF link" },
-  { id: "source", label: "Source details", hint: "Provenance and retrieval time" },
+  { id: "fccId", label: "FCC ID", required: true },
+  { id: "grantee", label: "Grantee" },
+  { id: "granteeCode", label: "Grantee code" },
+  { id: "productCode", label: "Product code" },
+  { id: "authorizationDate", label: "Authorization date" },
+  { id: "activity", label: "Activity category" },
+  { id: "purpose", label: "FCC-reported purpose" },
+  { id: "description", label: "Equipment description" },
+  { id: "equipmentClass", label: "Equipment class" },
+  { id: "rf", label: "RF characteristics" },
+  { id: "location", label: "Grantee location" },
+  { id: "publicLink", label: "Public FCC ID page" },
+  { id: "exhibitCount", label: "Exhibit count" },
+  { id: "exhibitTypes", label: "Exhibit types" },
+  { id: "exhibitNames", label: "Exhibit document names" },
+  { id: "firstExhibit", label: "First exhibit link" },
+  { id: "confidential", label: "Confidential / metadata-only" },
+  { id: "source", label: "Source" },
+  { id: "sourceMode", label: "Source mode" },
+  { id: "retrievedAt", label: "Retrieved at" },
 ];
-const DEFAULT_FCC_EXPORT = ["identity", "authorization", "equipment", "location", "links", "exhibits"];
+const DEFAULT_FCC_EXPORT = ["fccId", "grantee", "granteeCode", "authorizationDate", "purpose", "location", "publicLink", "exhibitCount", "exhibitTypes", "exhibitNames", "firstExhibit"];
+const FCC_VISIBLE_TO_EXPORT: Partial<Record<ColumnKey, string[]>> = {
+  fccId: ["fccId"],
+  grantee: ["grantee"],
+  granteeCode: ["granteeCode"],
+  authorizationDate: ["authorizationDate"],
+  purpose: ["purpose", "activity"],
+  description: ["description"],
+  equipmentClass: ["equipmentClass"],
+  rf: ["rf"],
+  location: ["location"],
+  open: ["publicLink"],
+  source: ["source"],
+};
 
 function initialState() {
   const preset = getFccPreset(DEFAULT_FCC_PRESET);
@@ -147,7 +173,13 @@ export default function FccExplorerPage() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportToggles, setExportToggles] = useState<string[]>(() => loadExportToggles("fcc-excel-export", DEFAULT_FCC_EXPORT));
+  const [exportOptions, setExportOptions] = useState(() => loadExportSettings("fcc-excel-export", {
+    groups: DEFAULT_FCC_EXPORT,
+    scope: "all",
+    unique: false,
+    clickableLinks: true,
+    filename: "",
+  }));
   const [error, setError] = useState("");
   const [coverageNote, setCoverageNote] = useState("");
   const [importText, setImportText] = useState("");
@@ -292,49 +324,60 @@ export default function FccExplorerPage() {
   };
 
   const exportWorkbook = async () => {
-    const include = new Set(exportToggles.includes("identity") ? exportToggles : ["identity", ...exportToggles]);
-    saveExportToggles("fcc-excel-export", [...include]);
+    const include = new Set(exportOptions.groups.includes("fccId") ? exportOptions.groups : ["fccId", ...exportOptions.groups]);
+    const filename = sanitizeExportFilename(exportOptions.filename, defaultExportFilename("fcc-authorizations"));
+    saveExportSettings("fcc-excel-export", { ...exportOptions, groups: [...include], filename });
     setExporting(true);
     try {
+      const sourceRows = exportOptions.scope === "page" ? visibleRecords : filteredRecords;
+      const rowsToExport = exportOptions.unique
+        ? [...sourceRows.reduce((map, record) => {
+          const current = map.get(record.fccId);
+          if (!current || (record.authorizationDate || "") > (current.authorizationDate || "")) map.set(record.fccId, record);
+          return map;
+        }, new Map<string, NormalizedFccRecord>()).values()]
+        : sourceRows;
+      const wantExhibits = ["exhibitCount", "exhibitTypes", "exhibitNames", "firstExhibit", "confidential"].some((id) => include.has(id));
       const exhibitsById = new Map<string, NonNullable<NormalizedFccRecord["exhibits"]>>();
-      if (include.has("exhibits")) {
-        const uniqueIds = [...new Set(filteredRecords.map((record) => record.fccId))].slice(0, 40);
+      if (wantExhibits) {
+        const uniqueIds = [...new Set(rowsToExport.map((record) => record.fccId))].slice(0, 40);
         for (const fccId of uniqueIds) {
-          const cached = filteredRecords.find((record) => record.fccId === fccId && record.exhibits?.length)?.exhibits || [];
+          const cached = rowsToExport.find((record) => record.fccId === fccId && record.exhibits?.length)?.exhibits || [];
           exhibitsById.set(fccId, cached.length ? cached : await fetchFccExhibits(fccId).catch(() => []));
         }
       }
-      const fields: { group: string; column: ExcelColumn; value: (record: NormalizedFccRecord) => ExcelValue }[] = [
-        { group: "identity", column: { header: "FCC ID", width: 16 }, value: (record) => record.fccId },
-        { group: "identity", column: { header: "Grantee", width: 28 }, value: (record) => record.granteeName || "" },
-        { group: "identity", column: { header: "Grantee code", width: 14 }, value: (record) => record.granteeCode || "" },
-        { group: "identity", column: { header: "Product code", width: 16 }, value: (record) => record.fccProductCode || "" },
-        { group: "authorization", column: { header: "Authorization date", type: "date", width: 16 }, value: (record) => record.authorizationDate || "" },
-        { group: "authorization", column: { header: "Activity category", width: 24 }, value: (record) => record.purposeCategory || "" },
-        { group: "authorization", column: { header: "FCC-reported purpose", width: 26 }, value: (record) => record.applicationPurpose || "" },
-        { group: "equipment", column: { header: "Equipment description", width: 36 }, value: (record) => record.equipmentDescription || "" },
-        { group: "equipment", column: { header: "Equipment class", width: 28 }, value: (record) => (record.equipmentClasses || []).join("; ") },
-        { group: "equipment", column: { header: "RF characteristics", width: 28 }, value: (record) => formatFccRfBands(record.rfBands) },
-        { group: "location", column: { header: "Grantee location", width: 22 }, value: (record) => fccLocation(record) === "—" ? "" : fccLocation(record) },
-        { group: "links", column: { header: "Public FCC ID page", type: "link", width: 22 }, value: (record) => ({ text: record.fccId, url: fccPublicRecordUrl(record.fccId) }) },
-        { group: "exhibits", column: { header: "Exhibit count", type: "number", width: 14 }, value: (record) => (exhibitsById.get(record.fccId) || record.exhibits || []).length },
-        { group: "exhibits", column: { header: "Exhibit types", width: 32 }, value: (record) => [...new Set((exhibitsById.get(record.fccId) || record.exhibits || []).map((exhibit) => exhibit.exhibitType))].join("; ") },
-        { group: "exhibits", column: { header: "Exhibit documents", width: 42 }, value: (record) => (exhibitsById.get(record.fccId) || record.exhibits || []).map((exhibit) => exhibit.name).join("; ") },
-        { group: "exhibits", column: { header: "First exhibit", type: "link", width: 22 }, value: (record) => {
+      const link = (text: string, url: string) => asExportLink(text, url, exportOptions.clickableLinks);
+      const fields: { id: string; column: ExcelColumn; value: (record: NormalizedFccRecord) => ExcelValue }[] = [
+        { id: "fccId", column: { header: "FCC ID", width: 16 }, value: (record) => record.fccId },
+        { id: "grantee", column: { header: "Grantee", width: 28 }, value: (record) => record.granteeName || "" },
+        { id: "granteeCode", column: { header: "Grantee code", width: 14 }, value: (record) => record.granteeCode || "" },
+        { id: "productCode", column: { header: "Product code", width: 16 }, value: (record) => record.fccProductCode || "" },
+        { id: "authorizationDate", column: { header: "Authorization date", type: "date", width: 16 }, value: (record) => record.authorizationDate || "" },
+        { id: "activity", column: { header: "Activity category", width: 24 }, value: (record) => record.purposeCategory || "" },
+        { id: "purpose", column: { header: "FCC-reported purpose", width: 26 }, value: (record) => record.applicationPurpose || "" },
+        { id: "description", column: { header: "Equipment description", width: 36 }, value: (record) => record.equipmentDescription || "" },
+        { id: "equipmentClass", column: { header: "Equipment class", width: 28 }, value: (record) => (record.equipmentClasses || []).join("; ") },
+        { id: "rf", column: { header: "RF characteristics", width: 28 }, value: (record) => formatFccRfBands(record.rfBands) },
+        { id: "location", column: { header: "Grantee location", width: 22 }, value: (record) => fccLocation(record) === "—" ? "" : fccLocation(record) },
+        { id: "publicLink", column: { header: "Public FCC ID page", type: exportOptions.clickableLinks ? "link" : "text", width: 22 }, value: (record) => link(record.fccId, fccPublicRecordUrl(record.fccId)) },
+        { id: "exhibitCount", column: { header: "Exhibit count", type: "number", width: 14 }, value: (record) => (exhibitsById.get(record.fccId) || record.exhibits || []).length },
+        { id: "exhibitTypes", column: { header: "Exhibit types", width: 32 }, value: (record) => [...new Set((exhibitsById.get(record.fccId) || record.exhibits || []).map((exhibit) => exhibit.exhibitType))].join("; ") },
+        { id: "exhibitNames", column: { header: "Exhibit document names", width: 42 }, value: (record) => (exhibitsById.get(record.fccId) || record.exhibits || []).map((exhibit) => exhibit.name).join("; ") },
+        { id: "firstExhibit", column: { header: "First exhibit", type: exportOptions.clickableLinks ? "link" : "text", width: 22 }, value: (record) => {
           const firstPublic = (exhibitsById.get(record.fccId) || record.exhibits || []).find((exhibit) => exhibit.url && !/metadata only/i.test(exhibit.confidentiality || ""));
-          return firstPublic?.url ? { text: firstPublic.name, url: firstPublic.url } : "";
+          return firstPublic?.url ? link(firstPublic.name, firstPublic.url) : "";
         } },
-        { group: "exhibits", column: { header: "Confidential / metadata-only", width: 24 }, value: (record) => (exhibitsById.get(record.fccId) || record.exhibits || []).filter((exhibit) => exhibit.confidentiality).map((exhibit) => `${exhibit.name}: ${exhibit.confidentiality}`).join("; ") },
-        { group: "source", column: { header: "Source", width: 14 }, value: () => "FCC" },
-        { group: "source", column: { header: "Source mode", width: 16 }, value: (record) => record.sourceMode || "" },
-        { group: "source", column: { header: "Retrieved at", width: 22 }, value: (record) => record.retrievedAt },
+        { id: "confidential", column: { header: "Confidential / metadata-only", width: 24 }, value: (record) => (exhibitsById.get(record.fccId) || record.exhibits || []).filter((exhibit) => exhibit.confidentiality).map((exhibit) => `${exhibit.name}: ${exhibit.confidentiality}`).join("; ") },
+        { id: "source", column: { header: "Source", width: 14 }, value: () => "FCC" },
+        { id: "sourceMode", column: { header: "Source mode", width: 16 }, value: (record) => record.sourceMode || "" },
+        { id: "retrievedAt", column: { header: "Retrieved at", width: 22 }, value: (record) => record.retrievedAt },
       ];
-      const selectedFields = fields.filter((field) => include.has(field.group));
+      const selectedFields = fields.filter((field) => include.has(field.id));
       downloadExcel({
-        filename: `fcc-authorizations-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        filename,
         sheetName: "FCC authorizations",
         columns: selectedFields.map((field) => field.column),
-        rows: filteredRecords.map((record) => selectedFields.map((field) => field.value(record))),
+        rows: rowsToExport.map((record) => selectedFields.map((field) => field.value(record))),
       });
       setExportOpen(false);
     } finally {
@@ -466,7 +509,7 @@ export default function FccExplorerPage() {
               {resultView === "records" && <label className="page-size">Rows <select value={pageSize} onChange={(event) => { const next = Number(event.target.value); setPageSize(next); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, next, resultView, presetId); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>}
               <button className="icon-button" onClick={copyLink} aria-label="Copy shareable FCC URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
               <button className="icon-button" onClick={() => runSearch(true)} disabled={!effectiveScopes.length || loading} aria-label="Refresh FCC results" title="Refresh"><RefreshCw className={loading ? "spin" : ""} size={16} /></button>
-              <button className="secondary export-button" onClick={() => setExportOpen(true)} disabled={!filteredRecords.length || exporting}><ArrowDownToLine size={14} /> Excel</button>
+              <button className="secondary export-button" onClick={() => { setExportOptions((current) => ({ ...current, filename: current.filename || defaultExportFilename("fcc-authorizations") })); setExportOpen(true); }} disabled={!filteredRecords.length || exporting}><ArrowDownToLine size={14} /> Excel</button>
               <button className="icon-button filter-toggle" onClick={() => setFiltersOpen(true)} aria-label="Open filters"><Filter size={17} /></button>
             </div>
           </div>
@@ -522,12 +565,28 @@ export default function FccExplorerPage() {
       <ExportDialog
         open={exportOpen}
         title="Pack this workbook."
-        countLabel={`${filteredRecords.length.toLocaleString()} authorization record${filteredRecords.length === 1 ? "" : "s"} will be included.`}
-        note={exportToggles.includes("exhibits") ? "Exhibit details are fetched for up to 40 FCC IDs and added as extra columns." : undefined}
+        countLabel={exportOptions.unique ? "Latest grant per FCC ID." : "Each authorization event is a row."}
+        note={["exhibitCount", "exhibitTypes", "exhibitNames", "firstExhibit", "confidential"].some((id) => exportOptions.groups.includes(id)) ? "Exhibit lookups run for up to 40 FCC IDs." : undefined}
         toggles={FCC_EXPORT_TOGGLES}
-        selected={exportToggles}
+        selected={exportOptions.groups}
         confirming={exporting}
-        onChange={setExportToggles}
+        filename={exportOptions.filename}
+        scope={exportOptions.scope}
+        unique={exportOptions.unique}
+        uniqueLabel="One row per FCC ID, using the newest grant date"
+        clickableLinks={exportOptions.clickableLinks}
+        pageCount={visibleRecords.length}
+        allCount={filteredRecords.length}
+        filters={[query, ...scopes, from && `From ${from}`, to && `To ${to}`, purpose].filter(Boolean) as string[]}
+        onFilename={(filename) => setExportOptions((current) => ({ ...current, filename }))}
+        onScope={(scope) => setExportOptions((current) => ({ ...current, scope }))}
+        onUnique={(unique) => setExportOptions((current) => ({ ...current, unique }))}
+        onClickableLinks={(clickableLinks) => setExportOptions((current) => ({ ...current, clickableLinks }))}
+        onChange={(groups) => setExportOptions((current) => ({ ...current, groups }))}
+        onUseVisible={() => setExportOptions((current) => ({
+          ...current,
+          groups: ["fccId", ...columns.flatMap((column) => FCC_VISIBLE_TO_EXPORT[column] || [])],
+        }))}
         onCancel={() => !exporting && setExportOpen(false)}
         onConfirm={() => void exportWorkbook()}
       />
