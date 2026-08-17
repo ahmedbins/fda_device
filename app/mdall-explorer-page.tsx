@@ -421,9 +421,11 @@ export default function MdallExplorerPage() {
             <h2 className="fcc-drawer-id">{selected.licenceNumber}</h2>
             <p><PackageSearch size={15} /> {selected.licenceName}</p>
             <p><MapPin size={15} /> {mdallLocation(selected.company)}</p>
-            <a className="primary official-record-link" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL search <ExternalLink size={14} /></a>
-            <a className="secondary official-record-link" href={MDALL_DOCS_URL} target="_blank" rel="noreferrer">MDALL API documentation <ExternalLink size={14} /></a>
-            <button className="secondary copy-id" onClick={async () => { await navigator.clipboard.writeText(String(selected.licenceNumber)); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); }}>{idCopied ? <Check size={14} /> : <Clipboard size={14} />} {idCopied ? "Copied" : "Copy licence number"}</button>
+            <div className="drawer-actions">
+              <a className="secondary" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL search <ExternalLink size={14} /></a>
+              <a className="secondary" href={MDALL_DOCS_URL} target="_blank" rel="noreferrer">MDALL API documentation <ExternalLink size={14} /></a>
+              <button className="secondary" type="button" onClick={async () => { await navigator.clipboard.writeText(String(selected.licenceNumber)); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); }}>{idCopied ? <Check size={14} /> : <Clipboard size={14} />} {idCopied ? "Copied" : "Copy licence number"}</button>
+            </div>
           </div>
           <div className="detail-stats"><div><span>First issued</span><b>{displayDate(selected.issuedAt)}</b></div><div><span>Risk class</span><b>{selected.riskClassLabel}</b></div><div><span>Status</span><b>{selected.licenceStatusLabel}</b></div></div>
           <section className="detail-section"><h3><Landmark size={16} /> Licence</h3><dl className="fcc-detail-list"><div><dt>Licence number <small>MDALL source</small></dt><dd>{selected.licenceNumber}</dd></div><div><dt>Licence name <small>MDALL source</small></dt><dd>{selected.licenceName}</dd></div><div><dt>Licence type</dt><dd>{selected.licenceType || "—"}</dd></div><div><dt>Status</dt><dd>{selected.licenceStatusLabel} ({selected.licenceStatus || "—"})</dd></div><div><dt>Risk class</dt><dd>{selected.riskClassLabel}</dd></div><div><dt>First issued</dt><dd>{displayDate(selected.issuedAt)}</dd></div><div><dt>End date</dt><dd>{displayDate(selected.endDate)}</dd></div></dl></section>
