@@ -38,6 +38,7 @@ import {
 } from "./fda-shared";
 import SourceNav from "./source-nav";
 import { downloadExcel } from "./excel-export";
+import { ExportDialog, loadExportToggles, saveExportToggles } from "./export-dialog";
 
 type MatrixRow = {
   key: string;
@@ -307,6 +308,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RecordItem | null>(null);
   const [exportProgress, setExportProgress] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportAllColumns, setExportAllColumns] = useState(() => loadExportToggles("fda-excel-export", ["visible"]).includes("all"));
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [datasetUpdated, setDatasetUpdated] = useState("");
   const [datasetTotal, setDatasetTotal] = useState(0);
@@ -584,6 +587,7 @@ export default function Home() {
 
   const exportCsv = async () => {
     if (!total || exportProgress) return;
+    saveExportToggles("fda-excel-export", [exportAllColumns ? "all" : "visible"]);
     setError("");
     try {
       const all = await fetchAllMatching();
@@ -611,12 +615,13 @@ export default function Home() {
           countries: row.countries.join("; "),
           latestListing: row.latestListing,
         })[column];
+        const exportColumns = exportAllColumns ? MATRIX_COLUMN_OPTIONS.map((option) => option.key) : matrixColumns;
         const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
-          .map((row) => matrixColumns.map((column) => value(row, column)));
+          .map((row) => exportColumns.map((column) => value(row, column)));
         downloadExcel({
           filename: `fda-devices-matrix-${codesPart}-${stamp}.xlsx`,
           sheetName: "Company + devices",
-          columns: matrixColumns.map((column) => ({ header: labels[column], width: 22 })),
+          columns: exportColumns.map((column) => ({ header: labels[column], width: 22 })),
           rows,
         });
       } else {
@@ -643,15 +648,17 @@ export default function Home() {
             registrationNumber: item.registration?.registration_number,
             feiNumber: item.registration?.fei_number,
           };
-          return recordColumns.map((column) => values[column]);
+          return (exportAllColumns ? RECORD_COLUMN_OPTIONS.map((option) => option.key) : recordColumns).map((column) => values[column]);
         });
+        const exportColumns = exportAllColumns ? RECORD_COLUMN_OPTIONS.map((option) => option.key) : recordColumns;
         downloadExcel({
           filename: `fda-devices-${codesPart}-${stamp}.xlsx`,
           sheetName: "FDA records",
-          columns: recordColumns.map((column) => ({ header: labels[column], width: 22 })),
+          columns: exportColumns.map((column) => ({ header: labels[column], width: 22 })),
           rows,
         });
       }
+      setExportOpen(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The export could not be completed.");
     } finally {
@@ -872,7 +879,7 @@ export default function Home() {
               {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}><option>25</option><option>50</option><option>100</option></select></label>}
               <button
                 className="secondary export-button"
-                onClick={exportCsv}
+                onClick={() => setExportOpen(true)}
                 disabled={!total || loading || !!exportProgress}
                 title={total > EXPORT_CAP ? `Exports the first ${EXPORT_CAP.toLocaleString()} matching records (openFDA limit)` : "Download matching records as Excel"}
               >
@@ -1039,6 +1046,22 @@ export default function Home() {
           </aside>
         </div>
       )}
+
+      <ExportDialog
+        open={exportOpen}
+        title="Pack this workbook."
+        countLabel={`${exportCount.toLocaleString()} matching record${exportCount === 1 ? "" : "s"} will be included.`}
+        note={viewMode === "matrix" ? "The export uses the current company + devices view." : "The export uses the current records view."}
+        toggles={[
+          { id: "visible", label: "Visible table columns", hint: "Match the columns currently shown" },
+          { id: "all", label: "All available columns", hint: "Include hidden table fields too" },
+        ]}
+        selected={exportAllColumns ? ["all"] : ["visible"]}
+        confirming={!!exportProgress}
+        onChange={(next) => setExportAllColumns(next[next.length - 1] === "all")}
+        onCancel={() => !exportProgress && setExportOpen(false)}
+        onConfirm={() => void exportCsv()}
+      />
     </main>
   );
 }

@@ -411,6 +411,21 @@ td > span:not(.code-pill):not(.class-badge) { display: block; max-width: 280px; 
 .exhibit-link { display: inline; }
 .open-record-button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px; border: 1px solid #9cc7db; border-radius: 14px; background: #eef6fb; color: #0b5f8a; text-decoration: none; font: 700 10px var(--font-roboto), sans-serif; letter-spacing: .02em; white-space: nowrap; }
 .open-record-button:hover { background: #d7eef8; border-color: var(--coral); }
+.export-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: rgba(4,18,28,.46); backdrop-filter: blur(3px); }
+.export-card { width: min(440px, 100%); overflow: hidden; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 60px rgba(22,54,105,.22); }
+.export-card-top { min-height: 52px; padding: 0 16px 0 18px; display: flex; align-items: center; justify-content: space-between; background: var(--white); border-bottom: 1px solid var(--line); }
+.export-card-top > span { display: inline-flex; align-items: center; gap: 8px; color: var(--coral); font: 650 11px var(--font-roboto), sans-serif; letter-spacing: .04em; }
+.export-card-body { padding: 22px 22px 8px; }
+.export-card-body h2 { margin: 0; font: 600 22px/1.1 var(--font-roboto), sans-serif; letter-spacing: -.03em; }
+.export-count { margin: 8px 0 18px; color: var(--muted); font-size: 12px; }
+.export-toggles { display: grid; gap: 4px; }
+.export-toggles label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+.export-toggles label:hover { background: #f2f7f9; }
+.export-toggles input { width: 15px; height: 15px; margin-top: 1px; accent-color: var(--coral); }
+.export-toggles b { display: block; font-size: 12px; }
+.export-toggles small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.export-note { margin: 12px 10px 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+.export-card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 16px 22px 20px; }
 .event-type { display: inline-block; padding: 4px 8px; border-radius: 10px; white-space: nowrap; font: 600 9px var(--font-roboto), sans-serif; }
 .evt-malfunction { color: #775828; background: #f2e8cc; }
 .evt-injury { color: #8e3c2b; background: #f7ded8; }
