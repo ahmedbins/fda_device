@@ -13,6 +13,7 @@ import {
   type RawFccRecord,
 } from "./fcc-core";
 import { FCC_OFFICIAL_SNAPSHOT } from "./fcc-official-snapshot";
+import { FCC_OFFICIAL_GRANTS } from "./fcc-official-grants";
 
 const CACHE_MS = 5 * 60 * 1000;
 type ScopeResult = { records: NormalizedFccRecord[]; resolved: boolean; sourceMode?: "live" | "official_snapshot" };
@@ -22,13 +23,25 @@ const inflight = new Map<string, Promise<ScopeResult>>();
 let directBrowserSupport: boolean | null = null;
 const confirmedCodes = FCC_OFFICIAL_SNAPSHOT.scopes.map((scope) => scope.scope);
 
+function applyOfficialGrantFields(record: NormalizedFccRecord): NormalizedFccRecord {
+  const extra = FCC_OFFICIAL_GRANTS[record.fccId];
+  if (!extra) return record;
+  return {
+    ...record,
+    equipmentClasses: extra.equipmentClasses.length ? extra.equipmentClasses : record.equipmentClasses,
+    equipmentDescription: extra.descriptions[0] || record.equipmentDescription,
+    rfBands: extra.bands.length ? extra.bands : record.rfBands,
+  };
+}
+
 const snapshotRecords = (FCC_OFFICIAL_SNAPSHOT.records as readonly RawFccRecord[])
   .map((raw) => normalizeFccRecord(raw, FCC_OFFICIAL_SNAPSHOT.capturedAt, {
     confirmedCodes,
     sourceMode: "official_snapshot",
     snapshotCapturedAt: FCC_OFFICIAL_SNAPSHOT.capturedAt,
   }))
-  .filter((record): record is NormalizedFccRecord => record !== null);
+  .filter((record): record is NormalizedFccRecord => record !== null)
+  .map(applyOfficialGrantFields);
 
 function requestSignal(signal?: AbortSignal) {
   const controller = new AbortController();
@@ -174,7 +187,7 @@ export async function searchFcc(scopes: string[], signal?: AbortSignal): Promise
   const normalizedScopes = scopes.map(normalizeFccScope);
   const resolvedScopes = normalizedScopes.filter((_, index) => batches[index].resolved);
   const unresolvedScopes = normalizedScopes.filter((_, index) => !batches[index].resolved);
-  const records = uniqueFccRecords(batches.flatMap((batch) => batch.records));
+  const records = uniqueFccRecords(batches.flatMap((batch) => batch.records)).map(applyOfficialGrantFields);
   const grantees = await fetchGranteeRegistrations(normalizedScopes, signal);
   const modes = new Set(batches.map((batch) => batch.sourceMode).filter(Boolean));
   const sourceMode: FccSearchResult["sourceMode"] = unresolvedScopes.length && !records.length
@@ -198,7 +211,8 @@ export function importOfficialFccResponse(body: string, scopes: string[] = []): 
   const payload = parseFccPayload(body);
   return uniqueFccRecords(extractRawFccRecords(payload)
     .map((raw) => normalizeFccRecord(raw, importedAt, { confirmedCodes: [...confirmedCodes, ...scopes], sourceMode: "official_import" }))
-    .filter((record): record is NormalizedFccRecord => record !== null));
+    .filter((record): record is NormalizedFccRecord => record !== null)
+    .map(applyOfficialGrantFields));
 }
 
 export function clearFccCache(scopes?: string[]) {

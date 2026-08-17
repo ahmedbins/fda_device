@@ -6,12 +6,22 @@ export const FCC_GRANTEE_DATASET = "https://opendata.fcc.gov/Engineering-Technol
 
 export type RawFccRecord = Record<string, unknown>;
 
+export type FccRfBand = {
+  lowMhz: string;
+  highMhz: string;
+  outputWatts?: string;
+  ruleParts?: string;
+};
+
 export type NormalizedFccRecord = {
   source: "FCC";
   fccId: string;
   granteeCode?: string;
   fccProductCode?: string;
   granteeName?: string;
+  equipmentDescription?: string;
+  equipmentClasses?: string[];
+  rfBands?: FccRfBand[];
   authorizationDate?: string;
   applicationPurpose?: string;
   purposeCategory?: "Original authorization" | "Class II permissive change" | "Change in FCC ID" | "Other authorization activity";
@@ -218,6 +228,18 @@ export function normalizeFccRecord(raw: RawFccRecord, retrievedAt: string, optio
 
 export function fccLocation(record: NormalizedFccRecord) {
   return [record.city, record.state, record.country].map(cleanFccDisplayValue).filter(Boolean).join(", ") || "—";
+}
+
+export function formatFccRfBands(bands?: FccRfBand[]) {
+  if (!bands?.length) return "";
+  return bands.map((band) => {
+    const range = band.lowMhz === band.highMhz ? `${band.lowMhz} MHz` : `${band.lowMhz}–${band.highMhz} MHz`;
+    const extras = [
+      band.outputWatts ? `${band.outputWatts} W` : "",
+      band.ruleParts || "",
+    ].filter(Boolean);
+    return extras.length ? `${range} (${extras.join(", ")})` : range;
+  }).join("; ");
 }
 
 export function uniqueFccRecords(records: NormalizedFccRecord[]) {

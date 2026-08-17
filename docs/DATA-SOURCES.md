@@ -37,6 +37,7 @@ Official documentation: [openFDA device APIs](https://open.fda.gov/apis/device/)
 - Endpoint: `https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId={scope}`
 - Used by: FCC Explorer and FCC Monitoring
 - Implemented source fields: FCC ID, grant date, grantee, application purpose, address, city, state, country and postal code.
+- Equipment description, equipment class and RF characteristics are not in this endpoint. Those fields come from official FCC ID Search results and Grant of Equipment Authorization pages, stored in `app/fcc-official-grants.ts` for covered IDs.
 
 The endpoint accepts a complete FCC ID or an initial prefix. It returns XML in a normal browser. FCC/Akamai policies and browser CORS rules can block automated server-side or embedded requests even while the same URL works when opened directly. An FCC account is not required for this endpoint, and geographic location is not the cause of that request-mode difference.
 

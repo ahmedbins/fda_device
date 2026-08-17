@@ -33,6 +33,7 @@ import {
   fccLocation,
   fccOfficialIdParts,
   fccSourcePresentation,
+  formatFccRfBands,
   groupFccRecordsByGrantee,
   normalizeFccScope,
   parseFccScopes,
@@ -44,7 +45,7 @@ import { clearFccCache, importOfficialFccResponse, searchFcc } from "./fcc-servi
 import { downloadCsv } from "./fda-shared";
 
 type SortKey = "date-desc" | "date-asc" | "fcc-id" | "grantee";
-type ColumnKey = "fccId" | "grantee" | "granteeCode" | "authorizationDate" | "purpose" | "location" | "source";
+type ColumnKey = "fccId" | "grantee" | "granteeCode" | "authorizationDate" | "purpose" | "description" | "equipmentClass" | "rf" | "location" | "source";
 type ResultView = "records" | "grantees";
 
 const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
@@ -53,6 +54,9 @@ const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "granteeCode", label: "Grantee code", hint: "Derived from a confirmed FCC grantee scope" },
   { key: "authorizationDate", label: "Authorization date", hint: "FCC grant date" },
   { key: "purpose", label: "Application purpose", hint: "FCC-reported application purpose" },
+  { key: "description", label: "Equipment description", hint: "Official FCC grant notes" },
+  { key: "equipmentClass", label: "Equipment class", hint: "Official FCC grant equipment class" },
+  { key: "rf", label: "RF characteristics", hint: "Official EAS frequency range" },
   { key: "location", label: "Grantee location", hint: "FCC-reported city, state and country" },
   { key: "source", label: "Source", hint: "Authoritative regulatory source" },
 ];
@@ -263,6 +267,9 @@ export default function FccExplorerPage() {
       record.authorizationDate || "",
       record.purposeCategory || "",
       record.applicationPurpose || "",
+      record.equipmentDescription || "",
+      (record.equipmentClasses || []).join("; "),
+      formatFccRfBands(record.rfBands),
       fccLocation(record) === "—" ? "" : fccLocation(record),
       "FCC",
       record.sourceMode || "",
@@ -270,7 +277,7 @@ export default function FccExplorerPage() {
       record.retrievedAt,
     ]);
     downloadCsv([
-      ["fcc_id", "fcc_grantee", "fcc_grantee_code_derived_from_confirmed_scope", "fcc_product_code_component_derived", "fcc_authorization_date", "normalized_activity_category", "fcc_reported_application_purpose", "fcc_grantee_location", "source", "source_mode", "snapshot_captured_at", "retrieved_at"],
+      ["fcc_id", "fcc_grantee", "fcc_grantee_code_derived_from_confirmed_scope", "fcc_product_code_component_derived", "fcc_authorization_date", "normalized_activity_category", "fcc_reported_application_purpose", "fcc_grant_equipment_description", "fcc_grant_equipment_class", "fcc_eas_frequency_mhz", "fcc_grantee_location", "source", "source_mode", "snapshot_captured_at", "retrieved_at"],
       ...rows,
     ], `fcc-authorizations-${new Date().toISOString().slice(0, 10)}.csv`);
   };
@@ -285,6 +292,9 @@ export default function FccExplorerPage() {
     if (column === "granteeCode") return <span className="source-cell">{record.granteeCode || "—"}</span>;
     if (column === "authorizationDate") return <span className="date-cell">{displayDate(record.authorizationDate)}</span>;
     if (column === "purpose") return <span className="cell-list">{record.applicationPurpose || "—"}</span>;
+    if (column === "description") return <span className="cell-list">{record.equipmentDescription || "—"}</span>;
+    if (column === "equipmentClass") return <span className="cell-list">{record.equipmentClasses?.join("; ") || "—"}</span>;
+    if (column === "rf") return <span className="cell-list">{formatFccRfBands(record.rfBands) || "—"}</span>;
     if (column === "location") return <span className="cell-list">{fccLocation(record)}</span>;
     return <span className="source-cell">FCC EAS</span>;
   };
@@ -363,7 +373,7 @@ export default function FccExplorerPage() {
             <label className="field"><span>To grant date</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           </div>
           <label className="field"><span>Authorization activity</span><select value={purpose} onChange={(event) => { setPurpose(event.target.value); setPage(0); }}><option value="">All FCC-reported purposes</option><option>Original authorization</option><option>Class II permissive change</option><option>Change in FCC ID</option><option>Other authorization activity</option></select></label>
-          <small className="field-hint fcc-limit-note">Equipment description, equipment class and RF fields are not returned by the implemented FCC ID service.</small>
+          <small className="field-hint fcc-limit-note">Equipment description, class and RF come from official FCC grants and EAS search results for covered IDs.</small>
 
           <details className="fcc-import">
             <summary><Upload size={14} /> Import official FCC response</summary>
@@ -416,8 +426,8 @@ export default function FccExplorerPage() {
           <div className="drawer-top"><span>FCC AUTHORIZATION DOSSIER</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
           <div className="drawer-hero"><span className="record-id">FCC ID</span><h2 className="fcc-drawer-id">{selected.fccId}</h2><p><MapPin size={15} /> {fccLocation(selected)}</p><button className="secondary copy-id" onClick={async () => { await navigator.clipboard.writeText(selected.fccId); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); }}>{idCopied ? <Check size={14} /> : <Clipboard size={14} />} {idCopied ? "Copied" : "Copy FCC ID"}</button></div>
           <div className="detail-stats"><div><span>Authorization date</span><b>{displayDate(selected.authorizationDate)}</b></div><div><span>Activity category</span><b>{selected.purposeCategory || "—"}</b></div><div><span>History entries</span><b>{selectedHistory.length}</b></div></div>
-          <section className="detail-section"><h3><RadioTower size={16} /> Identity</h3><dl className="fcc-detail-list"><div><dt>FCC ID <small>FCC source</small></dt><dd>{selected.fccId}</dd></div><div><dt>Grantee <small>FCC source</small></dt><dd>{selected.granteeName || "—"}</dd></div><div><dt>Grantee code <small>derived from confirmed FCC scope</small></dt><dd>{selected.granteeCode || "Not available from current FCC source"}</dd></div><div><dt>FCC equipment product-code component <small>derived</small></dt><dd>{selected.fccProductCode || "Not available from current FCC source"}</dd></div><div><dt>Equipment description</dt><dd>Not available from the implemented FCC service</dd></div></dl>{selected.granteeCode && <button className="secondary official-record-link" onClick={() => { setSelected(null); setSelectedGrantee(selected.granteeCode || selected.granteeName || null); }}><Users size={14} /> Open grantee profile</button>}</section>
-          <section className="detail-section"><h3><CalendarDays size={16} /> Authorization</h3><dl className="fcc-detail-list"><div><dt>Grant date <small>FCC source</small></dt><dd>{displayDate(selected.authorizationDate)}</dd></div><div><dt>Normalized activity category <small>derived from FCC purpose</small></dt><dd>{selected.purposeCategory || "—"}</dd></div><div><dt>FCC-reported application purpose</dt><dd>{selected.applicationPurpose || "—"}</dd></div><div><dt>Equipment class / RF characteristics</dt><dd>Not returned by getFCCIDList</dd></div></dl></section>
+          <section className="detail-section"><h3><RadioTower size={16} /> Identity</h3><dl className="fcc-detail-list"><div><dt>FCC ID <small>FCC source</small></dt><dd>{selected.fccId}</dd></div><div><dt>Grantee <small>FCC source</small></dt><dd>{selected.granteeName || "—"}</dd></div><div><dt>Grantee code <small>derived from confirmed FCC scope</small></dt><dd>{selected.granteeCode || "Not available from current FCC source"}</dd></div><div><dt>FCC equipment product-code component <small>derived</small></dt><dd>{selected.fccProductCode || "Not available from current FCC source"}</dd></div><div><dt>Equipment description <small>official FCC grant notes</small></dt><dd>{selected.equipmentDescription || "Not on the official grant snapshot. Open the official FCC ID Search to read the grant notes."}</dd></div></dl>{selected.granteeCode && <button className="secondary official-record-link" onClick={() => { setSelected(null); setSelectedGrantee(selected.granteeCode || selected.granteeName || null); }}><Users size={14} /> Open grantee profile</button>}</section>
+          <section className="detail-section"><h3><CalendarDays size={16} /> Authorization</h3><dl className="fcc-detail-list"><div><dt>Grant date <small>FCC source</small></dt><dd>{displayDate(selected.authorizationDate)}</dd></div><div><dt>Normalized activity category <small>derived from FCC purpose</small></dt><dd>{selected.purposeCategory || "—"}</dd></div><div><dt>FCC-reported application purpose</dt><dd>{selected.applicationPurpose || "—"}</dd></div><div><dt>Equipment class <small>official FCC grant</small></dt><dd>{selected.equipmentClasses?.length ? selected.equipmentClasses.join("; ") : "Not on the official grant snapshot. Open the official FCC ID Search to read the grant."}</dd></div><div><dt>RF characteristics <small>official EAS search / grant</small></dt><dd>{formatFccRfBands(selected.rfBands) || "Not returned by getFCCIDList and not present in the official EAS search snapshot."}</dd></div></dl></section>
           <section className="detail-section"><h3><RefreshCw size={16} /> Authorization history</h3>{selectedHistory.map((record, index) => <div className="history-row" key={`${record.fccId}-${record.authorizationDate}-${index}`}><time>{displayDate(record.authorizationDate)}</time><div><b>{record.purposeCategory || "Authorization activity"}</b><span>FCC-reported purpose: {record.applicationPurpose || "—"}</span></div></div>)}</section>
           <section className="detail-section"><h3><Database size={16} /> Evidence / source</h3><dl className="fcc-detail-list"><div><dt>Regulatory source</dt><dd>{FCC_SOURCE_LABEL}</dd></div><div><dt>Source mode</dt><dd>{selected.sourceMode === "official_snapshot" ? "Official EAS snapshot" : selected.sourceMode === "official_import" ? "Imported official EAS response" : "Live FCC response"}</dd></div>{selected.snapshotCapturedAt && <div><dt>Snapshot captured</dt><dd>{new Date(selected.snapshotCapturedAt).toLocaleString([], dateTimeFormat)}</dd></div>}<div><dt>Loaded in app</dt><dd>{new Date(selected.retrievedAt).toLocaleString([], dateTimeFormat)}</dd></div>{selectedEasParts.granteeCode && <div><dt>Official EAS search fields</dt><dd>Grantee {selectedEasParts.granteeCode}{selectedEasParts.productCode ? ` · product ${selectedEasParts.productCode}` : ""}</dd></div>}</dl><a className="primary official-record-link" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open official FCC ID Search <ExternalLink size={14} /></a><a className="secondary official-record-link" href={selected.sourceUrl} target="_blank" rel="noreferrer">View raw API response <ExternalLink size={14} /></a></section>
           <section className="detail-section raw-section"><details><summary>View raw FCC response <ChevronDown size={15} /></summary><pre>{JSON.stringify(selected.raw, null, 2)}</pre></details></section>

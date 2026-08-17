@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRawFccRecords, normalizeFccRecord, parseFccPayload, uniqueFccRecords } from "../app/fcc-core.ts";
+import { extractRawFccRecords, formatFccRfBands, normalizeFccRecord, parseFccPayload, uniqueFccRecords } from "../app/fcc-core.ts";
 import { FCC_OFFICIAL_SNAPSHOT } from "../app/fcc-official-snapshot.ts";
+import { FCC_OFFICIAL_GRANTS } from "../app/fcc-official-grants.ts";
 
 test("serves confirmed Sonova scopes from the official FCC snapshot", async () => {
   assert.deepEqual(FCC_OFFICIAL_SNAPSHOT.scopes.map((scope) => scope.scope), ["KWC", "2A3UL"]);
@@ -13,6 +14,16 @@ test("serves confirmed Sonova scopes from the official FCC snapshot", async () =
   }));
   assert.ok(records.some((record) => record?.fccId === "2A3ULM5AEBT" && record.authorizationDate === "2026-04-07"));
   assert.ok(records.some((record) => record?.granteeCode === "KWC" && record.granteeName?.includes("Sonova")));
+});
+
+test("attaches official EAS grant description, class and RF to covered FCC IDs", () => {
+  const erf = FCC_OFFICIAL_GRANTS["KWC-ERF"];
+  const m5 = FCC_OFFICIAL_GRANTS["2A3ULM5AEBT"];
+  assert.ok(erf.descriptions.includes("Wireless hearing aid"));
+  assert.ok(erf.equipmentClasses.includes("Part 15 Spread Spectrum Transmitter"));
+  assert.match(formatFccRfBands(erf.bands), /2402\.0–2480\.0 MHz/);
+  assert.equal(m5.equipmentClasses.length, 0);
+  assert.deepEqual(m5.bands[0], { lowMhz: "2402.0", highMhz: "2480.0" });
 });
 
 test("imports an official FCC XML response for an uncovered scope", () => {
