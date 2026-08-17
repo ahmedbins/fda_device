@@ -14,7 +14,7 @@ function isGranteeOnly(fccId) {
 
 async function fetchFcc(fccId, retry = true) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 4000);
   try {
     const response = await fetch(`${FCC_API}?fccId=${encodeURIComponent(fccId)}`, {
       signal: controller.signal,

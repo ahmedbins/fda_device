@@ -6,7 +6,7 @@ const JINA = "https://r.jina.ai/";
 
 async function requestFcc(fccId: string, retry = true): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), 4_000);
   try {
     const response = await fetch(`${FCC_EAS_API}?fccId=${encodeURIComponent(fccId)}`, {
       signal: controller.signal,

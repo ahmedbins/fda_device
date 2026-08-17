@@ -46,7 +46,7 @@ const snapshotRecords = (FCC_OFFICIAL_SNAPSHOT.records as readonly RawFccRecord[
 
 function requestSignal(signal?: AbortSignal) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new DOMException("The FCC request timed out.", "TimeoutError")), 14_000);
+  const timeout = setTimeout(() => controller.abort(new DOMException("The FCC request timed out.", "TimeoutError")), 22_000);
   const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", onAbort, { once: true });
   return {
@@ -224,7 +224,7 @@ export async function searchFcc(scopes: string[], signal?: AbortSignal): Promise
     grantees,
     retrievedAt: new Date().toISOString(),
     sourceMode,
-    snapshotCapturedAt: modes.has("official_snapshot") ? FCC_OFFICIAL_SNAPSHOT.capturedAt : undefined,
+    snapshotCapturedAt: sourceMode === "official_snapshot" || sourceMode === "mixed" ? FCC_OFFICIAL_SNAPSHOT.capturedAt : undefined,
     resolvedScopes,
     unresolvedScopes,
   };
