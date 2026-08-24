@@ -34,24 +34,31 @@ import {
   mdallSearchUrl,
   mdallSourcePresentation,
   parseMdallQuery,
-  type MdallDevice,
   type MdallLicence,
   type MdallLicenceState,
   type MdallSearchMode,
   type MdallSearchResult,
 } from "./mdall-core";
-import { clearMdallCache, fetchMdallDevicesForLicence, searchMdall } from "./mdall-service";
+import {
+  clearMdallCache,
+  fetchMdallDevicesForLicence,
+  fetchMdallDevicesForLicences,
+  mdallDeviceLookupKey,
+  searchMdall,
+  type MdallDeviceLookupOutcome,
+} from "./mdall-service";
 import { downloadExcel, type ExcelColumn, type ExcelValue } from "./excel-export";
 import { ExportDialog, asExportLink, defaultExportFilename, loadExportSettings, sanitizeExportFilename, saveExportSettings } from "./export-dialog";
 
 type SortKey = "date-desc" | "date-asc" | "licence" | "company" | "name";
-type ColumnKey = "licenceNo" | "licenceName" | "company" | "class" | "type" | "status" | "issued" | "endDate" | "open";
+type ColumnKey = "licenceNo" | "licenceName" | "company" | "deviceCount" | "class" | "type" | "status" | "issued" | "endDate" | "open";
 type ResultView = "licences" | "companies";
 
 const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "licenceNo", label: "Licence no.", hint: "Health Canada licence number" },
   { key: "licenceName", label: "Licence name", hint: "MDALL licence name" },
   { key: "company", label: "Company", hint: "MDALL company name" },
+  { key: "deviceCount", label: "Devices", hint: "Active devices linked by original licence number" },
   { key: "class", label: "Risk class", hint: "Health Canada application risk class" },
   { key: "type", label: "Licence type", hint: "Single device, family, system, or group" },
   { key: "status", label: "Status", hint: "MDALL licence status" },
@@ -59,7 +66,7 @@ const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "endDate", label: "End date", hint: "Cancellation or removal date, if any" },
   { key: "open", label: "Open record", hint: "Official Health Canada MDALL search" },
 ];
-const DEFAULT_COLUMNS: ColumnKey[] = ["licenceNo", "licenceName", "company", "class", "status", "issued", "open"];
+const DEFAULT_COLUMNS: ColumnKey[] = ["licenceNo", "licenceName", "company", "deviceCount", "class", "status", "issued", "open"];
 const PAGE_SIZES = [10, 25, 50, 100];
 const MDALL_EXPORT_TOGGLES = [
   { id: "licenceNumber", label: "Licence number", required: true },
@@ -74,6 +81,7 @@ const MDALL_EXPORT_TOGGLES = [
   { id: "company", label: "Company" },
   { id: "location", label: "Company location" },
   { id: "deviceCount", label: "Device count" },
+  { id: "deviceDataStatus", label: "Device data status" },
   { id: "tradeNames", label: "Trade names" },
   { id: "identifiers", label: "Device identifiers" },
   { id: "mdallLink", label: "MDALL search link" },
@@ -81,11 +89,12 @@ const MDALL_EXPORT_TOGGLES = [
   { id: "refresh", label: "MDALL last refresh" },
   { id: "retrievedAt", label: "Retrieved at" },
 ];
-const DEFAULT_MDALL_EXPORT = ["licenceNumber", "licenceName", "status", "riskClass", "company", "location", "tradeNames", "identifiers", "mdallLink"];
+const DEFAULT_MDALL_EXPORT = ["licenceNumber", "licenceName", "status", "riskClass", "company", "location", "deviceCount", "deviceDataStatus", "tradeNames", "identifiers", "mdallLink"];
 const MDALL_VISIBLE_TO_EXPORT: Partial<Record<ColumnKey, string[]>> = {
   licenceNo: ["licenceNumber"],
   licenceName: ["licenceName"],
   company: ["company", "companyId"],
+  deviceCount: ["deviceCount", "deviceDataStatus"],
   class: ["riskClass"],
   type: ["licenceType"],
   status: ["status"],
@@ -179,6 +188,7 @@ export default function MdallExplorerPage() {
   const [searchMeta, setSearchMeta] = useState<MdallSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [exportOptions, setExportOptions] = useState(() => loadExportSettings("mdall-excel-export", {
     groups: DEFAULT_MDALL_EXPORT,
@@ -220,6 +230,9 @@ export default function MdallExplorerPage() {
   const visibleLicences = filteredLicences.slice(page * pageSize, page * pageSize + pageSize);
   const activeFilters = Number(!!query) + Number(companyIds.length > 0) + Number(state !== "active") + Number(!!riskClass) + Number(!!licenceType) + Number(!!from) + Number(!!to);
   const officialSearch = mdallSearchUrl(state === "archived" ? "archived" : "active");
+  const deviceCountTargets = columns.includes("deviceCount")
+    ? licences.filter((licence) => !licence.deviceDataStatus).map((licence) => licence.licenceNumber).join(",")
+    : "";
 
   const runSearch = useCallback(async (force = false) => {
     if (!query.trim() && !companyIds.length) {
@@ -263,12 +276,41 @@ export default function MdallExplorerPage() {
   }, [columns]);
 
   useEffect(() => {
-    if (!selected || selected.devices) return;
+    if (!deviceCountTargets) return;
     let cancelled = false;
-    fetchMdallDevicesForLicence(selected).then((devices) => {
-      if (!cancelled) setSelected((current) => current && current.licenceNumber === selected.licenceNumber ? { ...current, devices } : current);
-    }).catch(() => {
-      if (!cancelled) setSelected((current) => current && current.licenceNumber === selected.licenceNumber ? { ...current, devices: [] } : current);
+    const targets = licences.filter((licence) => !licence.deviceDataStatus);
+    fetchMdallDevicesForLicences(targets, { includeIdentifiers: false }).then((outcomes) => {
+      if (cancelled) return;
+      setLicences((current) => current.map((licence) => {
+        const outcome = outcomes.get(mdallDeviceLookupKey(licence));
+        if (!outcome) return licence;
+        return outcome.status === "complete"
+          ? { ...licence, devices: outcome.devices, deviceDataStatus: "complete", identifierDataComplete: false }
+          : { ...licence, deviceDataStatus: "error", deviceDataError: outcome.error };
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [deviceCountTargets, licences]);
+
+  useEffect(() => {
+    const identifierDataAttempted = selected?.devices?.every((device) => device.identifierDataComplete !== undefined) ?? false;
+    if (!selected || selected.deviceDataStatus === "error" || (selected.deviceDataStatus === "complete" && (selected.identifierDataComplete || identifierDataAttempted))) return;
+    let cancelled = false;
+    fetchMdallDevicesForLicence(selected).then((result) => {
+      if (!cancelled) setSelected((current) => current && current.licenceNumber === selected.licenceNumber ? {
+        ...current,
+        devices: result.devices,
+        deviceDataStatus: "complete",
+        deviceDataError: undefined,
+        identifierDataComplete: result.identifiersComplete,
+      } : current);
+    }).catch((caught) => {
+      if (!cancelled) setSelected((current) => current && current.licenceNumber === selected.licenceNumber ? {
+        ...current,
+        devices: undefined,
+        deviceDataStatus: "error",
+        deviceDataError: caught instanceof Error ? caught.message : "Device data was not retrieved.",
+      } : current);
     });
     return () => { cancelled = true; };
   }, [selected]);
@@ -291,16 +333,25 @@ export default function MdallExplorerPage() {
     const filename = sanitizeExportFilename(exportOptions.filename, defaultExportFilename("mdall-licences"));
     saveExportSettings("mdall-excel-export", { ...exportOptions, groups: [...include], filename });
     setExporting(true);
+    setExportProgress("");
     try {
       const sourceRows = exportOptions.scope === "page" ? visibleLicences : filteredLicences;
-      const wantDevices = ["deviceCount", "tradeNames", "identifiers"].some((id) => include.has(id));
-      const devicesByLicence = new Map<number, MdallDevice[]>();
+      const wantDevices = ["deviceCount", "deviceDataStatus", "tradeNames", "identifiers"].some((id) => include.has(id));
+      if (wantDevices) include.add("deviceDataStatus");
+      let devicesByLicence = new Map<string, MdallDeviceLookupOutcome>();
       if (wantDevices) {
-        for (const licence of sourceRows.slice(0, 25)) {
-          const devices = licence.devices?.length ? licence.devices : await fetchMdallDevicesForLicence(licence).catch(() => []);
-          devicesByLicence.set(licence.licenceNumber, devices);
-        }
+        devicesByLicence = await fetchMdallDevicesForLicences(sourceRows, {
+          includeIdentifiers: include.has("identifiers"),
+          concurrency: 6,
+          onProgress: (completed, total) => setExportProgress(`Loading device data ${completed.toLocaleString()} of ${total.toLocaleString()}…`),
+        });
       }
+      const outcomeFor = (licence: MdallLicence) => devicesByLicence.get(mdallDeviceLookupKey(licence));
+      const devicesFor = (licence: MdallLicence) => {
+        const outcome = outcomeFor(licence);
+        return outcome?.status === "complete" ? outcome.devices : undefined;
+      };
+      const unavailable = (licence: MdallLicence) => outcomeFor(licence)?.status === "error" ? "Not retrieved" : "";
       const link = (text: string, url: string) => asExportLink(text, url, exportOptions.clickableLinks);
       const fields: { id: string; column: ExcelColumn; value: (licence: MdallLicence) => ExcelValue }[] = [
         { id: "licenceNumber", column: { header: "Licence number", type: "number", width: 16 }, value: (licence) => licence.licenceNumber },
@@ -314,9 +365,15 @@ export default function MdallExplorerPage() {
         { id: "companyId", column: { header: "Company ID", type: "number", width: 14 }, value: (licence) => licence.companyId || "" },
         { id: "company", column: { header: "Company", width: 28 }, value: (licence) => licence.companyName || "" },
         { id: "location", column: { header: "Company location", width: 22 }, value: (licence) => mdallLocation(licence.company) === "—" ? "" : mdallLocation(licence.company) },
-        { id: "deviceCount", column: { header: "Device count", type: "number", width: 14 }, value: (licence) => (devicesByLicence.get(licence.licenceNumber) || licence.devices || []).length },
-        { id: "tradeNames", column: { header: "Trade names", width: 40 }, value: (licence) => [...new Set((devicesByLicence.get(licence.licenceNumber) || licence.devices || []).map((device) => device.tradeName))].join("; ") },
-        { id: "identifiers", column: { header: "Device identifiers", width: 36 }, value: (licence) => [...new Set((devicesByLicence.get(licence.licenceNumber) || licence.devices || []).flatMap((device) => device.identifiers))].join("; ") },
+        { id: "deviceCount", column: { header: "Device count", width: 14 }, value: (licence) => devicesFor(licence)?.length ?? unavailable(licence) },
+        { id: "deviceDataStatus", column: { header: "Device data status", width: 30 }, value: (licence) => {
+          const outcome = outcomeFor(licence);
+          if (!outcome) return "Not requested";
+          if (outcome.status === "error") return `Not retrieved: ${outcome.error}`;
+          return outcome.identifiersComplete || !include.has("identifiers") ? "Complete" : `Devices complete; ${outcome.identifierErrors.length} identifier lookup(s) failed`;
+        } },
+        { id: "tradeNames", column: { header: "Trade names", width: 40 }, value: (licence) => devicesFor(licence) ? [...new Set(devicesFor(licence)!.map((device) => device.tradeName))].join("; ") : unavailable(licence) },
+        { id: "identifiers", column: { header: "Device identifiers", width: 44 }, value: (licence) => devicesFor(licence) ? devicesFor(licence)!.flatMap((device) => (device.identifiers || []).map((identifier) => `${identifier} (device ${device.deviceId})`)).join("; ") : unavailable(licence) },
         { id: "mdallLink", column: { header: "MDALL search", type: exportOptions.clickableLinks ? "link" : "text", width: 20 }, value: () => link("Open MDALL", officialSearch) },
         { id: "source", column: { header: "Source", width: 22 }, value: () => "Health Canada MDALL" },
         { id: "refresh", column: { header: "MDALL last refresh", type: "date", width: 16 }, value: (licence) => licence.lastRefreshAt || "" },
@@ -332,6 +389,7 @@ export default function MdallExplorerPage() {
       setExportOpen(false);
     } finally {
       setExporting(false);
+      setExportProgress("");
     }
   };
 
@@ -339,6 +397,11 @@ export default function MdallExplorerPage() {
     if (column === "licenceNo") return <b className="fcc-id">{licence.licenceNumber}</b>;
     if (column === "licenceName") return <><b>{licence.licenceName}</b><span>{licence.licenceType || "MDALL licence"}</span></>;
     if (column === "company") return <><b>{licence.companyName || "—"}</b><span>{licence.companyId ? `Company ID ${licence.companyId}` : "Company"}</span></>;
+    if (column === "deviceCount") {
+      if (licence.deviceDataStatus === "error") return <span className="cell-list" title={licence.deviceDataError}>Not retrieved</span>;
+      if (licence.deviceDataStatus !== "complete") return <span className="cell-list">Loading…</span>;
+      return <span className="source-cell">{licence.devices?.length ?? 0}</span>;
+    }
     if (column === "class") return <span className="source-cell">{licence.riskClassLabel}</span>;
     if (column === "type") return <span className="cell-list">{licence.licenceType || "—"}</span>;
     if (column === "status") return <span className="cell-list">{licence.licenceStatusLabel}</span>;
@@ -479,10 +542,10 @@ export default function MdallExplorerPage() {
               <button className="secondary" type="button" onClick={async () => { await navigator.clipboard.writeText(String(selected.licenceNumber)); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); }}>{idCopied ? <Check size={14} /> : <Clipboard size={14} />} {idCopied ? "Copied" : "Copy licence number"}</button>
             </div>
           </div>
-          <div className="detail-stats"><div><span>First issued</span><b>{displayDate(selected.issuedAt)}</b></div><div><span>Risk class</span><b>{selected.riskClassLabel}</b></div><div><span>Status</span><b>{selected.licenceStatusLabel}</b></div></div>
+          <div className="detail-stats"><div><span>First issued</span><b>{displayDate(selected.issuedAt)}</b></div><div><span>Risk class</span><b>{selected.riskClassLabel}</b></div><div><span>Status</span><b>{selected.licenceStatusLabel}</b></div><div><span>Devices</span><b>{selected.deviceDataStatus === "complete" ? selected.devices?.length ?? 0 : selected.deviceDataStatus === "error" ? "Not retrieved" : "Loading…"}</b></div></div>
           <section className="detail-section"><h3><Landmark size={16} /> Licence</h3><dl className="fcc-detail-list"><div><dt>Licence number <small>MDALL source</small></dt><dd>{selected.licenceNumber}</dd></div><div><dt>Licence name <small>MDALL source</small></dt><dd>{selected.licenceName}</dd></div><div><dt>Licence type</dt><dd>{selected.licenceType || "—"}</dd></div><div><dt>Status</dt><dd>{selected.licenceStatusLabel} ({selected.licenceStatus || "—"})</dd></div><div><dt>Risk class</dt><dd>{selected.riskClassLabel}</dd></div><div><dt>First issued</dt><dd>{displayDate(selected.issuedAt)}</dd></div><div><dt>End date</dt><dd>{displayDate(selected.endDate)}</dd></div></dl></section>
           <section className="detail-section"><h3><Building2 size={16} /> Company</h3><dl className="fcc-detail-list"><div><dt>Company name</dt><dd>{selected.companyName || "—"}</dd></div><div><dt>Company ID</dt><dd>{selected.companyId || "—"}</dd></div><div><dt>Address</dt><dd>{selected.company?.address || "—"}</dd></div><div><dt>Location</dt><dd>{mdallLocation(selected.company)}</dd></div></dl>{selected.companyId && <button className="secondary official-record-link" onClick={() => { setSelected(null); setSelectedCompany(String(selected.companyId)); }}><Building2 size={14} /> Open company profile</button>}</section>
-          <section className="detail-section"><h3><PackageSearch size={16} /> Devices on this licence</h3>{selected.devices === undefined ? <p>Loading MDALL device names…</p> : !selected.devices.length ? <p>MDALL does not offer a licence-number filter on the device endpoint. No trade names were matched from this licence name.</p> : <dl className="fcc-detail-list">{selected.devices.slice(0, 40).map((device) => <div key={device.deviceId}><dt>{device.tradeName}<small>Device ID {device.deviceId}{device.firstLicensedAt ? ` · added ${device.firstLicensedAt}` : ""}</small></dt><dd>{device.identifiers.length ? device.identifiers.join(", ") : "No device identifiers returned"}</dd></div>)}</dl>}</section>
+          <section className="detail-section"><h3><PackageSearch size={16} /> Devices on this licence{selected.deviceDataStatus === "complete" ? ` (${selected.devices?.length ?? 0})` : ""}</h3>{selected.deviceDataStatus === "error" ? <div className="error-banner"><CircleAlert size={18} /><div><b>Device data was not retrieved</b><span>{selected.deviceDataError}</span></div><button className="secondary" onClick={() => setSelected((current) => current ? { ...current, deviceDataStatus: undefined, deviceDataError: undefined } : current)}>Retry</button></div> : selected.deviceDataStatus !== "complete" ? <p>Loading the complete {selected.state} MDALL device list…</p> : !selected.devices?.length ? <p>No {selected.state} devices are linked to this licence in the MDALL device dataset.</p> : <dl className="fcc-detail-list">{selected.devices.map((device) => <div key={device.deviceId}><dt>{device.tradeName}<small>Device ID {device.deviceId}{device.firstLicensedAt ? ` · added ${device.firstLicensedAt}` : ""}</small></dt><dd>{device.identifierDataError ? "Identifiers not retrieved" : device.identifiers?.length ? device.identifiers.join(", ") : "No active device identifiers returned"}</dd></div>)}</dl>}</section>
           <section className="detail-section"><h3><CalendarDays size={16} /> Evidence / source</h3><dl className="fcc-detail-list"><div><dt>Regulatory source</dt><dd>{MDALL_SOURCE_LABEL}</dd></div><div><dt>Official search</dt><dd>Health Canada MDALL HTML search is POST-only; this dossier uses the documented JSON API.</dd></div><div><dt>Loaded in app</dt><dd>{new Date(selected.retrievedAt).toLocaleString([], dateTimeFormat)}</dd></div>{selected.lastRefreshAt && <div><dt>MDALL last refresh</dt><dd>{displayDate(selected.lastRefreshAt)}</dd></div>}</dl><a className="primary official-record-link" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL search <ExternalLink size={14} /></a><a className="secondary official-record-link" href={selected.sourceUrl} target="_blank" rel="noreferrer">View raw API response <ExternalLink size={14} /></a></section>
           <section className="detail-section raw-section"><details><summary>View raw MDALL licence <ChevronDown size={15} /></summary><pre>{JSON.stringify(selected.raw, null, 2)}</pre></details></section>
         </aside>
@@ -494,7 +557,7 @@ export default function MdallExplorerPage() {
           <div className="drawer-hero"><span className="record-id">MDALL COMPANY</span><h2>{selectedCompanyGroup.companyName}</h2><p><MapPin size={15} /> {mdallLocation(selectedCompanyGroup.company)}</p></div>
           <div className="detail-stats"><div><span>Licences</span><b>{selectedCompanyGroup.licenceCount}</b></div><div><span>Most recent</span><b>{displayDate(selectedCompanyGroup.latestIssued)}</b></div><div><span>Company ID</span><b>{selectedCompanyGroup.companyId || "—"}</b></div></div>
           <section className="detail-section"><h3><Building2 size={16} /> Overview</h3><dl className="fcc-detail-list"><div><dt>Company</dt><dd>{selectedCompanyGroup.companyName}</dd></div><div><dt>Company ID</dt><dd>{selectedCompanyGroup.companyId || "—"}</dd></div><div><dt>Address</dt><dd>{selectedCompanyGroup.company?.address || "—"}</dd></div></dl></section>
-          <section className="detail-section"><h3><Landmark size={16} /> Licences</h3><div className="profile-records">{selectedCompanyGroup.licences.slice(0, 40).map((licence) => <button key={licence.licenceNumber} onClick={() => { setSelectedCompany(null); setSelected(licence); }}><b>{licence.licenceNumber}</b><span>{licence.licenceName} · {displayDate(licence.issuedAt)}</span></button>)}</div></section>
+          <section className="detail-section"><h3><Landmark size={16} /> Licences</h3><div className="profile-records">{selectedCompanyGroup.licences.map((licence) => <button key={`${licence.licenceNumber}-${licence.state}-${licence.endDate || "open"}`} onClick={() => { setSelectedCompany(null); setSelected(licence); }}><b>{licence.licenceNumber}</b><span>{licence.licenceName} · {displayDate(licence.issuedAt)}</span></button>)}</div></section>
           <section className="detail-section"><h3><Database size={16} /> Source</h3><a className="primary official-record-link" href={officialSearch} target="_blank" rel="noreferrer">Open official MDALL search <ExternalLink size={14} /></a></section>
         </aside>
       </div>}
@@ -503,7 +566,7 @@ export default function MdallExplorerPage() {
         open={exportOpen}
         title="Pack this workbook."
         countLabel="Choose columns and which licence rows to include."
-        note={["deviceCount", "tradeNames", "identifiers"].some((id) => exportOptions.groups.includes(id)) ? "Device names and identifiers are fetched for up to 25 licences." : undefined}
+        note={exportProgress || (["deviceCount", "deviceDataStatus", "tradeNames", "identifiers"].some((id) => exportOptions.groups.includes(id)) ? "Device data is retrieved for every exported licence. Large exports can take a moment." : undefined)}
         toggles={MDALL_EXPORT_TOGGLES}
         selected={exportOptions.groups}
         confirming={exporting}

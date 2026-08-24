@@ -238,7 +238,7 @@ td > span:not(.code-pill):not(.class-badge) { display: block; max-width: 280px; 
   text-decoration: none;
   font: 600 10px var(--font-roboto), sans-serif;
 }
-.detail-stats { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--paper-2); border-bottom: 1px solid var(--line); }
+.detail-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); background: var(--paper-2); border-bottom: 1px solid var(--line); }
 .detail-stats div { min-height: 88px; padding: 20px 24px; display: flex; flex-direction: column; gap: 9px; border-right: 1px solid var(--line); }
 .detail-stats div:last-child { border: 0; }
 .detail-stats span { color: var(--muted); text-transform: uppercase; font: 8px var(--font-roboto), sans-serif; letter-spacing: .1em; }

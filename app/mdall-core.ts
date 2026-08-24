@@ -29,7 +29,9 @@ export type MdallDevice = {
   tradeName: string;
   firstLicensedAt?: string;
   endDate?: string;
-  identifiers: string[];
+  identifiers?: string[];
+  identifierDataComplete?: boolean;
+  identifierDataError?: string;
   raw: RawMdallRecord;
 };
 
@@ -50,6 +52,9 @@ export type MdallLicence = {
   companyName?: string;
   company?: MdallCompany;
   devices?: MdallDevice[];
+  deviceDataStatus?: "loading" | "complete" | "error";
+  deviceDataError?: string;
+  identifierDataComplete?: boolean;
   state: "active" | "archived";
   sourceUrl: string;
   retrievedAt: string;
@@ -162,7 +167,6 @@ export function normalizeMdallDevice(raw: RawMdallRecord): MdallDevice | null {
     tradeName,
     firstLicensedAt: isoMdallDate(text(raw, "first_licence_dt")),
     endDate: isoMdallDate(text(raw, "end_date")),
-    identifiers: [],
     raw,
   };
 }
@@ -244,16 +248,6 @@ export function parseMdallQuery(value: string) {
 
 export function looksLikeMdallNumber(value: string) {
   return /^\d{3,8}$/.test(value.trim());
-}
-
-export function deviceSearchTokens(name: string) {
-  const stop = new Set(["THE", "AND", "FOR", "WITH", "FROM", "SYSTEM", "SYSTEMS", "DEVICE", "DEVICES", "FAMILY", "UNKNOWN"]);
-  return [...new Set(
-    name
-      .toUpperCase()
-      .split(/[^A-Z0-9]+/)
-      .filter((token) => token.length >= 4 && !stop.has(token)),
-  )];
 }
 
 export function mdallSourcePresentation(retrieved = false) {

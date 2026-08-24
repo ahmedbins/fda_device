@@ -1,7 +1,6 @@
 import {
   MDALL_API,
   asMdallList,
-  deviceSearchTokens,
   looksLikeMdallNumber,
   normalizeMdallCompany,
   normalizeMdallDevice,
@@ -15,11 +14,16 @@ import {
   type MdallSearchMode,
   type MdallSearchResult,
   type RawMdallRecord,
-} from "./mdall-core";
+} from "./mdall-core.ts";
 
 const CACHE_MS = 5 * 60 * 1000;
 const companyCache = new Map<number, MdallCompany>();
 const searchCache = new Map<string, { expires: number; result: MdallSearchResult }>();
+type ConcreteState = Exclude<MdallLicenceState, "both">;
+type DeviceIndex = Map<number, MdallDevice[]>;
+const deviceIndexCache = new Map<ConcreteState, { expires: number; index: DeviceIndex }>();
+const deviceIndexRequests = new Map<ConcreteState, Promise<DeviceIndex>>();
+const identifierCache = new Map<string, { expires: number; identifiers: string[] }>();
 
 type SearchOptions = {
   query: string;
@@ -28,6 +32,31 @@ type SearchOptions = {
   companyIds?: number[];
   signal?: AbortSignal;
 };
+
+export type MdallDeviceLookupResult = {
+  devices: MdallDevice[];
+  identifiersComplete: boolean;
+  identifierErrors: string[];
+};
+
+export type MdallDeviceLookupOutcome =
+  | ({ status: "complete" } & MdallDeviceLookupResult)
+  | { status: "error"; error: string };
+
+type DeviceLookupOptions = {
+  state?: MdallLicenceState;
+  includeIdentifiers?: boolean;
+  signal?: AbortSignal;
+};
+
+type BulkDeviceLookupOptions = DeviceLookupOptions & {
+  concurrency?: number;
+  onProgress?: (completed: number, total: number) => void;
+};
+
+export function mdallDeviceLookupKey(licence: MdallLicence) {
+  return `${licence.licenceNumber}:${licence.state}`;
+}
 
 function requestSignal(signal?: AbortSignal, timeoutMs = 20_000) {
   const controller = new AbortController();
@@ -43,8 +72,8 @@ function requestSignal(signal?: AbortSignal, timeoutMs = 20_000) {
   };
 }
 
-async function fetchMdall<T extends RawMdallRecord>(path: string, signal?: AbortSignal): Promise<T[]> {
-  const timed = requestSignal(signal);
+async function fetchMdall<T extends RawMdallRecord>(path: string, signal?: AbortSignal, timeoutMs = 20_000): Promise<T[]> {
+  const timed = requestSignal(signal, timeoutMs);
   try {
     const response = await fetch(`${MDALL_API}${path}`, {
       signal: timed.signal,
@@ -118,24 +147,53 @@ async function fetchLicenceByNumber(licenceNumber: string, retrievedAt: string, 
 
 async function attachCompanies(licences: MdallLicence[], signal?: AbortSignal) {
   const ids = [...new Set(licences.map((licence) => licence.companyId).filter((id): id is number => !!id && !companyCache.has(id)))];
-  await mapPool(ids.slice(0, 40), 6, async (companyId) => fetchMdallCompany(companyId, signal));
+  await mapPool(ids, 6, async (companyId) => fetchMdallCompany(companyId, signal));
   return licences.map((licence) => {
     const company = licence.company || (licence.companyId ? companyCache.get(licence.companyId) : undefined);
     return company ? { ...licence, company, companyName: company.companyName } : licence;
   });
 }
 
-async function licencesFromDeviceName(query: string, retrievedAt: string, signal?: AbortSignal) {
-  const rows = await fetchMdall(`/device/?device_name=${encodeURIComponent(query)}&type=json`, signal);
-  const devices = rows.map(normalizeMdallDevice).filter((device): device is MdallDevice => !!device).slice(0, 400);
-  const numbers = [...new Set(devices.map((device) => device.licenceNumber))].slice(0, 80);
+function matchesState(endDate: string | undefined, state: ConcreteState) {
+  return state === "active" ? !endDate : !!endDate;
+}
+
+function uniqueDevices(devices: MdallDevice[]) {
+  const unique = new Map<number, MdallDevice>();
+  for (const device of devices) {
+    const current = unique.get(device.deviceId);
+    if (!current || (current.endDate && !device.endDate) || (device.firstLicensedAt || "") > (current.firstLicensedAt || "")) {
+      unique.set(device.deviceId, device);
+    }
+  }
+  return [...unique.values()].sort((a, b) => (b.firstLicensedAt || "").localeCompare(a.firstLicensedAt || "") || a.tradeName.localeCompare(b.tradeName));
+}
+
+async function devicesForStateQuery(query: string, state: ConcreteState, signal?: AbortSignal) {
+  const rows = await fetchMdall(`/device/?device_name=${encodeURIComponent(query)}&state=${state}&type=json`, signal);
+  return rows
+    .map(normalizeMdallDevice)
+    .filter((device): device is MdallDevice => !!device && matchesState(device.endDate, state));
+}
+
+async function licencesFromDeviceName(query: string, retrievedAt: string, state: MdallLicenceState, signal?: AbortSignal) {
+  const devices = uniqueDevices((await Promise.all(licenceStates(state).map((item) => devicesForStateQuery(query, item, signal)))).flat());
+  const numbers = [...new Set(devices.map((device) => device.licenceNumber))];
   const licences = (await mapPool(numbers, 6, async (licenceNumber) => fetchLicenceByNumber(String(licenceNumber), retrievedAt, signal))).flat();
   return { licences, devices };
 }
 
-async function licencesFromIdentifier(query: string, retrievedAt: string, signal?: AbortSignal) {
-  const rows = await fetchMdall(`/deviceidentifier/?device_identifier=${encodeURIComponent(query)}&type=json`, signal);
-  const numbers = [...new Set(rows.map((row) => Number(row.original_licence_no)).filter((value) => Number.isFinite(value) && value > 0))].slice(0, 80);
+function rawEndDate(row: RawMdallRecord) {
+  const value = row.end_date;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+async function licencesFromIdentifier(query: string, retrievedAt: string, state: MdallLicenceState, signal?: AbortSignal) {
+  const batches = await Promise.all(licenceStates(state).map((item) => (
+    fetchMdall(`/deviceidentifier/?device_identifier=${encodeURIComponent(query)}&state=${item}&type=json`, signal)
+      .then((rows) => rows.filter((row) => matchesState(rawEndDate(row), item)))
+  )));
+  const numbers = [...new Set(batches.flat().map((row) => Number(row.original_licence_no)).filter((value) => Number.isFinite(value) && value > 0))];
   const licences = (await mapPool(numbers, 6, async (licenceNumber) => fetchLicenceByNumber(String(licenceNumber), retrievedAt, signal))).flat();
   return licences;
 }
@@ -179,13 +237,12 @@ export async function searchMdall(options: SearchOptions): Promise<MdallSearchRe
   }
 
   if (query && (mode === "auto" || mode === "device") && query.length >= 3) {
-    const fromDevices = await licencesFromDeviceName(query, retrievedAt, options.signal);
+    const fromDevices = await licencesFromDeviceName(query, retrievedAt, state, options.signal);
     licences = uniqueMdallLicences([...licences, ...fromDevices.licences]);
-    if (fromDevices.devices.length >= 400) notes.push("Device-name matches were capped. Narrow the device name if a licence is missing.");
   }
 
   if (query && (mode === "auto" || mode === "identifier") && query.length >= 3) {
-    licences = uniqueMdallLicences([...licences, ...await licencesFromIdentifier(query, retrievedAt, options.signal)]);
+    licences = uniqueMdallLicences([...licences, ...await licencesFromIdentifier(query, retrievedAt, state, options.signal)]);
   }
 
   if (state !== "both") {
@@ -205,33 +262,97 @@ export async function searchMdall(options: SearchOptions): Promise<MdallSearchRe
   return result;
 }
 
-export async function fetchMdallDevicesForLicence(licence: MdallLicence, signal?: AbortSignal): Promise<MdallDevice[]> {
-  const tokens = deviceSearchTokens(licence.licenceName);
-  const queries = [...tokens.slice(0, 2), licence.licenceName];
-  const collected: MdallDevice[] = [];
-  for (const query of queries) {
-    const rows = await fetchMdall(`/device/?device_name=${encodeURIComponent(query)}&type=json`, signal);
-    const matches = rows
+async function fetchDeviceIndex(state: ConcreteState, signal?: AbortSignal) {
+  const cached = deviceIndexCache.get(state);
+  if (cached && cached.expires > Date.now()) return cached.index;
+  const pending = deviceIndexRequests.get(state);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const rows = await fetchMdall(`/device/?state=${state}&type=json`, signal, 60_000);
+    const devices = uniqueDevices(rows
       .map(normalizeMdallDevice)
-      .filter((device): device is MdallDevice => !!device && device.licenceNumber === licence.licenceNumber);
-    for (const device of matches) {
-      if (!collected.some((item) => item.deviceId === device.deviceId)) collected.push(device);
-    }
-    if (collected.length) break;
+      .filter((device): device is MdallDevice => !!device && matchesState(device.endDate, state)));
+    const index: DeviceIndex = new Map();
+    for (const device of devices) index.set(device.licenceNumber, [...(index.get(device.licenceNumber) || []), device]);
+    deviceIndexCache.set(state, { expires: Date.now() + CACHE_MS, index });
+    return index;
+  })();
+  deviceIndexRequests.set(state, request);
+  try {
+    return await request;
+  } finally {
+    deviceIndexRequests.delete(state);
   }
-  const withIdentifiers = await mapPool(collected.slice(0, 12), 4, async (device) => {
+}
+
+async function fetchIdentifiersForDevice(device: MdallDevice, state: MdallLicenceState, signal?: AbortSignal) {
+  const cacheId = `${state}:${device.deviceId}`;
+  const cached = identifierCache.get(cacheId);
+  if (cached && cached.expires > Date.now()) return cached.identifiers;
+
+  const rows = (await Promise.all(licenceStates(state).map((item) => (
+    fetchMdall(`/deviceidentifier/?id=${device.deviceId}&state=${item}&type=json`, signal)
+      .then((batch) => batch.filter((row) => {
+        const rowDeviceId = Number(row.device_id);
+        const rowLicenceNumber = Number(row.original_licence_no);
+        return rowDeviceId === device.deviceId
+          && rowLicenceNumber === device.licenceNumber
+          && matchesState(rawEndDate(row), item);
+      }))
+  )))).flat();
+  const identifiers = [...new Map(rows.map((row) => {
+    const identifier = String(row.device_identifier || "").trim();
+    return [`${device.deviceId}|${identifier}`, identifier] as const;
+  }).filter((entry) => !!entry[1])).values()];
+  identifierCache.set(cacheId, { expires: Date.now() + CACHE_MS, identifiers });
+  return identifiers;
+}
+
+export async function fetchMdallDevicesForLicence(licence: MdallLicence, options: DeviceLookupOptions = {}): Promise<MdallDeviceLookupResult> {
+  const state = options.state || licence.state;
+  const indexes = await Promise.all(licenceStates(state).map((item) => fetchDeviceIndex(item, options.signal)));
+  const devices = uniqueDevices(indexes.flatMap((index) => index.get(licence.licenceNumber) || []));
+  if (options.includeIdentifiers === false) return { devices, identifiersComplete: false, identifierErrors: [] };
+
+  const identifierErrors: string[] = [];
+  const withIdentifiers = await mapPool(devices, 6, async (device) => {
     try {
-      const rows = await fetchMdall(`/deviceidentifier/?id=${device.deviceId}&type=json`, signal);
-      const identifiers = [...new Set(rows.map((row) => String(row.device_identifier || "").trim()).filter(Boolean))];
-      return { ...device, identifiers };
-    } catch {
-      return device;
+      const identifiers = await fetchIdentifiersForDevice(device, state, options.signal);
+      return { ...device, identifiers, identifierDataComplete: true };
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Identifier lookup failed.";
+      identifierErrors.push(`Device ${device.deviceId}: ${message}`);
+      return { ...device, identifierDataComplete: false, identifierDataError: message };
     }
   });
-  return withIdentifiers;
+  return { devices: withIdentifiers, identifiersComplete: identifierErrors.length === 0, identifierErrors };
+}
+
+export async function fetchMdallDevicesForLicences(licences: MdallLicence[], options: BulkDeviceLookupOptions = {}) {
+  const outcomes = new Map<string, MdallDeviceLookupOutcome>();
+  let completed = 0;
+  await mapPool(licences, options.concurrency || 6, async (licence) => {
+    try {
+      const result = await fetchMdallDevicesForLicence(licence, options);
+      outcomes.set(mdallDeviceLookupKey(licence), { status: "complete", ...result });
+    } catch (caught) {
+      outcomes.set(mdallDeviceLookupKey(licence), {
+        status: "error",
+        error: caught instanceof Error ? caught.message : "Device data was not retrieved.",
+      });
+    } finally {
+      completed += 1;
+      options.onProgress?.(completed, licences.length);
+    }
+  });
+  return outcomes;
 }
 
 export function clearMdallCache() {
   searchCache.clear();
   companyCache.clear();
+  deviceIndexCache.clear();
+  deviceIndexRequests.clear();
+  identifierCache.clear();
 }

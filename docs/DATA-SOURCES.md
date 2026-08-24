@@ -112,8 +112,8 @@ Health Canada publishes a documented JSON API for the Medical Devices Active Lic
 | --- | --- |
 | `/licence/` | Licence number, name, status, risk class, type, first issued date, end date, company ID |
 | `/company/` | Company name, ID, address, country |
-| `/device/` | Trade names on a licence (search by device name, then match `original_licence_no`) |
-| `/deviceidentifier/` | Catalogue / device identifiers |
+| `/device/` | Device IDs and trade names; the app loads the selected state and indexes rows by `original_licence_no` |
+| `/deviceidentifier/` | Catalogue / device identifiers, requested by device ID and selected state |
 | `/licencetype/` | Licence type codes |
 | `/sbdlocation/` | Summary Basis of Decision URLs, when present |
 
@@ -121,7 +121,7 @@ MDALL covers licensed Class II, III and IV devices. Class I devices, investigati
 
 The official MDALL HTML search is POST-only (`/mdall-limh/search`). There is no stable official GET page for a specific licence number. The dashboard therefore uses the JSON API and keeps a prominent link to the official search form.
 
-The `licence` endpoint does **not** accept `company_name`. Company searches resolve `company_id` first, then request `/licence/?company_id=`. The `device` endpoint does **not** accept a licence-number filter; device names for a licence are recovered by searching distinctive tokens from the licence name.
+The `licence` endpoint does **not** accept `company_name`. Company searches resolve `company_id` first, then request `/licence/?company_id=`. The `device` endpoint does **not** provide a working licence-number filter, so the dashboard retrieves the complete selected-state device feed, filters locally on `original_licence_no`, and deduplicates on `device_id`. Identifier requests include the selected state and are also filtered locally so historical identifiers cannot leak into the active view. The licence drawer, device-count column, and Excel export all use this normalized dataset; retrieval errors remain explicit instead of being represented as zero devices.
 
 Confirmed watch scope: SONOVA AG, company ID `113080`.
 
@@ -137,4 +137,3 @@ When the official snapshot is refreshed:
 6. Promote the same commit to Main only after validation.
 
 Never infer competitors, affiliates, grantee-code ownership, equipment class or RF characteristics without an authoritative source.
-

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   asMdallList,
-  deviceSearchTokens,
   looksLikeMdallNumber,
   mdallRiskClassLabel,
   mdallStatusLabel,
@@ -85,6 +84,4 @@ test("ignores empty MDALL objects and keeps unique licences", () => {
 test("treats numeric MDALL queries as licence or company identifiers", () => {
   assert.equal(looksLikeMdallNumber("113080"), true);
   assert.equal(looksLikeMdallNumber("SONOVA"), false);
-  assert.deepEqual(deviceSearchTokens("PHONAK TARGET FITTING SOFTWARE"), ["PHONAK", "TARGET", "FITTING", "SOFTWARE"]);
-  assert.ok(!deviceSearchTokens("CHARGER SYSTEMS").includes("SYSTEMS"));
 });
