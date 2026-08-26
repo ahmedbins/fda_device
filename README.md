@@ -1,8 +1,8 @@
-# FDA + FCC + Health Canada Device Regulatory Explorer
+# Sonova Regulatory Data Hub
 
 One workspace for searching and monitoring public FDA medical-device records, FCC equipment authorizations, and Health Canada MDALL licences.
 
-![FDA + FCC Device Regulatory Explorer](public/og-regulatory.png)
+![Sonova Regulatory Data Hub](public/og-regulatory.png)
 
 ## Start here
 

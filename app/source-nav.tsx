@@ -47,7 +47,7 @@ export default function SourceNav({ source, view, status, statusState = "ready" 
     <header className="topbar regulatory-topbar">
       <button className="brand brand-button" type="button" onClick={() => navTo(source, "explorer")} aria-label={`${source.toUpperCase()} Explorer home`}>
         <span className="brand-mark"><PackageSearch size={19} /></span>
-        <span><b>SONOVA</b> / REGULATORY DATA</span>
+        <span><b>SONOVA</b> / REGULATORY DATA HUB</span>
         {devHost && <span className="dev-badge">DEV</span>}
       </button>
 
