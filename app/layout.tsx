@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Roboto, Rufina } from "next/font/google";
 import { headers } from "next/headers";
+import ContactFooter from "./contact-footer";
 import "./globals.css";
 
 const roboto = Roboto({ variable: "--font-roboto", subsets: ["latin"] });
@@ -20,5 +21,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={`${roboto.variable} ${rufina.variable}`}>{children}</body></html>;
+  return (
+    <html lang="en">
+      <body className={`${roboto.variable} ${rufina.variable}`}>
+        {children}
+        <ContactFooter />
+      </body>
+    </html>
+  );
 }

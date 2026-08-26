@@ -21,6 +21,20 @@ button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .46; }
 
+.site-contact-footer {
+  padding: 18px clamp(20px, 4vw, 64px);
+  color: #52636a;
+  background: var(--white);
+  border-top: 1px solid var(--line);
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.site-contact-footer p { margin: 0; }
+.site-contact-footer a { color: #0b5f8a; font-weight: 600; text-underline-offset: 3px; }
+.site-contact-footer a:hover { color: var(--coral); }
+.site-contact-footer a:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; border-radius: 2px; }
+
 .topbar {
   height: 68px; padding: 0 clamp(20px, 4vw, 64px); display: flex; align-items: center; justify-content: space-between;
   color: var(--ink); background: var(--white); border-bottom: 1px solid var(--line);
