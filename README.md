@@ -4,10 +4,17 @@ One workspace for searching and monitoring public FDA medical-device records, FC
 
 ![Sonova Regulatory Data Hub](public/og-regulatory.png)
 
+## 📖 New here? Never touched code?
+
+**Start with [The Friendly Guide](guide/README.md)** — a short, plain-English book that explains what this website does and how it's built, step by step, assuming zero technical background. It covers what a website even is, where the data comes from, what all the files in this repository are for, and how the site gets onto the internet. About 45 minutes, no jargon left unexplained.
+
+Everything below this point is the quicker, more technical reference for people who already write code.
+
 ## Start here
 
 | I want to… | Go here |
 | --- | --- |
+| Understand this project from zero | [The Friendly Guide](guide/README.md) |
 | Use the stable website | [Main site](https://fda-device-index.pages.dev/) |
 | Review the newest internal version | [Internal Use Only](https://fda-device-internaluseonly.pages.dev/) |
 | Run the project locally | [Local setup](#run-it-locally) |
@@ -54,11 +61,11 @@ The normal release path is:
 3. Verify all FDA, FCC and Health Canada routes.
 4. Deploy that exact commit to Main.
 
-This keeps the two sites consistent while giving unfinished changes a safe validation target.
+This keeps the two sites consistent while giving unfinished changes a safe validation target. ([Friendly Guide, Chapter 8](guide/08-how-the-website-goes-live.md) tells this story in plain language.)
 
 ## Run it locally
 
-You need Node.js 22.13 or newer and npm.
+You need Node.js 22.13 or newer and npm. (First time doing this? [Friendly Guide, Chapter 9](guide/09-run-it-on-your-own-computer.md) walks through every step, including installing the tools.)
 
 ```bash
 git clone https://github.com/ahmedbins/fda_device.git
@@ -136,7 +143,7 @@ flowchart TD
   N --> V["Explorer or Monitoring view"]
 ```
 
-The FCC endpoint is public, but FCC/Akamai and browser CORS policies can block some automated request modes. The app treats that as a coverage limitation—not evidence that a record does not exist. Confirmed scopes load from the labelled official snapshot, and uncovered scopes can be imported from the official XML/JSON response.
+The FCC endpoint is public, but FCC/Akamai and browser CORS policies can block some automated request modes. The app treats that as a coverage limitation—not evidence that a record does not exist. Confirmed scopes load from the labelled official snapshot, and uncovered scopes can be imported from the official XML/JSON response. ([Friendly Guide, Chapter 6](guide/06-when-a-source-wont-answer.md) explains the reasoning behind this fallback ladder.)
 
 ### 5. Two production build paths share the same UI
 
@@ -159,6 +166,7 @@ app/
   fcc-core.ts            FCC parsing and normalization
   fcc-service.ts         FCC source orchestration
 cloudflare-spa/          Static Pages entry points and Vite configuration
+guide/                   The Friendly Guide — plain-English walkthrough of the project
 public/                  Icons and social-preview assets
 tests/                   Unit, rendered-route, API, and regression tests
 worker/                  Full-stack Cloudflare Worker entry point
@@ -204,6 +212,7 @@ Read [Data sources and provenance](docs/DATA-SOURCES.md) before changing source 
 
 ## More documentation
 
+- [The Friendly Guide](guide/README.md) — plain-English, step-by-step walkthrough for non-developers
 - [Architecture](docs/ARCHITECTURE.md)
 - [Data sources and provenance](docs/DATA-SOURCES.md)
 - [Deployment and promotion](docs/DEPLOYMENT.md)
