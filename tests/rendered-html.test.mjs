@@ -86,3 +86,12 @@ test("server-renders the design-preview hub and FDA Explorer", async () => {
   assert.match(explorer, /Companies with QDD \+ QUH/);
   assert.match(explorer, /Hearing aids/);
 });
+
+test("server-renders the FDA workspace preview with its scope bar and views", async () => {
+  const workspace = await (await render("/next/fda/workspace")).text();
+  assert.match(workspace, /Apply scope/);
+  assert.match(workspace, /Any code/);
+  assert.match(workspace, /All codes · one company/);
+  for (const view of ["Overview", "Companies", "Listings", "Timeline", "Changes"]) assert.match(workspace, new RegExp(view));
+  assert.match(workspace, /Define a scope/);
+});

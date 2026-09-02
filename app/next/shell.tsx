@@ -1,10 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Activity, FileSearch, Radio, ShieldCheck } from "lucide-react";
+import { Activity, Compass, FileSearch, Radio, ShieldCheck } from "lucide-react";
 import { useDevHost } from "../fda-shared";
 
-export type NextRoute = "hub" | "fda-explorer";
+export type NextRoute = "hub" | "fda-workspace" | "fda-explorer";
 
 type NextShellProps = {
   active: NextRoute;
@@ -28,7 +28,8 @@ export function NextShell({ active, children }: NextShellProps) {
         </a>
         <div className="nx-rail-group">
           <span>FDA · openFDA</span>
-          <a className={`nx-rail-link ${active === "fda-explorer" ? "active" : ""}`} href="/next/fda/explorer" aria-current={active === "fda-explorer" ? "page" : undefined}><FileSearch size={15} /> Explorer</a>
+          <a className={`nx-rail-link ${active === "fda-workspace" ? "active" : ""}`} href="/next/fda/workspace" aria-current={active === "fda-workspace" ? "page" : undefined}><Compass size={15} /> Workspace <em>new</em></a>
+          <a className={`nx-rail-link ${active === "fda-explorer" ? "active" : ""}`} href="/next/fda/explorer" aria-current={active === "fda-explorer" ? "page" : undefined}><FileSearch size={15} /> Explorer <em>preview</em></a>
           <a className="nx-rail-link" href="/fda/monitoring"><Activity size={15} /> Monitoring <em>current</em></a>
         </div>
         <div className="nx-rail-group">
@@ -42,7 +43,7 @@ export function NextShell({ active, children }: NextShellProps) {
           <a className="nx-rail-link" href="/hc/monitoring"><Activity size={15} /> Monitoring <em>current</em></a>
         </div>
         <div className="nx-rail-foot">
-          <p>Design preview. Links marked <em>current</em> open the existing pages.</p>
+          <p>Design preview. <em>new</em> is the scope workbench, <em>preview</em> the earlier restyle, <em>current</em> the existing pages.</p>
           <p><a href="/fda/explorer">Back to the current design</a></p>
           <p>Questions? <a href="mailto:muzaffar.bhatti@sonova.com?subject=Regulatory%20Data%20Portal%20Question">Muzaffar Bhatti</a></p>
         </div>

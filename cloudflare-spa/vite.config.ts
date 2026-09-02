@@ -15,6 +15,7 @@ function cleanUrls(): Plugin {
     ["/next", "/next/index.html"],
     ["/next/", "/next/index.html"],
     ["/next/fda/explorer", "/next/fda/explorer.html"],
+    ["/next/fda/workspace", "/next/fda/workspace.html"],
   ]);
   const rewrite = (url?: string) => {
     if (!url) return url;
@@ -58,6 +59,7 @@ export default defineConfig({
         "hc/monitoring": resolve(__dirname, "hc/monitoring.html"),
         "next/index": resolve(__dirname, "next/index.html"),
         "next/fda/explorer": resolve(__dirname, "next/fda/explorer.html"),
+        "next/fda/workspace": resolve(__dirname, "next/fda/workspace.html"),
       },
     },
   },

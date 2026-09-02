@@ -39,8 +39,8 @@ export default function HubPage() {
               {fdaMeta && !fdaMeta.total && "openFDA live"}
             </span>
             <div className="links">
-              <a className="nx-btn primary" href="/next/fda/explorer"><Search size={13} /> Open explorer</a>
-              <a className="nx-btn" href="/fda/monitoring"><Activity size={13} /> Monitoring</a>
+              <a className="nx-btn primary" href="/next/fda/workspace"><Search size={13} /> Open workspace</a>
+              <a className="nx-btn" href="/next/fda/explorer">Explorer preview</a>
             </div>
           </article>
           <article className="nx-card">
@@ -65,36 +65,36 @@ export default function HubPage() {
 
         <div className="nx-section-title">Quick starts</div>
         <div className="nx-quick">
-          <a href={`/next/fda/explorer?${presetQuery}`}>
+          <a href={`/next/fda/workspace?${presetQuery}`}>
             <b><Ear size={12} /> Hearing-aid competitors</b>
-            <span>The six codes the team tracks: <code>{PRESET_CODES.join(" · ")}</code>. Any code matches.</span>
+            <span>The six codes the team tracks: <code>{PRESET_CODES.join(" · ")}</code>. Overview, companies, listings, timeline and changes.</span>
           </a>
-          <a href="/next/fda/explorer?codes=QDD,QUH&match=all">
+          <a href="/next/fda/workspace?codes=QDD,QUH&match=all&tab=companies">
             <b><Layers size={12} /> Same-listing self-fitting aids</b>
             <span>Listings that carry <code>QDD</code> and <code>QUH</code> on the same FDA filing.</span>
           </a>
-          <a href="/next/fda/explorer?kw=Sonova">
+          <a href="/next/fda/workspace?kw=Sonova&tab=companies">
             <b><Search size={12} /> Sonova listings</b>
             <span>Every establishment or device record that names Sonova.</span>
           </a>
-          <a href="/fda/monitoring?days=30">
+          <a href={`/next/fda/workspace?${presetQuery}&tab=changes&days=30`}>
             <b><Activity size={12} /> What changed in 30 days</b>
-            <span>New listings, 510(k)s, recalls and MAUDE reports for the preset codes.</span>
+            <span>New listings, 510(k)s, recalls and MAUDE reports for the six codes, inside the workspace.</span>
           </a>
         </div>
 
         <div className="nx-section-title">What changed in this design</div>
         <div className="nx-principles">
-          <div><b>Query first</b><span>No hero banner. The search field and the product-code chips sit at the top, and results begin immediately below.</span></div>
+          <div><b>A scope, not a search</b><span>Define the codes, country and keyword once. Overview, Companies, Listings, Timeline and Changes all answer that one scope, instantly.</span></div>
           <div><b>Persistent rail</b><span>All six workflows are one click away on the left, so switching between FDA, FCC and Health Canada never loses context.</span></div>
-          <div><b>Split detail pane</b><span>Opening a record slides a pane in beside the table instead of covering it, so you can step through results.</span></div>
-          <div><b>Denser tables</b><span>Tighter rows, sticky headers, monospace codes and tabular numbers for scanning hundreds of listings.</span></div>
+          <div><b>Companies are first-class</b><span>A competitor roster with coverage per code, establishments, trade names and 510(k)s. Pin up to four and compare them side by side.</span></div>
+          <div><b>Analysis the old site cannot do</b><span>Market stats, listings by year and code, new-entrant detection, client-side sorting and filtering, and saved scopes.</span></div>
           <div><b>Freshness in the status bar</b><span>Dataset vintage, pull time and paging live in a slim bar at the bottom, always visible, never in the way.</span></div>
           <div><b>Guided starts</b><span>Empty states offer the starting points the team actually uses instead of a blank search.</span></div>
         </div>
 
         <div className="nx-note">
-          Only this hub and the FDA Explorer use the new design so far. Every other link opens the current pages, and nothing on the main site has changed.
+          Only this hub, the FDA Workspace and the earlier FDA Explorer preview use the new design so far. Every other link opens the current pages, and nothing on the main site has changed.
         </div>
       </div>
     </NextShell>
