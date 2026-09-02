@@ -460,6 +460,7 @@ export async function fetchListingPages<T>(
   search: string,
   cap: number,
   onProgress?: (loaded: number, target: number) => void,
+  sort = "",
 ): Promise<{ results: T[]; meta?: OpenFdaMeta; total: number }> {
   const results: T[] = [];
   let meta: OpenFdaMeta | undefined;
@@ -467,6 +468,7 @@ export async function fetchListingPages<T>(
   for (let offset = 0; offset < Math.max(cap, 1); offset += OPENFDA_PAGE) {
     const params = new URLSearchParams({ limit: String(Math.min(OPENFDA_PAGE, Math.max(cap, 1) - offset)), skip: String(offset) });
     if (search) params.set("search", search);
+    if (sort) params.set("sort", sort);
     const page = await fetchOpenFda<T>(`${baseUrl}?${params.toString()}`);
     if (offset === 0) {
       meta = page.meta;
@@ -478,6 +480,139 @@ export async function fetchListingPages<T>(
     if (!page.results.length || results.length >= target) break;
   }
   return { results, meta, total };
+}
+
+/* ------------------------------------------------------------------ */
+/* Records sorting                                                      */
+/* ------------------------------------------------------------------ */
+
+/** openFDA only sorts non-analyzed fields, so names are out; dates and years work. */
+export type RecordSort = "relevance" | "newest" | "oldest" | "expiry";
+
+export const RECORD_SORT_OPTIONS: { value: RecordSort; label: string; openFda: string }[] = [
+  { value: "relevance", label: "openFDA order", openFda: "" },
+  { value: "newest", label: "Newest listing first", openFda: "products.created_date:desc" },
+  { value: "oldest", label: "Oldest listing first", openFda: "products.created_date:asc" },
+  { value: "expiry", label: "Latest expiry first", openFda: "registration.reg_expiry_date_year:desc" },
+];
+
+export function asRecordSort(value: unknown): RecordSort {
+  return RECORD_SORT_OPTIONS.some((option) => option.value === value && option.value !== "relevance") ? (value as RecordSort) : "relevance";
+}
+
+export function recordSortParam(sort: RecordSort) {
+  return RECORD_SORT_OPTIONS.find((option) => option.value === sort)?.openFda || "";
+}
+
+/* ------------------------------------------------------------------ */
+/* FDA deep links                                                       */
+/* ------------------------------------------------------------------ */
+
+const FDA_CFDOCS = "https://www.accessdata.fda.gov/scripts/cdrh/cfdocs";
+
+/** Official FDA database page for a 510(k) (K…), De Novo (DEN…) or PMA (P…) number; empty when the format is not recognised. */
+export function fdaPremarketUrl(id: string) {
+  const value = normalizeCode(id);
+  if (/^DEN\d/.test(value)) return `${FDA_CFDOCS}/cfpmn/denovo.cfm?ID=${encodeURIComponent(value)}`;
+  if (/^K\d/.test(value)) return `${FDA_CFDOCS}/cfpmn/pmn.cfm?ID=${encodeURIComponent(value)}`;
+  if (/^P\d/.test(value)) return `${FDA_CFDOCS}/cfpma/pma.cfm?id=${encodeURIComponent(value)}`;
+  return "";
+}
+
+/** Official FDA product classification page for a product code. */
+export function fdaProductCodeUrl(code: string) {
+  return `${FDA_CFDOCS}/cfpcd/classification.cfm?id=${encodeURIComponent(normalizeCode(code))}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Product-code classification lookup                                   */
+/* ------------------------------------------------------------------ */
+
+export const CLASSIFICATION_API = "https://api.fda.gov/device/classification.json";
+
+export type CodeInfo = { code: string; name: string; deviceClass: string; regulation: string; specialty: string };
+
+const codeInfoCache = new Map<string, CodeInfo | null>(
+  PRESET.map((entry) => [entry.code, { code: entry.code, name: entry.name, deviceClass: "", regulation: "", specialty: "" }]),
+);
+
+/** Cached classification for a code: an entry, `null` when openFDA knows no such code, or `undefined` when not looked up yet. */
+export function cachedCodeInfo(code: string) {
+  return codeInfoCache.get(normalizeCode(code));
+}
+
+export function seedCodeInfo(entries: readonly (CodeInfo | { code: string; missing: true })[]) {
+  entries.forEach((entry) => {
+    const code = normalizeCode(entry.code);
+    if (!code) return;
+    codeInfoCache.set(code, "missing" in entry ? null : { ...entry, code });
+  });
+}
+
+/**
+ * Resolves device names for product codes from the openFDA classification
+ * dataset. Codes openFDA does not know resolve to `null`, which the UI uses
+ * to flag likely typos. Results are cached for the session.
+ */
+export async function fetchCodeInfo(codes: readonly string[]): Promise<Map<string, CodeInfo | null>> {
+  const wanted = normalizeCodes(codes).filter((code) => !codeInfoCache.has(code));
+  for (let index = 0; index < wanted.length; index += 50) {
+    const chunk = wanted.slice(index, index + 50);
+    const clause = chunk.length === 1 ? `product_code:${quote(chunk[0])}` : `product_code:(${chunk.map(quote).join(" OR ")})`;
+    const params = new URLSearchParams({ search: clause, limit: "100" });
+    const data = await fetchOpenFda<{ product_code?: string; device_name?: string; device_class?: string; regulation_number?: string; medical_specialty_description?: string }>(`${CLASSIFICATION_API}?${params.toString()}`);
+    data.results.forEach((entry) => {
+      const code = normalizeCode(entry.product_code);
+      if (code && !codeInfoCache.get(code)) {
+        codeInfoCache.set(code, { code, name: entry.device_name || "", deviceClass: entry.device_class || "", regulation: entry.regulation_number || "", specialty: entry.medical_specialty_description || "" });
+      }
+    });
+    chunk.forEach((code) => { if (!codeInfoCache.has(code)) codeInfoCache.set(code, null); });
+  }
+  return new Map(normalizeCodes(codes).map((code) => [code, codeInfoCache.get(code) ?? null]));
+}
+
+/* ------------------------------------------------------------------ */
+/* Recent searches                                                      */
+/* ------------------------------------------------------------------ */
+
+export type RecentSearch = { params: string; label: string; at: string };
+export const RECENT_SEARCHES_KEY = "fda-recent-searches";
+export const RECENT_SEARCHES_MAX = 6;
+
+/** Short human label for a filter set, e.g. "OSM + ESD · All codes · Company + devices". */
+export function describeFilters(filters: ExplorerFilters, view: ExplorerView) {
+  const parts: string[] = [];
+  if (filters.productCodes.length) parts.push(filters.productCodes.join(" + "));
+  if (view === "matrix" && codeMatchApplies(filters)) parts.push("All codes");
+  if (filters.keyword.trim()) parts.push(`“${filters.keyword.trim()}”`);
+  if (filters.country.trim()) parts.push(filters.country.trim().toUpperCase());
+  if (filters.state.trim()) parts.push(filters.state.trim().toUpperCase());
+  if (filters.deviceClass) parts.push(`Class ${filters.deviceClass}`);
+  if (filters.establishment) parts.push(filters.establishment.split(" ").slice(0, 3).join(" "));
+  if (view === "matrix") parts.push("Company + devices");
+  return parts.join(" · ") || "All records";
+}
+
+/** Adds a search to the front of the recent list, de-duplicated by its URL parameters. */
+export function rememberSearch(list: readonly RecentSearch[], filters: ExplorerFilters, view: ExplorerView, at = new Date().toISOString()) {
+  const params = filtersToParams(filters, view).toString();
+  if (!params) return [...list];
+  const entry: RecentSearch = { params, label: describeFilters(filters, view), at };
+  return [entry, ...list.filter((item) => item.params !== params)].slice(0, RECENT_SEARCHES_MAX);
+}
+
+export function parseRecentSearches(raw: string | null): RecentSearch[] {
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item.params === "string" && typeof item.label === "string")
+      .map((item) => ({ params: item.params, label: item.label, at: typeof item.at === "string" ? item.at : "" }))
+      .slice(0, RECENT_SEARCHES_MAX);
+  } catch {
+    return [];
+  }
 }
 
 /** True on the internal dev deployment and local previews — drives the DEV badge. */

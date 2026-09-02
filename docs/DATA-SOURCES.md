@@ -13,6 +13,12 @@ The application uses public regulatory sources and keeps their fields distinguis
 - Product-code matching: the Records view lists listings that carry at least one selected code (`products.product_code:("A" OR "B")`), because a listing is one filing and normally one code. The **Company + devices** view adds a Match control: **Any** shows every owner/operator with a listing for at least one selected code; **All** keeps only owner/operators whose listings, taken together, cover every selected code — so a firm with one KSW listing and a separate OSM listing qualifies for KSW + OSM. That rollup is app-derived by grouping on the FDA-reported owner/operator name; the source data does not link listings to each other. The request to openFDA is the same for both modes; the view loads up to 5,000 matching listings before grouping and says so when a search has more.
 - Zero-hit searches: openFDA answers with HTTP 404 `NOT_FOUND`. The app treats that as an empty result set, not an error.
 
+### Product classification
+
+- Endpoint: `https://api.fda.gov/device/classification.json`
+- Used by: FDA Explorer, to name any product code a user enters (device name, class, regulation) and to flag codes FDA does not know. Results are cached per session.
+- Deep links: 510(k) numbers open `cfpmn/pmn.cfm`, De Novo numbers `cfpmn/denovo.cfm`, PMA numbers `cfpma/pma.cfm`, and product codes `cfpcd/classification.cfm` on accessdata.fda.gov.
+
 ### 510(k)
 
 - Endpoint: `https://api.fda.gov/device/510k.json`
