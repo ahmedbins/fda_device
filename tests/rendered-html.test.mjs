@@ -82,7 +82,7 @@ test("server-renders the design-preview hub and FDA Explorer", async () => {
 
   const explorer = await (await render("/next/fda/explorer")).text();
   assert.match(explorer, /Run search/);
-  assert.match(explorer, /Any code/);
-  assert.match(explorer, /All codes/);
+  assert.match(explorer, /Company \+ devices/);
+  assert.match(explorer, /Companies with QDD \+ QUH/);
   assert.match(explorer, /Hearing aids/);
 });

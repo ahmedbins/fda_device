@@ -26,6 +26,8 @@ import {
   CODE_MATCH_MODES,
   CODE_NAMES,
   EMPTY_FILTERS,
+  EXPORT_CAP,
+  MATRIX_FETCH_CAP,
   PRESET,
   PRESET_CODES,
   type CodeMatchMode,
@@ -33,11 +35,13 @@ import {
   type ExplorerView as ViewMode,
   type MatrixRow,
   type MatrixSort,
+  type OpenFdaMeta,
   type RecordItem,
-  applyCodeMatch,
   buildMatrix,
   buildSearch,
+  codeMatchApplies,
   companyName,
+  fetchListingPages,
   fetchOpenFda,
   filtersFromParams,
   filtersToParams,
@@ -45,6 +49,7 @@ import {
   listedDeviceNames,
   locationSummary,
   matchingProducts,
+  matrixCompanyCount,
   parseCodes,
   premarketSummary,
   productFilterActive,
@@ -91,7 +96,6 @@ const MATRIX_COLUMN_OPTIONS: { key: MatrixColumn; label: string; hint: string }[
 
 const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice", "productCodes", "listedProducts", "location", "deviceClass", "premarket"];
 const DEFAULT_MATRIX_COLUMNS: MatrixColumn[] = ["productCode", "deviceType", "company", "listedDeviceCount", "registeredDevices", "registrations"];
-const EXPORT_CAP = 26000; // openFDA pagination ceiling: skip<=25000 + limit<=1000
 const DEVICE_CLASSES: [string, string][] = [["", "Any class"], ["1", "Class I"], ["2", "Class II"], ["3", "Class III"], ["U", "Unclassified"]];
 const ESTABLISHMENT_TYPES = [
   "Manufacture Medical Device",
@@ -137,6 +141,7 @@ export default function FdaExplorerNext() {
   const [limit, setLimit] = useState(50);
   const [skip, setSkip] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingNote, setLoadingNote] = useState("");
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RecordItem | null>(null);
   const [exportProgress, setExportProgress] = useState("");
@@ -163,20 +168,28 @@ export default function FdaExplorerNext() {
 
   const hasSearched = fetchedAt !== null;
   const presetActive = filters.productCodes.length === PRESET_CODES.length && PRESET_CODES.every((code) => filters.productCodes.includes(code));
-  const allTogether = appliedFilters.codeMatch === "all" && appliedFilters.productCodes.length > 1;
+  /** ALL only exists in the Company + devices view, and only changes anything with two or more applied codes. */
+  const allTogether = viewMode === "matrix" && codeMatchApplies(appliedFilters);
   const moreCount = [filters.state.trim(), filters.establishment].filter(Boolean).length;
-  const matchHint = filters.codeMatch === "all"
-    ? (filters.productCodes.length > 1
-      ? "All codes: only listings that carry every selected code on the same FDA filing."
-      : "All codes needs two or more codes — add another to require them on the same listing.")
+  const matchHint = viewMode === "matrix"
+    ? (filters.codeMatch === "all"
+      ? (filters.productCodes.length > 1
+        ? "All codes: only companies whose listings cover every selected code."
+        : "All codes needs two or more codes — add another to require every code per company.")
+      : "Any code: companies with a listing for at least one selected code.")
     : filters.productCodes.length > 1
-      ? "Any code: listings that carry at least one selected code."
+      ? "Listings match any selected code. Company + devices can require every code per company."
       : "Type product codes separated by commas or spaces. Press / to jump to search.";
 
-  /** Client-side guard: every displayed listing must itself satisfy the ANY/ALL rule, whatever the API returned. */
-  const visibleRecords = useMemo(
-    () => applyCodeMatch(records, appliedFilters.productCodes, appliedFilters.codeMatch),
-    [records, appliedFilters.productCodes, appliedFilters.codeMatch],
+  /** Company + devices groups; with ALL, only companies covering every selected code survive. */
+  const matrixRows = useMemo(
+    () => sortMatrixRows(buildMatrix(records, appliedFilters), matrixSort),
+    [records, appliedFilters, matrixSort],
+  );
+  const matrixCompanies = useMemo(() => matrixCompanyCount(matrixRows), [matrixRows]);
+  const anyCompanies = useMemo(
+    () => matrixCompanyCount(buildMatrix(records, { ...appliedFilters, codeMatch: "any" })),
+    [records, appliedFilters],
   );
 
   const runSearch = useCallback(
@@ -184,14 +197,20 @@ export default function FdaExplorerNext() {
       const seq = ++searchSeq.current;
       setError("");
       setLoading(true);
+      setLoadingNote("");
       try {
-        const params = new URLSearchParams({
-          limit: String(requestedView === "matrix" ? 1000 : nextLimit),
-          skip: String(requestedView === "matrix" ? 0 : nextSkip),
-        });
         const search = buildSearch(nextFilters);
-        if (search) params.set("search", search);
-        const data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+        let data: { results: RecordItem[]; meta?: OpenFdaMeta };
+        if (requestedView === "matrix") {
+          // Company coverage must be judged on the whole match set, so the matrix pages well past one call.
+          data = await fetchListingPages<RecordItem>(API, search, MATRIX_FETCH_CAP, (loaded, target) => {
+            if (seq === searchSeq.current && target > 1000) setLoadingNote(`Loading listings ${loaded.toLocaleString()} of ${target.toLocaleString()}…`);
+          });
+        } else {
+          const params = new URLSearchParams({ limit: String(nextLimit), skip: String(nextSkip) });
+          if (search) params.set("search", search);
+          data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+        }
         if (seq !== searchSeq.current) return;
         setRecords(data.results);
         setTotal(data.meta?.results?.total || 0);
@@ -202,9 +221,8 @@ export default function FdaExplorerNext() {
         if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
         syncUrl(nextFilters, requestedView);
         if (nextFilters.productCodes.length) {
-          const countSearch = buildSearch({ ...nextFilters, codeMatch: "any" });
           const countParams = new URLSearchParams({ count: "products.product_code", limit: "1000" });
-          if (countSearch) countParams.set("search", countSearch);
+          if (search) countParams.set("search", search);
           fetchOpenFda<{ term?: string; count?: number }>(`${API}?${countParams.toString()}`)
             .then((countData) => {
               if (seq !== searchSeq.current) return;
@@ -222,7 +240,10 @@ export default function FdaExplorerNext() {
         setCodeCounts(null);
         setError(caught instanceof Error ? caught.message : "Unable to reach the FDA API.");
       } finally {
-        if (seq === searchSeq.current) setLoading(false);
+        if (seq === searchSeq.current) {
+          setLoading(false);
+          setLoadingNote("");
+        }
       }
     },
     [filters, limit, viewMode],
@@ -326,10 +347,11 @@ export default function FdaExplorerNext() {
     if (hasSearched) runSearch(0, viewMode, next);
   };
 
-  const applyFilters = (next: Filters) => {
+  const applyFilters = (next: Filters, nextView: ViewMode = viewMode) => {
+    if (nextView !== viewMode) setViewMode(nextView);
     setFilters(next);
     setCodeDraft("");
-    runSearch(0, viewMode, next);
+    runSearch(0, nextView, next);
   };
 
   const togglePreset = () => {
@@ -342,18 +364,14 @@ export default function FdaExplorerNext() {
     }
   };
 
+  /** ANY/ALL is a client-side rollup over the listings already loaded, so switching is instant — no new request. */
   const setCodeMatch = (mode: CodeMatchMode) => {
     if (filters.codeMatch === mode && appliedFilters.codeMatch === mode) return;
-    const next = { ...filters, codeMatch: mode };
-    setFilters(next);
+    setFilters((current) => ({ ...current, codeMatch: mode }));
     if (!hasSearched) return;
-    if (Math.max(next.productCodes.length, appliedFilters.productCodes.length) > 1) {
-      runSearch(0, viewMode, next);
-    } else {
-      const applied = { ...appliedFilters, codeMatch: mode };
-      setAppliedFilters(applied);
-      syncUrl(applied, viewMode);
-    }
+    const applied = { ...appliedFilters, codeMatch: mode };
+    setAppliedFilters(applied);
+    syncUrl(applied, viewMode);
   };
 
   const changeLimit = (nextLimit: number) => {
@@ -383,6 +401,7 @@ export default function FdaExplorerNext() {
     setSkip(0);
     setError("");
     setLoading(false);
+    setLoadingNote("");
     setSelected(null);
     setFetchedAt(null);
     syncUrl(EMPTY_FILTERS, viewMode);
@@ -399,17 +418,11 @@ export default function FdaExplorerNext() {
 
   const fetchAllMatching = async () => {
     const cap = Math.min(total, EXPORT_CAP);
-    const all: RecordItem[] = [];
-    const search = buildSearch(appliedFilters);
-    for (let offset = 0; offset < cap; offset += 1000) {
-      setExportProgress(`Downloading ${Math.min(offset + 1000, cap).toLocaleString()} of ${cap.toLocaleString()} records…`);
-      const params = new URLSearchParams({ limit: String(Math.min(1000, cap - offset)), skip: String(offset) });
-      if (search) params.set("search", search);
-      const data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
-      all.push(...data.results);
-      if (!data.results.length) break;
-    }
-    return all;
+    setExportProgress(`Downloading 0 of ${cap.toLocaleString()} records…`);
+    const { results } = await fetchListingPages<RecordItem>(API, buildSearch(appliedFilters), cap, (loaded, target) => {
+      setExportProgress(`Downloading ${loaded.toLocaleString()} of ${target.toLocaleString()} records…`);
+    });
+    return results;
   };
 
   const exportBaseName = () => {
@@ -428,8 +441,7 @@ export default function FdaExplorerNext() {
     if (!total || exportProgress) return;
     setError("");
     try {
-      const fetched = exportScope === "page" ? visibleRecords : await fetchAllMatching();
-      const all = applyCodeMatch(fetched, appliedFilters.productCodes, appliedFilters.codeMatch);
+      const all = exportScope === "page" ? records : await fetchAllMatching();
       if (viewMode === "matrix") {
         const labels = Object.fromEntries(MATRIX_COLUMN_OPTIONS.map((option) => [option.key, option.label])) as Record<MatrixColumn, string>;
         const value = (row: MatrixRow, column: MatrixColumn): ExcelValue => ({
@@ -496,11 +508,6 @@ export default function FdaExplorerNext() {
     }
   };
 
-  const matrixRows = useMemo(
-    () => sortMatrixRows(buildMatrix(visibleRecords, appliedFilters), matrixSort),
-    [visibleRecords, appliedFilters, matrixSort],
-  );
-
   const drawerProducts = useMemo(() => {
     if (!selected) return [];
     const matched = new Set(matchingProducts(selected, appliedFilters));
@@ -511,34 +518,35 @@ export default function FdaExplorerNext() {
 
   const exportCount = Math.min(total, EXPORT_CAP);
   const timeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
-  const showNoResults = hasSearched && !loading && !error && !visibleRecords.length;
-  const showEmpty = !visibleRecords.length && !loading && !showNoResults;
+  const nothingToShow = viewMode === "matrix" ? !matrixRows.length : !records.length;
+  const showNoResults = hasSearched && !loading && !error && nothingToShow;
+  const showEmpty = nothingToShow && !loading && !showNoResults;
   const appliedCodesLabel = appliedFilters.productCodes.join(" + ");
   const rangeLabel = total
-    ? `${(skip + 1).toLocaleString()}–${Math.min(skip + visibleRecords.length, total).toLocaleString()} of ${total.toLocaleString()}`
+    ? `${(skip + 1).toLocaleString()}–${Math.min(skip + records.length, total).toLocaleString()} of ${total.toLocaleString()}`
     : "0 records";
   const heading = !hasSearched
     ? "FDA registrations & listings"
     : viewMode === "matrix"
-      ? `${matrixRows.length.toLocaleString()} company · device groups`
+      ? `${matrixCompanies.toLocaleString()} ${matrixCompanies === 1 ? "company" : "companies"} · ${matrixRows.length.toLocaleString()} code groups`
       : `${total.toLocaleString()} listing${total === 1 ? "" : "s"}`;
   const subheading = !hasSearched
     ? "openFDA registration & listing records"
     : viewMode === "matrix"
-      ? `from ${visibleRecords.length.toLocaleString()} matching listings${total > 1000 ? ` (first 1,000 of ${total.toLocaleString()})` : ""}`
+      ? `from ${records.length.toLocaleString()} matching listings${total > MATRIX_FETCH_CAP ? ` (first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()})` : ""}`
       : `showing ${rangeLabel}`;
 
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="nx-counts" aria-label="Matches per product code">
-      <span className="nx-counts-label">{allTogether ? "Each code alone" : "Per code"}</span>
+      <span className="nx-counts-label">Per code</span>
       {codeCounts.map(({ code, count }) => (
         <span key={code} className={`nx-count${count ? "" : " zero"}`} title={CODE_NAMES.get(code) || `Product code ${code}`}>
           <b>{code}</b> {count.toLocaleString()}
         </span>
       ))}
       {allTogether && (
-        <span className={`nx-count together${total ? "" : " zero"}`} title={`Listings that carry ${appliedCodesLabel} on the same record`}>
-          <b>All {appliedFilters.productCodes.length} together</b> {total.toLocaleString()}
+        <span className={`nx-count together${matrixCompanies ? "" : " zero"}`} title={`Companies whose listings cover ${appliedCodesLabel}`}>
+          <b>All {appliedFilters.productCodes.length} codes</b> {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"}
         </span>
       )}
     </div>
@@ -620,13 +628,15 @@ export default function FdaExplorerNext() {
             />
             <datalist id="nx-product-code-options">{PRESET.map((item) => <option key={item.code} value={item.code} label={item.name} />)}</datalist>
           </div>
-          <div className="nx-seg" role="group" aria-label="How several product codes combine">
-            {CODE_MATCH_MODES.map((mode) => (
-              <button key={mode.value} type="button" className={filters.codeMatch === mode.value ? "active" : ""} aria-pressed={filters.codeMatch === mode.value} title={mode.hint} onClick={() => setCodeMatch(mode.value)}>
-                {mode.value === "any" ? "Any code" : "All codes"}
-              </button>
-            ))}
-          </div>
+          {viewMode === "matrix" && (
+            <div className="nx-seg" role="group" aria-label="How several product codes combine per company">
+              {CODE_MATCH_MODES.map((mode) => (
+                <button key={mode.value} type="button" className={filters.codeMatch === mode.value ? "active" : ""} aria-pressed={filters.codeMatch === mode.value} title={mode.hint} onClick={() => setCodeMatch(mode.value)}>
+                  {mode.value === "any" ? "Any code" : "All codes"}
+                </button>
+              ))}
+            </div>
+          )}
           <button type="button" className={`nx-preset ${presetActive ? "on" : ""}`} onClick={togglePreset} aria-pressed={presetActive} title={PRESET.map((p) => `${p.code} — ${p.name}`).join("\n")}>
             <Ear size={13} /> Hearing aids · 6 {presetActive && <Check size={12} />}
           </button>
@@ -698,7 +708,7 @@ export default function FdaExplorerNext() {
               <p>{datasetTotal ? `${datasetTotal.toLocaleString()} listings` : "openFDA"}{datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}. Pick a starting point or type codes and keywords above.</p>
               <div className="nx-quick">
                 <button type="button" onClick={() => applyFilters({ ...EMPTY_FILTERS, productCodes: [...PRESET_CODES] })}><b>Hearing-aid competitors</b><span>The six tracked codes: <code>{PRESET_CODES.join(" · ")}</code>.</span></button>
-                <button type="button" onClick={() => applyFilters({ ...EMPTY_FILTERS, productCodes: ["QDD", "QUH"], codeMatch: "all" })}><b>Same-listing self-fitting aids</b><span>Listings carrying <code>QDD</code> and <code>QUH</code> on one filing.</span></button>
+                <button type="button" onClick={() => applyFilters({ ...EMPTY_FILTERS, productCodes: ["QDD", "QUH"], codeMatch: "all" }, "matrix")}><b>Companies with QDD + QUH</b><span>Owner / operators whose listings cover both self-fitting codes.</span></button>
                 <button type="button" onClick={() => applyFilters({ ...EMPTY_FILTERS, keyword: "Sonova" })}><b>Sonova listings</b><span>Every record that names Sonova.</span></button>
                 <button type="button" onClick={() => runSearch(0)}><b>Browse everything</b><span>Page through the whole registry, newest openFDA order.</span></button>
               </div>
@@ -706,14 +716,14 @@ export default function FdaExplorerNext() {
           ) : showNoResults ? (
             <div className="nx-empty" role="status">
               <PackageSearch size={30} />
-              <h2>No listings match.</h2>
-              {allTogether ? (
-                <p>No single FDA listing carries <b>{appliedCodesLabel}</b> together. Each openFDA record is one product filing, so a company with separate listings for these codes does not count. Switch to <b>Any code</b> to see listings with at least one of them.</p>
+              <h2>{allTogether && records.length ? "No company holds every code." : "No listings match."}</h2>
+              {allTogether && records.length ? (
+                <p>No owner / operator has listings covering all of <b>{appliedCodesLabel}</b>. {anyCompanies.toLocaleString()} {anyCompanies === 1 ? "company holds" : "companies hold"} at least one of them — switch to <b>Any code</b> to see them.</p>
               ) : (
                 <p>Nothing in the openFDA registration and listing dataset matches this combination. Try fewer filters, another country, or double-check the product codes.</p>
               )}
               <div className="nx-empty-actions">
-                {allTogether && <button type="button" className="nx-btn primary" onClick={() => setCodeMatch("any")}>Match any code</button>}
+                {allTogether && records.length > 0 && <button type="button" className="nx-btn primary" onClick={() => setCodeMatch("any")}>Match any code</button>}
                 <button type="button" className="nx-btn" onClick={reset}>Clear all filters</button>
               </div>
             </div>
@@ -721,8 +731,9 @@ export default function FdaExplorerNext() {
             <>
               {viewMode === "matrix" && (
                 <div className="nx-matrix-note">
-                  <span><Building2 size={13} /> <b>{matrixRows.length.toLocaleString()}</b> company · device groups from <b>{visibleRecords.length.toLocaleString()}</b> listings</span>
-                  {allTogether && <span><Layers size={13} /> only listings carrying {appliedCodesLabel} together are grouped</span>}
+                  <span><Building2 size={13} /> <b>{matrixCompanies.toLocaleString()}</b> {matrixCompanies === 1 ? "company" : "companies"} · <b>{matrixRows.length.toLocaleString()}</b> code groups from <b>{records.length.toLocaleString()}</b> listings</span>
+                  {allTogether && <span><Layers size={13} /> only companies whose listings cover {appliedCodesLabel} are shown</span>}
+                  {total > MATRIX_FETCH_CAP && <span>first {MATRIX_FETCH_CAP.toLocaleString()} of {total.toLocaleString()} matches — coverage beyond that is not checked</span>}
                   <span>Devices counts unique proprietary names · Excel fetches every available match</span>
                 </div>
               )}
@@ -744,7 +755,7 @@ export default function FdaExplorerNext() {
                       {recordColumns.includes("feiNumber") && <th>FEI</th>}
                     </tr></thead>
                     <tbody>
-                      {visibleRecords.map((item, index) => {
+                      {records.map((item, index) => {
                         const matched = matchingProducts(item, appliedFilters);
                         const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
                         const primary = shown[0];
@@ -809,7 +820,7 @@ export default function FdaExplorerNext() {
               </div>
             </>
           )}
-          {(loading || exportProgress) && <div className="nx-loading"><LoaderCircle className="nx-spin" size={18} /><span>{exportProgress || "Searching openFDA…"}</span></div>}
+          {(loading || exportProgress) && <div className="nx-loading"><LoaderCircle className="nx-spin" size={18} /><span>{exportProgress || loadingNote || "Searching openFDA…"}</span></div>}
         </div>
 
         {selected && (
@@ -869,7 +880,7 @@ export default function FdaExplorerNext() {
               <span><b>{rangeLabel}</b></span>
               <div className="nx-pager">
                 <button type="button" className="nx-btn icon" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading} aria-label="Previous page"><ArrowLeft size={14} /></button>
-                <button type="button" className="nx-btn icon" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + visibleRecords.length >= total || loading} aria-label="Next page"><ArrowRight size={14} /></button>
+                <button type="button" className="nx-btn icon" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + records.length >= total || loading} aria-label="Next page"><ArrowRight size={14} /></button>
               </div>
             </>
           )}
@@ -887,12 +898,12 @@ export default function FdaExplorerNext() {
         filename={exportFilename}
         scope={exportScope}
         clickableLinks={false}
-        pageCount={visibleRecords.length}
+        pageCount={records.length}
         allCount={exportCount}
         filters={[
           appliedFilters.keyword,
           ...appliedFilters.productCodes,
-          allTogether ? "All codes on the same listing" : "",
+          allTogether ? "Companies holding all codes" : "",
           appliedFilters.country,
           appliedFilters.deviceClass && `Class ${appliedFilters.deviceClass}`,
         ].filter(Boolean) as string[]}
