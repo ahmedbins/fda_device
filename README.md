@@ -197,6 +197,7 @@ Cloudflare deployment requires an authenticated Wrangler session with access to 
 | [FCC Equipment Authorization System](https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=KWC) | FCC Explorer and Monitoring |
 | [FCC Open Data grantee registrations](https://opendata.fcc.gov/Engineering-Technology/EAS-Equipment-Authorization-Grantee-Registrations/3b3k-34jp) | Confirmed FCC grantee profiles |
 | [Health Canada MDALL API](https://health-products.canada.ca/api/documentation/mdall-documentation-en.html) | HC Explorer and Monitoring |
+| [Canada Gazette Parts I, II and III](https://gazette.gc.ca/rp-pr/publications-eng.html) | Canada Gazette intelligence (design preview) |
 
 Read [Data sources and provenance](docs/DATA-SOURCES.md) before changing source mappings, FCC presets, normalized categories, or snapshot records.
 

@@ -95,3 +95,11 @@ test("server-renders the FDA workspace preview with its scope bar and views", as
   for (const view of ["Overview", "Companies", "Listings", "Timeline", "Changes"]) assert.match(workspace, new RegExp(view));
   assert.match(workspace, /Define a scope/);
 });
+
+test("server-renders the Canada Gazette intelligence preview", async () => {
+  const page = await (await render("/next/gazette")).text();
+  assert.match(page, /Canada Gazette/);
+  assert.match(page, /General Medical Devices/);
+  assert.match(page, /Hearing Aids/);
+  assert.match(page, /not a legal or regulatory conclusion/i);
+});

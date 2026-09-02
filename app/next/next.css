@@ -399,3 +399,74 @@ button.nx-bar-row:hover { background: #f6f9fc; }
   .nx-scroll { overflow: visible; }
 }
 .nx-chart-note { margin: -4px 0 8px; color: var(--nx-muted); font-size: 11px; }
+
+/* ---------- Canada Gazette intelligence ---------- */
+.nx-gz-fresh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 20px; border-bottom: 1px solid var(--nx-line); background: #fafbfc; color: var(--nx-muted); font-size: 11.5px; }
+.nx-gz-fresh b { color: var(--nx-ink); font-weight: 600; }
+.nx-gz-fresh .nx-pill { font-size: 10.5px; }
+.nx-gz-fresh .nx-pill.ok { background: #e6f4ea; color: #1f6b3a; }
+.nx-gz-fresh .nx-pill.partial { background: #fff3d6; color: #7a5410; }
+.nx-gz-fresh .nx-pill.bad { background: #fbeae7; color: #8f2f22; }
+.nx-gz-fresh .nx-pill.stale { background: #fff3d6; color: #7a5410; }
+.nx-gz-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 20px; border-bottom: 1px solid var(--nx-line); background: #fff; }
+.nx-gz-summary .nx-query-label { margin-right: 4px; }
+.nx-gz-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid var(--nx-line-2); border-radius: 13px; background: #fff; color: var(--nx-ink-2); font: 600 11px var(--nx-sans); cursor: pointer; }
+.nx-gz-chip em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--nx-muted); }
+.nx-gz-chip:hover { border-color: #b3bcc8; }
+.nx-gz-chip.on { border-color: var(--nx-ink); background: var(--nx-ink); color: #fff; }
+.nx-gz-chip.on em { color: #c9d3e3; }
+.nx-gz-chip i { width: 8px; height: 8px; border-radius: 50%; }
+.nx-gz-list { flex: 1; min-height: 0; overflow: auto; background: var(--nx-bg); }
+.nx-gz-item { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; margin: 10px 20px 0; padding: 12px 14px; background: #fff; border: 1px solid var(--nx-line); border-left-width: 4px; border-radius: 9px; }
+.nx-gz-item:last-child { margin-bottom: 16px; }
+.nx-gz-item.p-critical { border-left-color: #b7382b; }
+.nx-gz-item.p-high { border-left-color: #d97a1c; }
+.nx-gz-item.p-medium { border-left-color: #c9a500; }
+.nx-gz-item.p-low { border-left-color: #8fa3c4; }
+.nx-gz-item.p-very-low { border-left-color: #d3d8df; }
+.nx-gz-rank { display: flex; flex-direction: column; gap: 4px; }
+.nx-gz-priority { display: inline-block; width: fit-content; padding: 2px 7px; border-radius: 4px; font: 700 10px var(--nx-sans); text-transform: uppercase; letter-spacing: .06em; }
+.p-critical .nx-gz-priority { background: #fbeae7; color: #8f2f22; }
+.p-high .nx-gz-priority { background: #fdefdc; color: #8a4b0a; }
+.p-medium .nx-gz-priority { background: #fbf4d0; color: #6d5a00; }
+.p-low .nx-gz-priority { background: #e7f2fa; color: var(--nx-accent-ink); }
+.p-very-low .nx-gz-priority { background: #eef0f3; color: var(--nx-muted); }
+.nx-gz-score { font: 600 22px/1 var(--nx-sans); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.nx-gz-score small { font-size: 11px; color: var(--nx-faint); font-weight: 500; }
+.nx-gz-depth { color: var(--nx-faint); font-size: 10.5px; }
+.nx-gz-main { min-width: 0; }
+.nx-gz-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--nx-muted); font-size: 11px; }
+.nx-gz-part { color: var(--nx-accent-ink); font-weight: 600; }
+.nx-gz-item h3 { margin: 3px 0 2px; font: 600 13.5px/1.35 var(--nx-sans); }
+.nx-gz-item h3 a { color: var(--nx-ink); text-decoration: none; }
+.nx-gz-item h3 a:hover { text-decoration: underline; }
+.nx-gz-context { margin: 0 0 6px; color: var(--nx-muted); font-size: 11.5px; }
+.nx-gz-why { margin: 0 0 6px; font-size: 12px; color: var(--nx-ink-2); }
+.nx-gz-why b { font-weight: 600; color: var(--nx-muted); }
+.nx-gz-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.nx-gz-topic { padding: 2px 7px; border-radius: 9px; font: 600 10px var(--nx-sans); background: #eef0f3; color: var(--nx-ink-2); }
+.nx-gz-topic.t-device { background: #fbeae7; color: #8f2f22; }
+.nx-gz-topic.t-lifecycle { background: #e7f2fa; color: var(--nx-accent-ink); }
+.nx-gz-topic.t-technology { background: #ede9fb; color: #4a3aa7; }
+.nx-gz-topic.t-broader { background: #f1f3f6; color: var(--nx-ink-2); }
+.nx-gz-topic.t-organization { background: #e6f4ea; color: #1f6b3a; }
+.nx-gz-topic.t-hearing { background: #fdefdc; color: #8a4b0a; }
+.nx-gz-concept { padding: 2px 6px; border: 1px solid var(--nx-line); border-radius: 4px; font: 500 10.5px var(--nx-sans); color: var(--nx-ink-2); }
+.nx-gz-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 11.5px; }
+.nx-gz-actions .nx-linklike { font-weight: 500; }
+.nx-gz-actions .nx-muted { font-size: 11px; }
+.nx-gz-detail { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--nx-line); border-radius: 7px; background: #fafbfc; font-size: 11.5px; }
+.nx-gz-detail table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.nx-gz-detail th { text-align: left; padding: 3px 6px; color: var(--nx-muted); font: 600 10px var(--nx-sans); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--nx-line); }
+.nx-gz-detail td { padding: 3px 6px; border-bottom: 1px solid #eef0f3; vertical-align: top; }
+.nx-gz-detail td.nx-num { text-align: right; }
+.nx-gz-snippet { margin: 6px 0 0; padding: 8px 10px; background: #fff; border: 1px solid var(--nx-line); border-radius: 6px; color: var(--nx-ink-2); line-height: 1.5; white-space: pre-wrap; }
+.nx-gz-snippet mark { background: #fff3a8; color: inherit; padding: 0 1px; }
+.nx-gz-disclaimer { padding: 10px 20px; border-top: 1px solid var(--nx-line); background: #fff; color: var(--nx-muted); font-size: 11px; line-height: 1.5; }
+.nx-gz-rules { width: 420px; max-height: 60vh; overflow: auto; }
+.nx-gz-rules h4 { margin: 8px 0 4px; font: 600 11px var(--nx-sans); text-transform: uppercase; letter-spacing: .06em; color: var(--nx-muted); }
+.nx-gz-rules ul { margin: 0; padding: 0 0 0 4px; list-style: none; }
+.nx-gz-rules li { display: flex; justify-content: space-between; gap: 10px; padding: 2px 4px; font-size: 11.5px; border-bottom: 1px solid #f1f3f6; }
+.nx-gz-rules li span { color: var(--nx-muted); font-variant-numeric: tabular-nums; }
+.nx-gz-rules p { margin: 6px 0; color: var(--nx-muted); font-size: 11px; }
+@media (max-width: 900px) { .nx-gz-item { grid-template-columns: 1fr; margin-inline: 10px; } .nx-gz-rank { flex-direction: row; align-items: center; gap: 10px; } .nx-gz-fresh, .nx-gz-summary, .nx-gz-disclaimer { padding-inline: 14px; } .nx-gz-rules { width: min(420px, 92vw); } }

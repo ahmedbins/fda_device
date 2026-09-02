@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, Ear, FileSearch, Layers, Radio, Search, ShieldCheck } from "lucide-react";
+import { Activity, Ear, FileSearch, Layers, Radio, ScrollText, Search, ShieldCheck } from "lucide-react";
 import { API, PRESET_CODES, fetchOpenFda } from "../fda-shared";
 import { NextShell } from "./shell";
 import "./next.css";
@@ -61,6 +61,15 @@ export default function HubPage() {
               <a className="nx-btn" href="/hc/monitoring"><Activity size={13} /> Monitoring</a>
             </div>
           </article>
+          <article className="nx-card">
+            <h2><ScrollText size={17} /> Canada Gazette</h2>
+            <p>Official Part I, II and III publications, parsed into items and ranked by relevance to a medical-device or hearing-aid company. Ranking orders reading; it hides nothing.</p>
+            <span className="meta">gazette.gc.ca live · General and Hearing Aids profiles</span>
+            <div className="links">
+              <a className="nx-btn primary" href="/next/gazette"><Search size={13} /> Open intelligence</a>
+              <a className="nx-btn" href="/next/gazette?profile=hearing"><Ear size={13} /> Hearing profile</a>
+            </div>
+          </article>
         </div>
 
         <div className="nx-section-title">Quick starts</div>
@@ -94,7 +103,7 @@ export default function HubPage() {
         </div>
 
         <div className="nx-note">
-          Only this hub, the FDA Workspace and the earlier FDA Explorer preview use the new design so far. Every other link opens the current pages, and nothing on the main site has changed.
+          Only this hub, the FDA Workspace, the Canada Gazette intelligence page and the earlier FDA Explorer preview use the new design so far. Every other link opens the current pages, and nothing on the main site has changed.
         </div>
       </div>
     </NextShell>

@@ -91,10 +91,60 @@ async function fccSearch(request) {
   return Response.json({ error: "The FCC Equipment Authorization source could not be reached." }, { status: 502 });
 }
 
+const GAZETTE_HOSTS = new Set(["gazette.gc.ca", "www.gazette.gc.ca", "canadagazette.gc.ca", "www.canadagazette.gc.ca"]);
+
+// Same-origin proxy for official Canada Gazette pages: the Gazette site refuses cross-origin
+// browser requests, so the page asks this worker, which fetches, caches and relays the HTML.
+async function gazetteSource(request, ctx) {
+  const target = new URL(request.url).searchParams.get("url") || "";
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return new Response("Missing or invalid url", { status: 400 });
+  }
+  if (parsed.protocol !== "https:" || !GAZETTE_HOSTS.has(parsed.hostname)) return new Response("Only gazette.gc.ca pages can be relayed", { status: 400 });
+  const cache = caches.default;
+  const cacheKey = new Request(parsed.toString(), { method: "GET" });
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const hit = new Response(cached.body, cached);
+    hit.headers.set("x-gazette-cache", "HIT");
+    return hit;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const upstream = await fetch(parsed.toString(), {
+      signal: controller.signal,
+      headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; Sonova-Regulatory-Data/1.0)" },
+    });
+    if (!upstream.ok) return new Response(`Canada Gazette answered HTTP ${upstream.status}`, { status: upstream.status === 404 ? 404 : 502 });
+    const body = await upstream.arrayBuffer();
+    const ttl = /index-eng\.html$/.test(parsed.pathname) ? 1800 : 86400;
+    const response = new Response(body, {
+      status: 200,
+      headers: {
+        "content-type": upstream.headers.get("content-type") || "text/html; charset=utf-8",
+        "cache-control": `public, max-age=${ttl}`,
+        "x-gazette-fetched-at": new Date().toISOString(),
+        "x-gazette-cache": "MISS",
+      },
+    });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
+  } catch (error) {
+    return new Response(`Canada Gazette request failed: ${error instanceof Error ? error.message : "unknown error"}`, { status: 502 });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/fcc/search") return fccSearch(request);
+    if (url.pathname === "/api/gazette/source") return gazetteSource(request, ctx);
     return env.ASSETS.fetch(request);
   },
 };

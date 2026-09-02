@@ -39,6 +39,19 @@ The application uses public regulatory sources and keeps their fields distinguis
 
 Official documentation: [openFDA device APIs](https://open.fda.gov/apis/device/).
 
+## Canada Gazette
+
+### Parts I, II and III
+
+- Site: `https://gazette.gc.ca/rp-pr/` (official HTML editions; the site refuses cross-origin browser requests, so the app relays pages through `/api/gazette/source`, which only accepts `gazette.gc.ca` URLs and caches them at the edge)
+- Used by: Canada Gazette intelligence (`/next/gazette`, design preview on Internal)
+- Part I (weekly, Saturdays): notices, commissions, miscellaneous notices, Parliament, Orders in Council and proposed regulations. The yearly index lists issues and extra editions; each issue index links items into section pages (one page for all government notices, one per proposed regulation).
+- Part II (fortnightly, Wednesdays): enacted regulations (SOR) and statutory instruments (SI) with registration number, registration date and enabling statutes; each instrument page carries the regulation and its Regulatory Impact Analysis Statement. Extra editions link straight to an instrument.
+- Part III: Acts of Parliament, published as a yearly table (Justice Canada hosts the Act text); Acts assented this year appear in the volume that closed last year.
+- Official fields shown as published: part, edition, date, title, section, organization, act or enabling statute, registration number, links.
+- App-generated fields, always labelled as such: relevance score (0–100), priority band, topics, matched concepts and the "why" explanation. They come from deterministic, configurable keyword rules in `app/gazette-scoring.ts` (weighted concept groups, title/heading/body weighting, capped repetition, co-occurrence bonuses, weak-term damping, conservative negatives), calibrated against six months of real publications. Ranking orders reading; it never hides an item and is not a legal or regulatory conclusion.
+- Freshness: the page shows when it last checked and when it last succeeded, per part, and keeps the last successful update in the browser so stale data is never presented as current.
+
 ## FCC
 
 ### Equipment Authorization System

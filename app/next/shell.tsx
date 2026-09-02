@@ -1,10 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Activity, Compass, FileSearch, Radio, ShieldCheck } from "lucide-react";
+import { Activity, Compass, FileSearch, Radio, ScrollText, ShieldCheck } from "lucide-react";
 import { useDevHost } from "../fda-shared";
 
-export type NextRoute = "hub" | "fda-workspace" | "fda-explorer";
+export type NextRoute = "hub" | "fda-workspace" | "fda-explorer" | "gazette";
 
 type NextShellProps = {
   active: NextRoute;
@@ -41,6 +41,10 @@ export function NextShell({ active, children }: NextShellProps) {
           <span>Health Canada · MDALL</span>
           <a className="nx-rail-link" href="/hc/explorer"><ShieldCheck size={15} /> Explorer <em>current</em></a>
           <a className="nx-rail-link" href="/hc/monitoring"><Activity size={15} /> Monitoring <em>current</em></a>
+        </div>
+        <div className="nx-rail-group">
+          <span>Canada Gazette</span>
+          <a className={`nx-rail-link ${active === "gazette" ? "active" : ""}`} href="/next/gazette" aria-current={active === "gazette" ? "page" : undefined}><ScrollText size={15} /> Intelligence <em>new</em></a>
         </div>
         <div className="nx-rail-foot">
           <p>Design preview. <em>new</em> is the scope workbench, <em>preview</em> the earlier restyle, <em>current</em> the existing pages.</p>
