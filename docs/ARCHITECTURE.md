@@ -82,7 +82,7 @@ Equipment descriptions, RF characteristics, and equipment class are not invented
 
 ## State and persistence
 
-- Explorer filters and Monitoring scopes are reflected in the URL for sharing and repeatability.
+- Explorer filters and Monitoring scopes are reflected in the URL for sharing and repeatability (FDA Explorer includes `match=all` when several product codes must sit on the same listing).
 - Column preferences use browser local storage.
 - Imported FCC responses remain in the current browser session.
 - No database-backed snapshot comparison is enabled. Monitoring reports activity based on FCC grant dates and does not claim snapshot-delta detection.
@@ -98,5 +98,6 @@ Equipment descriptions, RF characteristics, and equipment class are not invented
 - official snapshot records and manual imports;
 - grouped grantee behavior;
 - route server rendering;
+- FDA product-code ANY/ALL matching, openFDA query building and URL filter state;
 - FDA Explorer and Monitoring regression checks;
 - API input validation.

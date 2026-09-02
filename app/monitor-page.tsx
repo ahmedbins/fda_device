@@ -25,6 +25,7 @@ import {
   PRESET_CODES,
   type RecordItem,
   companyName,
+  fetchOpenFda,
   locationSummary,
   parseCodes,
   quote,
@@ -87,17 +88,9 @@ type Section<T> = {
 
 const EMPTY_SECTION = { status: "loading" as const, rows: [], total: 0, datasetDate: "", capped: false };
 
-type OpenFdaMeta = { last_updated?: string; results?: { total?: number } };
-
+/** openFDA answers a zero-hit search with HTTP 404 — `fetchOpenFda` turns that into an empty section instead of an error. */
 async function fetchJson(url: string) {
-  const response = await fetch(url);
-  const data = (await response.json()) as {
-    meta?: OpenFdaMeta;
-    results?: unknown[];
-    error?: { message?: string };
-  };
-  if (!response.ok) throw new Error(data.error?.message || "The openFDA request failed.");
-  return data;
+  return fetchOpenFda<unknown>(url);
 }
 
 function codesClause(field: string, codes: string[]) {

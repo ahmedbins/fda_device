@@ -9,6 +9,9 @@ The application uses public regulatory sources and keeps their fields distinguis
 - Endpoint: `https://api.fda.gov/device/registrationlisting.json`
 - Used by: FDA Explorer
 - Primary app fields: establishment name, registration number, FEI, location, status, products, proprietary names and device listing numbers.
+- Record granularity: each result is one **device listing** filed under one establishment registration. `products[]` holds one entry per product code on that listing, `proprietary_name[]` holds the listing's trade names, and `k_number` / `pma_number` identify the premarket submission behind it. The same registration number appears once per listing the establishment has filed.
+- Product-code matching: with several codes selected, **Any** returns listings that carry at least one of them (`products.product_code:("A" OR "B")`); **All** returns only listings that carry every selected code on that same record (`products.product_code:"A" AND products.product_code:"B"`). openFDA evaluates the `AND` per listing record, and the app re-checks each returned listing client-side. A company that files one listing for code A and a separate listing for code B does **not** satisfy **All** — the app never joins listings across a company because the source data does not.
+- Zero-hit searches: openFDA answers with HTTP 404 `NOT_FOUND`. The app treats that as an empty result set, not an error.
 
 ### 510(k)
 

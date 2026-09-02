@@ -33,7 +33,7 @@ That creates six main workflows:
 
 | Workflow | What it is for |
 | --- | --- |
-| **FDA Explorer** | Search registration and listing records; filter establishments and products; customize columns; inspect record details; export CSVs. |
+| **FDA Explorer** | Search registration and listing records; filter by product codes (match **any** or **all** selected codes on the same listing), class, country and role; customize columns; inspect record details; export Excel workbooks. |
 | **FDA Monitoring** | Review recent 510(k), recall, and adverse-event activity. |
 | **FCC Explorer** | Search complete or partial FCC IDs; group results by confirmed grantee; inspect authorization history, exhibits, and evidence. |
 | **FCC Monitoring** | Review recent original authorizations and FCC-labelled authorization changes for configured scopes. |
@@ -82,7 +82,7 @@ To validate the complete project:
 npm test
 ```
 
-That command creates a production build and runs the parsing, provenance, rendering, API-validation, and FDA regression tests.
+That command creates a production build and runs the parsing, provenance, rendering, API-validation, FDA product-code matching, and FDA regression tests.
 
 ## Code tour
 
@@ -107,7 +107,7 @@ The page components do not need to understand every source-specific detail:
 
 | File | Responsibility |
 | --- | --- |
-| `app/fda-shared.ts` | FDA constants, normalization helpers, and CSV utilities shared by FDA views. |
+| `app/fda-shared.ts` | FDA constants, the openFDA query builder, ANY/ALL product-code matching, company + devices grouping, URL filter state, the 404-as-empty openFDA fetch helper, and export utilities shared by FDA views. |
 | `app/fcc-core.ts` | FCC XML/JSON parsing, date normalization, conservative purpose mapping, confirmed ID-part derivation, deduplication, grouping, and monitoring windows. |
 | `app/fcc-service.ts` | Orchestrates the FCC snapshot, live request, server proxy, cache, grantee registry, and manual official-response import. |
 | `app/fcc-config.ts` | Explicitly confirmed FCC presets and watchlist scopes. |

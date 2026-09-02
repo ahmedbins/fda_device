@@ -26,48 +26,39 @@ import {
 } from "lucide-react";
 import {
   API,
+  CODE_MATCH_MODES,
   CODE_NAMES,
+  EMPTY_FILTERS,
   PRESET,
   PRESET_CODES,
+  type CodeMatchMode,
+  type ExplorerFilters as Filters,
+  type ExplorerView as ViewMode,
+  type MatrixRow,
+  type MatrixSort,
   type RecordItem,
+  applyCodeMatch,
+  buildMatrix,
+  buildSearch,
   companyName,
+  fetchOpenFda,
+  filtersFromParams,
+  filtersToParams,
   firmName,
+  listedDeviceNames,
   locationSummary,
+  matchingProducts,
   parseCodes,
-  quote,
+  premarketSummary,
+  productFilterActive,
+  sortMatrixRows,
 } from "./fda-shared";
 import SourceNav from "./source-nav";
-import { downloadExcel } from "./excel-export";
-import { ExportDialog, defaultExportFilename, sanitizeExportFilename } from "./export-dialog";
+import { downloadExcel, type ExcelValue } from "./excel-export";
+import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
-type MatrixRow = {
-  key: string;
-  productCode: string;
-  deviceType: string;
-  company: string;
-  devices: string[];
-  registrations: number;
-  productListings: number;
-  establishments: number;
-  deviceClasses: string[];
-  specialties: string[];
-  countries: string[];
-  latestListing: string;
-};
-
-type Filters = {
-  keyword: string;
-  productCodes: string[];
-  country: string;
-  state: string;
-  deviceClass: string;
-  establishment: string;
-};
-
-type ViewMode = "records" | "matrix";
-type MatrixSort = "code" | "devices" | "company" | "registrations";
 type CountryOption = { code: string; count: number; name: string };
-type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "deviceClass" | "expiry" | "registrationNumber" | "feiNumber";
+type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "deviceClass" | "premarket" | "expiry" | "registrationNumber" | "feiNumber";
 type MatrixColumn = "productCode" | "deviceType" | "company" | "listedDeviceCount" | "registeredDevices" | "registrations" | "productListings" | "establishments" | "deviceClass" | "specialty" | "countries" | "latestListing";
 
 const RECORD_COLUMN_OPTIONS: { key: RecordColumn; label: string; hint: string }[] = [
@@ -79,6 +70,7 @@ const RECORD_COLUMN_OPTIONS: { key: RecordColumn; label: string; hint: string }[
   { key: "tradeNames", label: "Trade names", hint: "Proprietary device names" },
   { key: "location", label: "Location", hint: "City, state and country" },
   { key: "deviceClass", label: "Device class", hint: "FDA regulatory class" },
+  { key: "premarket", label: "510(k) / PMA", hint: "Premarket submission behind the listing" },
   { key: "expiry", label: "Expiry year", hint: "Registration expiry year" },
   { key: "registrationNumber", label: "Registration #", hint: "FDA registration number" },
   { key: "feiNumber", label: "FEI number", hint: "FDA establishment identifier" },
@@ -103,14 +95,6 @@ const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice"
 const DEFAULT_MATRIX_COLUMNS: MatrixColumn[] = ["productCode", "deviceType", "company", "listedDeviceCount", "registeredDevices", "registrations"];
 
 const EXPORT_CAP = 26000; // openFDA pagination ceiling: skip<=25000 + limit<=1000
-const EMPTY_FILTERS: Filters = {
-  keyword: "",
-  productCodes: [],
-  country: "",
-  state: "",
-  deviceClass: "",
-  establishment: "",
-};
 
 const ESTABLISHMENT_TYPES = [
   "Manufacture Medical Device",
@@ -130,168 +114,15 @@ function regionName(code: string) {
   }
 }
 
-function buildSearch(filters: Filters) {
-  const clauses: string[] = [];
-  if (filters.keyword.trim()) {
-    const value = quote(filters.keyword);
-    clauses.push(
-      `(registration.name:${value} OR registration.owner_operator.firm_name:${value} OR proprietary_name:${value} OR products.openfda.device_name:${value})`,
-    );
-  }
-  if (filters.productCodes.length) {
-    const codes = filters.productCodes.map(quote);
-    clauses.push(
-      codes.length === 1
-        ? `products.product_code:${codes[0]}`
-        : `products.product_code:(${codes.join(" OR ")})`,
-    );
-  }
-  if (filters.country.trim())
-    clauses.push(`registration.iso_country_code:${quote(filters.country.toUpperCase())}`);
-  if (filters.state.trim())
-    clauses.push(`registration.state_code:${quote(filters.state.toUpperCase())}`);
-  if (filters.deviceClass)
-    clauses.push(`products.openfda.device_class:${quote(filters.deviceClass)}`);
-  if (filters.establishment)
-    clauses.push(`establishment_type:${quote(filters.establishment)}`);
-  return clauses.join(" AND ");
-}
-
-function productFilterActive(filters: Filters) {
-  return filters.productCodes.length > 0 || !!filters.deviceClass;
-}
-
-/** Products on this record that satisfy the product-level filters (code + class). */
-function matchingProducts(item: RecordItem, filters: Filters) {
-  const products = item.products || [];
-  if (!productFilterActive(filters)) return products;
-  const codeSet = new Set(filters.productCodes.map((code) => code.toUpperCase()));
-  return products.filter(
-    (product) =>
-      (!codeSet.size || (product.product_code && codeSet.has(product.product_code.toUpperCase()))) &&
-      (!filters.deviceClass || product.openfda?.device_class === filters.deviceClass),
-  );
-}
-
-function listedDeviceNames(item: RecordItem) {
-  const names = new Map<string, string>();
-  (item.proprietary_name || []).forEach((rawName) => {
-    rawName.split(/[;\n]+/).forEach((part) => {
-      const name = part.replace(/\s+/g, " ").trim();
-      const key = name.toLocaleLowerCase();
-      if (name && !names.has(key)) names.set(key, name);
-    });
-  });
-  return [...names.values()];
-}
-
-function buildMatrix(items: RecordItem[], filters: Filters): MatrixRow[] {
-  const groups = new Map<string, {
-    productCode: string;
-    deviceType: string;
-    company: string;
-    devices: Map<string, string>;
-    registrationIds: Set<string>;
-    productListings: number;
-    establishments: Set<string>;
-    deviceClasses: Set<string>;
-    specialties: Set<string>;
-    countries: Set<string>;
-    latestListing: string;
-  }>();
-  items.forEach((item, recordIndex) => {
-    const company = companyName(item);
-    const tradeNames = listedDeviceNames(item);
-    matchingProducts(item, filters).forEach((product) => {
-      const productCode = product.product_code || "—";
-      const deviceType = product.openfda?.device_name || "Unspecified device type";
-      const key = `${productCode.toLowerCase()}|${deviceType.toLowerCase()}|${company.toLowerCase()}`;
-      const existing = groups.get(key) || {
-        productCode,
-        deviceType,
-        company,
-        devices: new Map<string, string>(),
-        registrationIds: new Set<string>(),
-        productListings: 0,
-        establishments: new Set<string>(),
-        deviceClasses: new Set<string>(),
-        specialties: new Set<string>(),
-        countries: new Set<string>(),
-        latestListing: "",
-      };
-      tradeNames.forEach((name) => {
-        const normalized = name.toLocaleLowerCase();
-        if (!existing.devices.has(normalized)) existing.devices.set(normalized, name);
-      });
-      existing.registrationIds.add(item.registration?.registration_number || `record-${recordIndex}`);
-      existing.productListings += 1;
-      existing.establishments.add(firmName(item));
-      if (product.openfda?.device_class) existing.deviceClasses.add(product.openfda.device_class);
-      if (product.openfda?.medical_specialty_description) existing.specialties.add(product.openfda.medical_specialty_description);
-      if (item.registration?.iso_country_code) existing.countries.add(item.registration.iso_country_code);
-      if (product.created_date && product.created_date > existing.latestListing) existing.latestListing = product.created_date;
-      groups.set(key, existing);
-    });
-  });
-  return [...groups.entries()]
-    .map(([key, value]) => ({
-      key,
-      productCode: value.productCode,
-      deviceType: value.deviceType,
-      company: value.company,
-      devices: [...value.devices.values()].sort((a, b) => a.localeCompare(b)),
-      registrations: value.registrationIds.size,
-      productListings: value.productListings,
-      establishments: value.establishments.size,
-      deviceClasses: [...value.deviceClasses].sort(),
-      specialties: [...value.specialties].sort(),
-      countries: [...value.countries].sort(),
-      latestListing: value.latestListing,
-    }))
-    .sort((a, b) => a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company));
-}
-
-function sortMatrixRows(rows: MatrixRow[], sort: MatrixSort) {
-  return [...rows].sort((a, b) => {
-    if (sort === "devices") return b.devices.length - a.devices.length || a.company.localeCompare(b.company);
-    if (sort === "registrations") return b.registrations - a.registrations || a.company.localeCompare(b.company);
-    if (sort === "company") return a.company.localeCompare(b.company) || a.productCode.localeCompare(b.productCode);
-    return a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company);
-  });
-}
-
 function syncUrl(filters: Filters, view: ViewMode) {
   if (typeof window === "undefined") return;
-  const params = new URLSearchParams();
-  if (filters.productCodes.length) params.set("codes", filters.productCodes.join(","));
-  if (filters.keyword.trim()) params.set("kw", filters.keyword.trim());
-  if (filters.country.trim()) params.set("country", filters.country.trim().toUpperCase());
-  if (filters.state.trim()) params.set("state", filters.state.trim().toUpperCase());
-  if (filters.deviceClass) params.set("class", filters.deviceClass);
-  if (filters.establishment) params.set("est", filters.establishment);
-  if (view === "matrix") params.set("view", "matrix");
-  const query = params.toString();
+  const query = filtersToParams(filters, view).toString();
   window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
 }
 
 function initialStateFromUrl() {
-  const fallback = { filters: EMPTY_FILTERS, view: "records" as ViewMode, autorun: false };
-  if (typeof window === "undefined") return fallback;
-  const params = new URLSearchParams(window.location.search);
-  const filters: Filters = {
-    keyword: params.get("kw") || "",
-    productCodes: parseCodes(params.get("codes") || ""),
-    country: (params.get("country") || "").toUpperCase(),
-    state: (params.get("state") || "").toUpperCase(),
-    deviceClass: params.get("class") || "",
-    establishment: params.get("est") || "",
-  };
-  const view: ViewMode = params.get("view") === "matrix" ? "matrix" : "records";
-  const autorun = !!(
-    filters.keyword || filters.productCodes.length || filters.country ||
-    filters.state || filters.deviceClass || filters.establishment
-  );
-  return { filters, view, autorun };
+  if (typeof window === "undefined") return { filters: EMPTY_FILTERS, view: "records" as ViewMode, autorun: false };
+  return filtersFromParams(new URLSearchParams(window.location.search));
 }
 
 export default function Home() {
@@ -311,6 +142,7 @@ export default function Home() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"all" | "page">("all");
   const [exportFilename, setExportFilename] = useState("");
+  const [exportFilenameCustom, setExportFilenameCustom] = useState(false);
   const [exportColumnIds, setExportColumnIds] = useState<string[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [datasetUpdated, setDatasetUpdated] = useState("");
@@ -330,6 +162,7 @@ export default function Home() {
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const searchSeq = useRef(0);
 
+  const hasSearched = fetchedAt !== null;
   const countryOptions = apiCountries;
   const topCountries = countryOptions.slice(0, 4);
   const activeFilters = [
@@ -351,28 +184,36 @@ export default function Home() {
     filters.productCodes.length === PRESET_CODES.length &&
     PRESET_CODES.every((code) => filters.productCodes.includes(code));
 
+  /** ALL only changes anything once two or more codes are applied. */
+  const allTogether = appliedFilters.codeMatch === "all" && appliedFilters.productCodes.length > 1;
+  const matchHint = filters.codeMatch === "all"
+    ? (filters.productCodes.length > 1
+      ? "Only listings that carry every selected code together."
+      : "All needs two or more codes — add another to require them on the same listing.")
+    : "Listings that carry at least one selected code.";
+
+  /** Client-side guard: every displayed listing must itself satisfy the ANY/ALL rule, whatever the API returned. */
+  const visibleRecords = useMemo(
+    () => applyCodeMatch(records, appliedFilters.productCodes, appliedFilters.codeMatch),
+    [records, appliedFilters.productCodes, appliedFilters.codeMatch],
+  );
+
   const runSearch = useCallback(
-    async (nextSkip = 0, requestedView: ViewMode = viewMode, nextFilters: Filters = filters) => {
+    async (nextSkip = 0, requestedView: ViewMode = viewMode, nextFilters: Filters = filters, nextLimit: number = limit) => {
       const seq = ++searchSeq.current;
       setError("");
       setSelected(null);
       setLoading(true);
       try {
         const params = new URLSearchParams({
-          limit: String(requestedView === "matrix" ? 1000 : limit),
+          limit: String(requestedView === "matrix" ? 1000 : nextLimit),
           skip: String(requestedView === "matrix" ? 0 : nextSkip),
         });
         const search = buildSearch(nextFilters);
         if (search) params.set("search", search);
-        const response = await fetch(`${API}?${params.toString()}`);
-        const data = (await response.json()) as {
-          meta?: { last_updated?: string; results?: { total?: number } };
-          results?: RecordItem[];
-          error?: { message?: string };
-        };
-        if (!response.ok) throw new Error(data.error?.message || "The FDA API could not complete this search.");
+        const data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
         if (seq !== searchSeq.current) return;
-        setRecords(data.results || []);
+        setRecords(data.results);
         setTotal(data.meta?.results?.total || 0);
         setSkip(requestedView === "matrix" ? 0 : nextSkip);
         setAppliedFilters(nextFilters);
@@ -381,15 +222,15 @@ export default function Home() {
         if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
         syncUrl(nextFilters, requestedView);
         if (nextFilters.productCodes.length) {
+          // Per-code counts always use ANY semantics so each code's individual reach stays visible.
+          // In ALL mode the results total already says how many listings carry every code together.
+          const countSearch = buildSearch({ ...nextFilters, codeMatch: "any" });
           const countParams = new URLSearchParams({ count: "products.product_code", limit: "1000" });
-          if (search) countParams.set("search", search);
-          fetch(`${API}?${countParams.toString()}`)
-            .then((res) => res.json())
-            .then((countData: { results?: { term?: string; count?: number }[] }) => {
+          if (countSearch) countParams.set("search", countSearch);
+          fetchOpenFda<{ term?: string; count?: number }>(`${API}?${countParams.toString()}`)
+            .then((countData) => {
               if (seq !== searchSeq.current) return;
-              const terms = new Map(
-                (countData.results || []).map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]),
-              );
+              const terms = new Map(countData.results.map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]));
               setCodeCounts(nextFilters.productCodes.map((code) => ({ code, count: terms.get(code) ?? 0 })));
             })
             .catch(() => setCodeCounts(null));
@@ -522,7 +363,7 @@ export default function Home() {
   const removeCode = (code: string) => {
     const next = { ...filters, productCodes: filters.productCodes.filter((c) => c !== code) };
     setFilters(next);
-    if (records.length || total) runSearch(0, viewMode, next);
+    if (hasSearched) runSearch(0, viewMode, next);
   };
 
   const applyPreset = () => {
@@ -536,10 +377,30 @@ export default function Home() {
     if (presetActive) {
       const next = { ...filters, productCodes: [] };
       setFilters(next);
-      if (records.length || total) runSearch(0, viewMode, next);
+      if (hasSearched) runSearch(0, viewMode, next);
     } else {
       applyPreset();
     }
+  };
+
+  /** ANY/ALL applies immediately: with two or more codes it re-queries openFDA, otherwise the result set cannot change. */
+  const setCodeMatch = (mode: CodeMatchMode) => {
+    if (filters.codeMatch === mode && appliedFilters.codeMatch === mode) return;
+    const next = { ...filters, codeMatch: mode };
+    setFilters(next);
+    if (!hasSearched) return;
+    if (Math.max(next.productCodes.length, appliedFilters.productCodes.length) > 1) {
+      runSearch(0, viewMode, next);
+    } else {
+      const applied = { ...appliedFilters, codeMatch: mode };
+      setAppliedFilters(applied);
+      syncUrl(applied, viewMode);
+    }
+  };
+
+  const changeLimit = (nextLimit: number) => {
+    setLimit(nextLimit);
+    if (hasSearched) runSearch(0, viewMode, appliedFilters, nextLimit);
   };
 
   const searchNow = () => {
@@ -555,6 +416,7 @@ export default function Home() {
   };
 
   const reset = () => {
+    searchSeq.current += 1;
     setFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
     setCodeDraft("");
@@ -563,6 +425,9 @@ export default function Home() {
     setTotal(0);
     setSkip(0);
     setError("");
+    setLoading(false);
+    setSelected(null);
+    setFetchedAt(null);
     syncUrl(EMPTY_FILTERS, viewMode);
   };
 
@@ -577,23 +442,27 @@ export default function Home() {
         skip: String(offset),
       });
       if (search) params.set("search", search);
-      const response = await fetch(`${API}?${params.toString()}`);
-      const data = (await response.json()) as { results?: RecordItem[]; error?: { message?: string } };
-      if (!response.ok) throw new Error(data.error?.message || "Export interrupted while fetching records.");
-      const batch = data.results || [];
-      all.push(...batch);
-      if (!batch.length) break;
+      const data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+      all.push(...data.results);
+      if (!data.results.length) break;
     }
     return all;
+  };
+
+  const exportBaseName = () => {
+    const codes = appliedFilters.productCodes;
+    const codesPart = codes.length ? codes.join("+") : "all";
+    const modePart = allTogether ? "-all-codes" : "";
+    return `${viewMode === "matrix" ? "fda-devices-matrix" : "fda-devices"}-${codesPart}${modePart}-${new Date().toISOString().slice(0, 10)}`;
   };
 
   const exportCsv = async () => {
     if (!total || exportProgress) return;
     setError("");
     try {
-      const all = exportScope === "page" ? records : await fetchAllMatching();
-      const stamp = new Date().toISOString().slice(0, 10);
-      const codesPart = appliedFilters.productCodes.length ? appliedFilters.productCodes.join("+") : "all";
+      const fetched = exportScope === "page" ? visibleRecords : await fetchAllMatching();
+      // Export honours the same ANY/ALL guard as the table, so a workbook never contains a listing the view would hide.
+      const all = applyCodeMatch(fetched, appliedFilters.productCodes, appliedFilters.codeMatch);
       if (viewMode === "matrix") {
         const labels: Record<MatrixColumn, string> = {
           productCode: "Product code", deviceType: "Device type", company: "Company",
@@ -602,7 +471,7 @@ export default function Home() {
           establishments: "Establishments", deviceClass: "Device class",
           specialty: "Medical specialty", countries: "Countries", latestListing: "Latest listing",
         };
-        const value = (row: MatrixRow, column: MatrixColumn): unknown => ({
+        const value = (row: MatrixRow, column: MatrixColumn): ExcelValue => ({
           productCode: row.productCode,
           deviceType: row.deviceType,
           company: row.company,
@@ -621,7 +490,7 @@ export default function Home() {
         const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
           .map((row) => chosen.map((column) => value(row, column)));
         downloadExcel({
-          filename: sanitizeExportFilename(exportFilename, `fda-devices-matrix-${codesPart}-${stamp}.xlsx`),
+          filename: sanitizeExportFilename(exportFilename, exportBaseName()),
           sheetName: "Company + devices",
           columns: chosen.map((column) => ({ header: labels[column], width: 22 })),
           rows,
@@ -630,7 +499,7 @@ export default function Home() {
         const labels: Record<RecordColumn, string> = {
           establishment: "Establishment", ownerOperator: "Owner / operator", primaryDevice: "Primary device",
           productCodes: "Product codes", listedProducts: "Listed products", tradeNames: "Trade names",
-          location: "Location", deviceClass: "Device class", expiry: "Expiry year",
+          location: "Location", deviceClass: "Device class", premarket: "510(k) / PMA", expiry: "Expiry year",
           registrationNumber: "Registration #", feiNumber: "FEI number",
         };
         const exportColumns = (exportColumnIds.filter((id) => RECORD_COLUMN_OPTIONS.some((option) => option.key === id)) as RecordColumn[]);
@@ -639,7 +508,7 @@ export default function Home() {
           const matched = matchingProducts(item, appliedFilters);
           const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
           const primary = shown[0];
-          const values: Record<RecordColumn, unknown> = {
+          const values: Record<RecordColumn, ExcelValue> = {
             establishment: firmName(item),
             ownerOperator: companyName(item),
             primaryDevice: primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device",
@@ -648,14 +517,15 @@ export default function Home() {
             tradeNames: listedDeviceNames(item).join("; "),
             location: locationSummary(item),
             deviceClass: [...new Set(shown.map((p) => p.openfda?.device_class).filter(Boolean))].join("; "),
-            expiry: item.registration?.reg_expiry_date_year,
-            registrationNumber: item.registration?.registration_number,
-            feiNumber: item.registration?.fei_number,
+            premarket: premarketSummary(item),
+            expiry: item.registration?.reg_expiry_date_year ?? "",
+            registrationNumber: item.registration?.registration_number ?? "",
+            feiNumber: item.registration?.fei_number ?? "",
           };
           return chosen.map((column) => values[column]);
         });
         downloadExcel({
-          filename: sanitizeExportFilename(exportFilename, `fda-devices-${codesPart}-${stamp}.xlsx`),
+          filename: sanitizeExportFilename(exportFilename, exportBaseName()),
           sheetName: "FDA records",
           columns: chosen.map((column) => ({ header: labels[column], width: 22 })),
           rows,
@@ -681,12 +551,12 @@ export default function Home() {
 
   const rangeLabel = useMemo(() => {
     if (!total) return "0 records";
-    return `${(skip + 1).toLocaleString()}–${Math.min(skip + records.length, total).toLocaleString()} of ${total.toLocaleString()}`;
-  }, [records.length, skip, total]);
+    return `${(skip + 1).toLocaleString()}–${Math.min(skip + visibleRecords.length, total).toLocaleString()} of ${total.toLocaleString()}`;
+  }, [visibleRecords.length, skip, total]);
 
   const matrixRows = useMemo(
-    () => sortMatrixRows(buildMatrix(records, appliedFilters), matrixSort),
-    [records, appliedFilters, matrixSort],
+    () => sortMatrixRows(buildMatrix(visibleRecords, appliedFilters), matrixSort),
+    [visibleRecords, appliedFilters, matrixSort],
   );
 
   const drawerProducts = useMemo(() => {
@@ -700,16 +570,41 @@ export default function Home() {
   const switchView = (nextView: ViewMode) => {
     if (nextView === viewMode) return;
     setViewMode(nextView);
-    if (records.length || total) {
+    if (hasSearched) {
       runSearch(0, nextView, appliedFilters);
     } else {
       syncUrl(appliedFilters, nextView);
     }
   };
 
+  const openExport = () => {
+    setExportColumnIds(viewMode === "matrix" ? matrixColumns : recordColumns);
+    if (!exportFilenameCustom) setExportFilename(`${exportBaseName()}.xlsx`);
+    setExportOpen(true);
+  };
+
   const exportCount = Math.min(total, EXPORT_CAP);
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const freshnessHint = "\"FDA data as of\" is the date openFDA last rebuilt this dataset — records newer than that aren't published yet. \"Pulled\" is when this page last called the live API.";
+  const showNoResults = hasSearched && !loading && !error && !visibleRecords.length;
+  const showEmpty = !visibleRecords.length && !loading && !showNoResults;
+  const appliedCodesLabel = appliedFilters.productCodes.join(" + ");
+
+  const codeCountStrip = codeCounts && hasSearched && !error && (
+    <div className="code-count-strip" aria-label="Matches per product code">
+      <span className="strip-label"><Filter size={12} /> {allTogether ? "Per code · individually" : "Per code"}</span>
+      {codeCounts.map(({ code, count }) => (
+        <span key={code} className={`code-count${count ? "" : " zero"}`} title={CODE_NAMES.get(code) || `Product code ${code}`}>
+          <b>{code}</b> {count.toLocaleString()}
+        </span>
+      ))}
+      {allTogether && (
+        <span className={`code-count together${total ? "" : " zero"}`} title={`Listings that carry ${appliedCodesLabel} on the same record`}>
+          <b>All {appliedFilters.productCodes.length} together</b> {total.toLocaleString()}
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <main>
@@ -783,7 +678,24 @@ export default function Home() {
               />
             </div>
             <datalist id="product-code-options">{PRESET.map((item) => <option key={item.code} value={item.code} label={item.name} />)}</datalist>
-            <small className="field-hint">Add several codes — results match any of them.</small>
+            <div className="match-mode" role="group" aria-label="How several product codes combine">
+              <span className="match-mode-label">Match</span>
+              <div className="match-mode-switch">
+                {CODE_MATCH_MODES.map((mode) => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    className={filters.codeMatch === mode.value ? "active" : ""}
+                    aria-pressed={filters.codeMatch === mode.value}
+                    title={mode.hint}
+                    onClick={() => setCodeMatch(mode.value)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <small className="field-hint">{matchHint}</small>
           </div>
 
           <button
@@ -834,7 +746,7 @@ export default function Home() {
               <button className="icon-button filter-toggle" onClick={() => { setFiltersCollapsed(false); setFiltersOpen(true); }} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
               <div>
                 <span>03 / RESULTS</span>
-                <h2>{records.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : "Search records"}</h2>
+                <h2>{visibleRecords.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : showNoResults ? "0 records" : "Search records"}</h2>
                 {fetchedAt && (
                   <small className="fetch-meta" title={freshnessHint}>
                     {`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`}
@@ -879,14 +791,10 @@ export default function Home() {
               </details>
               {viewMode === "matrix" && <label className="matrix-sort">Sort <select value={matrixSort} onChange={(e) => setMatrixSort(e.target.value as MatrixSort)} aria-label="Sort company and device rows"><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option><option value="company">Company A–Z</option></select></label>}
               {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
-              {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}><option>25</option><option>50</option><option>100</option></select></label>}
+              {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>}
               <button
                 className="secondary export-button"
-                onClick={() => {
-                  setExportColumnIds(viewMode === "matrix" ? matrixColumns : recordColumns);
-                  setExportFilename((current) => current || defaultExportFilename(viewMode === "matrix" ? "fda-devices-matrix" : "fda-devices"));
-                  setExportOpen(true);
-                }}
+                onClick={openExport}
                 disabled={!total || loading || !!exportProgress}
                 title={total > EXPORT_CAP ? `Exports the first ${EXPORT_CAP.toLocaleString()} matching records (openFDA limit)` : "Download matching records as Excel"}
               >
@@ -899,7 +807,7 @@ export default function Home() {
 
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>Search interrupted</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
 
-          {!records.length && !loading ? (
+          {showEmpty ? (
             <div className="empty-state">
               <div className="empty-number">{datasetTotal ? `${Math.round(datasetTotal / 1000)}K` : "FDA"}</div>
               <PackageSearch size={34} />
@@ -910,22 +818,34 @@ export default function Home() {
                 <button className="secondary" onClick={applyPreset}><Ear size={15} /> Load the 6 hearing-aid codes</button>
               </div>
             </div>
+          ) : showNoResults ? (
+            <>
+              {codeCountStrip}
+              <div className="empty-state no-results" role="status">
+                <PackageSearch size={34} />
+                <h3>No records match.</h3>
+                {allTogether ? (
+                  <p>
+                    No single FDA listing carries <b>{appliedCodesLabel}</b> together. Each openFDA record is one product listing,
+                    so a company with separate listings for these codes does not count. Switch to <b>Any selected code</b> to see
+                    listings that carry at least one of them.
+                  </p>
+                ) : (
+                  <p>Nothing in the openFDA registration and listing dataset matches this combination. Try fewer filters, another country, or double-check the product codes.</p>
+                )}
+                <div className="empty-actions">
+                  {allTogether && <button className="primary" onClick={() => setCodeMatch("any")}>Match any selected code</button>}
+                  <button className="secondary" onClick={reset}>Clear all filters</button>
+                </div>
+              </div>
+            </>
           ) : (
             <>
-              {codeCounts && records.length > 0 && (
-                <div className="code-count-strip" aria-label="Matches per product code">
-                  <span className="strip-label"><Filter size={12} /> Per code</span>
-                  {codeCounts.map(({ code, count }) => (
-                    <span key={code} className={`code-count${count ? "" : " zero"}`} title={CODE_NAMES.get(code) || `Product code ${code}`}>
-                      <b>{code}</b> {count.toLocaleString()}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {codeCountStrip}
               {viewMode === "matrix" && (
                 <div className="matrix-note">
-                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device groups</b> from {records.length.toLocaleString()} matching records</span></div>
-                  <span>{total > 1000 && `Grouping the first 1,000 of ${total.toLocaleString()} matches · `}Listed devices counts unique proprietary names; CSV export fetches every available match.</span>
+                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device groups</b> from {visibleRecords.length.toLocaleString()} matching records</span></div>
+                  <span>{total > 1000 && `Grouping the first 1,000 of ${total.toLocaleString()} matches · `}{allTogether && `Only listings carrying ${appliedCodesLabel} together are grouped · `}Listed devices counts unique proprietary names; Excel export fetches every available match.</span>
                 </div>
               )}
               <div className="table-wrap" aria-live="polite">
@@ -939,13 +859,14 @@ export default function Home() {
                     {recordColumns.includes("tradeNames") && <th>Trade names</th>}
                     {recordColumns.includes("location") && <th>Location</th>}
                     {recordColumns.includes("deviceClass") && <th>Class</th>}
+                    {recordColumns.includes("premarket") && <th>510(k) / PMA</th>}
                     {recordColumns.includes("expiry") && <th>Expiry</th>}
                     {recordColumns.includes("registrationNumber") && <th>Registration #</th>}
                     {recordColumns.includes("feiNumber") && <th>FEI number</th>}
                     <th aria-label="Open record" />
                   </tr></thead>
                   <tbody>
-                    {records.map((item, index) => {
+                    {visibleRecords.map((item, index) => {
                       const matched = matchingProducts(item, appliedFilters);
                       const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
                       const primary = shown[0];
@@ -968,6 +889,7 @@ export default function Home() {
                           {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{tradeNames.length ? tradeNames.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{tradeNames.length > 5 && <em>+{tradeNames.length - 5} more</em>}</div></td>}
                           {recordColumns.includes("location") && <td><b>{locationSummary(item)}</b></td>}
                           {recordColumns.includes("deviceClass") && <td><span className={`class-badge class-${primary?.openfda?.device_class || "u"}`}>{primary?.openfda?.device_class ? `Class ${primary.openfda.device_class}` : "—"}</span></td>}
+                          {recordColumns.includes("premarket") && <td><b className="mono-value">{premarketSummary(item) || "—"}</b></td>}
                           {recordColumns.includes("expiry") && <td><b>{item.registration?.reg_expiry_date_year || "—"}</b></td>}
                           {recordColumns.includes("registrationNumber") && <td><b className="mono-value">{item.registration?.registration_number || "—"}</b></td>}
                           {recordColumns.includes("feiNumber") && <td><b className="mono-value">{item.registration?.fei_number || "—"}</b></td>}
@@ -1013,7 +935,7 @@ export default function Home() {
               </div>
               {viewMode === "records" && <div className="pagination">
                 <span>{rangeLabel}</span>
-                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + records.length >= total || loading}>Next <ArrowRight size={15} /></button></div>
+                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + visibleRecords.length >= total || loading}>Next <ArrowRight size={15} /></button></div>
               </div>}
             </>
           )}
@@ -1026,7 +948,12 @@ export default function Home() {
           <aside className="drawer" aria-label="Registration details">
             <div className="drawer-top"><span>RECORD DETAIL</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
             <div className="drawer-hero"><span className="record-id">REG {selected.registration?.registration_number || "—"}</span><h2>{firmName(selected)}</h2><p><MapPin size={15} /> {locationSummary(selected)}</p></div>
-            <div className="detail-stats"><div><span>FEI number</span><b>{selected.registration?.fei_number || "—"}</b></div><div><span>Expiry year</span><b>{selected.registration?.reg_expiry_date_year || "—"}</b></div><div><span>Products</span><b>{selected.products?.length || 0}</b></div></div>
+            <div className="detail-stats">
+              <div><span>FEI number</span><b>{selected.registration?.fei_number || "—"}</b></div>
+              <div><span>Expiry year</span><b>{selected.registration?.reg_expiry_date_year || "—"}</b></div>
+              <div><span>Products</span><b>{selected.products?.length || 0}</b></div>
+              <div><span>510(k) / PMA</span><b>{premarketSummary(selected) || "—"}</b></div>
+            </div>
             <section className="detail-section"><h3><Building2 size={16} /> Establishment roles</h3><div className="chips">{selected.establishment_type?.map((type) => <span key={type}>{type}</span>) || <span>Not listed</span>}</div></section>
             <section className="detail-section">
               <h3>
@@ -1065,10 +992,16 @@ export default function Home() {
         filename={exportFilename}
         scope={exportScope}
         clickableLinks={false}
-        pageCount={records.length}
+        pageCount={visibleRecords.length}
         allCount={exportCount}
-        filters={[appliedFilters.keyword, ...appliedFilters.productCodes, appliedFilters.country, appliedFilters.deviceClass && `Class ${appliedFilters.deviceClass}`].filter(Boolean) as string[]}
-        onFilename={setExportFilename}
+        filters={[
+          appliedFilters.keyword,
+          ...appliedFilters.productCodes,
+          allTogether ? "All codes on the same listing" : "",
+          appliedFilters.country,
+          appliedFilters.deviceClass && `Class ${appliedFilters.deviceClass}`,
+        ].filter(Boolean) as string[]}
+        onFilename={(value) => { setExportFilename(value); setExportFilenameCustom(true); }}
         onScope={setExportScope}
         onChange={setExportColumnIds}
         onUseVisible={() => setExportColumnIds(viewMode === "matrix" ? matrixColumns : recordColumns)}
