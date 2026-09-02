@@ -39,7 +39,7 @@ sequenceDiagram
 Every feature on the site is a variation of this loop:
 
 - **FDA Explorer**: your filters become an openFDA request slip; the answer becomes the establishments table.
-  - One detail worth knowing: every row openFDA sends back is a single *product listing* — one filing by one establishment, which may carry one or several product codes. So when you pick several codes and choose **All selected codes**, the request slip asks for listings that carry every code on that same filing. A company with one listing for code A and a separate listing for code B is not a match, because the FDA data never says those two filings belong together.
+  - One detail worth knowing: every row openFDA sends back is a single *product listing* — one filing by one establishment, almost always for one product code. So the **Records** view simply shows listings that carry any code you picked. The **Company + devices** view can go one step further: with **All selected codes** on, it keeps only companies whose listings, added together, cover every code you picked. That grouping is something the website works out from the company name on each filing; the FDA data itself never says two filings belong together.
 - **Monitoring screens**: the "search" is automatic — "everything in the last N days for the watched companies" — and runs when the page opens.
 - **Opening a record's detail panel**: often one more, narrower question to the same source ("give me the devices under this specific licence").
 - **CSV export**: no new journey at all — the site takes the translated records already on your screen and writes them into a spreadsheet file (**CSV** is the simplest spreadsheet format; Excel opens it directly).

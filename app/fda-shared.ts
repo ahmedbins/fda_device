@@ -36,10 +36,10 @@ export type Registration = {
  *
  * Each result is a single *device listing* filed under one establishment
  * registration. `products[]` carries one entry per product code on that
- * listing, `proprietary_name[]` holds the trade names for the listing, and
- * `k_number` / `pma_number` are the premarket submission behind it. The same
- * registration number therefore appears once per listing the establishment
- * has filed — a record is a listing, not a company.
+ * listing (usually exactly one), `proprietary_name[]` holds the trade names
+ * for the listing, and `k_number` / `pma_number` are the premarket submission
+ * behind it. The same registration number therefore appears once per listing
+ * the establishment has filed — a record is a listing, not a company.
  */
 export type RecordItem = {
   proprietary_name?: string[];
@@ -67,12 +67,18 @@ export const CODE_NAMES = new Map(PRESET.map((p) => [p.code, p.name]));
 /* Product-code matching                                                */
 /* ------------------------------------------------------------------ */
 
-/** How several selected product codes combine: at least one on the listing, or every one on the same listing. */
+/**
+ * How several selected product codes combine in the Company + devices view.
+ * A listing is one filing and (almost always) one product code, so the
+ * Records view simply lists listings carrying at least one selected code.
+ * ALL is a company-level question: which owner/operators hold listings that,
+ * taken together, cover every selected code.
+ */
 export type CodeMatchMode = "any" | "all";
 
 export const CODE_MATCH_MODES: { value: CodeMatchMode; label: string; hint: string }[] = [
-  { value: "any", label: "Any selected code", hint: "ANY: include listings that carry at least one selected product code." },
-  { value: "all", label: "All selected codes", hint: "ALL: include only listings that carry every selected product code together." },
+  { value: "any", label: "Any selected code", hint: "ANY: companies with a listing for at least one selected product code." },
+  { value: "all", label: "All selected codes", hint: "ALL: only companies whose listings, taken together, cover every selected product code." },
 ];
 
 export function asCodeMatch(value: unknown): CodeMatchMode {
@@ -93,26 +99,6 @@ export function recordProductCodes(item: RecordItem) {
   return new Set((item.products || []).map((product) => normalizeCode(product.product_code)).filter(Boolean));
 }
 
-/**
- * Whether one listing satisfies the selected codes under the given mode.
- * Evaluated per record — never across a company's other listings — so ALL
- * only holds when the same listing carries every selected code.
- */
-export function recordMatchesCodes(item: RecordItem, codes: readonly string[], mode: CodeMatchMode) {
-  const selected = normalizeCodes(codes);
-  if (!selected.length) return true;
-  const present = recordProductCodes(item);
-  return mode === "all"
-    ? selected.every((code) => present.has(code))
-    : selected.some((code) => present.has(code));
-}
-
-export function applyCodeMatch<T extends RecordItem>(records: readonly T[], codes: readonly string[], mode: CodeMatchMode) {
-  const selected = normalizeCodes(codes);
-  if (!selected.length) return [...records];
-  return records.filter((item) => recordMatchesCodes(item, selected, mode));
-}
-
 /* ------------------------------------------------------------------ */
 /* openFDA query building                                               */
 /* ------------------------------------------------------------------ */
@@ -131,16 +117,14 @@ export function parseCodes(text: string) {
 }
 
 /**
- * openFDA clause for the selected codes. `products` is a flattened object
- * array in openFDA's index, so `products.product_code:"A" AND
- * products.product_code:"B"` is evaluated per listing record — exactly the
- * level `recordMatchesCodes` checks on the client.
+ * openFDA clause for the selected codes. The request always asks for
+ * listings carrying at least one code; the ALL rollup happens client-side
+ * per company because no single listing can answer a cross-listing question.
  */
-export function productCodeClause(codes: readonly string[], mode: CodeMatchMode) {
+export function productCodeClause(codes: readonly string[]) {
   const quoted = normalizeCodes(codes).map(quote);
   if (!quoted.length) return "";
   if (quoted.length === 1) return `products.product_code:${quoted[0]}`;
-  if (mode === "all") return `(${quoted.map((code) => `products.product_code:${code}`).join(" AND ")})`;
   return `products.product_code:(${quoted.join(" OR ")})`;
 }
 
@@ -172,7 +156,7 @@ export function buildSearch(filters: ExplorerFilters) {
       `(registration.name:${value} OR registration.owner_operator.firm_name:${value} OR proprietary_name:${value} OR products.openfda.device_name:${value})`,
     );
   }
-  const codeClause = productCodeClause(filters.productCodes, filters.codeMatch);
+  const codeClause = productCodeClause(filters.productCodes);
   if (codeClause) clauses.push(codeClause);
   if (filters.country.trim())
     clauses.push(`registration.iso_country_code:${quote(filters.country.toUpperCase())}`);
@@ -187,6 +171,11 @@ export function buildSearch(filters: ExplorerFilters) {
 
 export function productFilterActive(filters: ExplorerFilters) {
   return filters.productCodes.length > 0 || !!filters.deviceClass;
+}
+
+/** True when ALL can change anything: the mode is ALL and at least two codes are selected. */
+export function codeMatchApplies(filters: ExplorerFilters) {
+  return filters.codeMatch === "all" && normalizeCodes(filters.productCodes).length > 1;
 }
 
 /** Products on this record that satisfy the product-level filters (code + class). */
@@ -255,6 +244,15 @@ export function companyName(item: RecordItem) {
   return item.registration?.owner_operator?.firm_name || firmName(item);
 }
 
+function normalizeCompany(name: string) {
+  return name.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+/** Grouping key for one owner/operator. Derived from the FDA-reported firm name — the source data does not link listings to each other. */
+export function companyKey(item: RecordItem) {
+  return normalizeCompany(companyName(item));
+}
+
 export function locationSummary(item: RecordItem) {
   const r = item.registration;
   return [r?.city, r?.state_code, r?.iso_country_code].filter(Boolean).join(", ") || "Location unavailable";
@@ -278,6 +276,40 @@ export function listedDeviceNames(item: RecordItem) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Company-level code coverage                                          */
+/* ------------------------------------------------------------------ */
+
+/** Selected product codes each owner/operator covers across all of its listings in `items` (only products passing the code + class filters count). */
+export function companyCodeCoverage(items: readonly RecordItem[], filters: ExplorerFilters) {
+  const coverage = new Map<string, Set<string>>();
+  items.forEach((item) => {
+    const key = companyKey(item);
+    const codes = coverage.get(key) || new Set<string>();
+    matchingProducts(item, filters).forEach((product) => {
+      const code = normalizeCode(product.product_code);
+      if (code) codes.add(code);
+    });
+    coverage.set(key, codes);
+  });
+  return coverage;
+}
+
+/**
+ * Owner/operators whose listings together cover every selected code. Two
+ * separate listings (one per code) from the same firm qualify — that is the
+ * company-level question ALL answers. Empty selection → no restriction.
+ */
+export function companiesCoveringAllCodes(items: readonly RecordItem[], filters: ExplorerFilters) {
+  const selected = normalizeCodes(filters.productCodes);
+  const matches = new Set<string>();
+  if (!selected.length) return matches;
+  companyCodeCoverage(items, filters).forEach((codes, key) => {
+    if (selected.every((code) => codes.has(code))) matches.add(key);
+  });
+  return matches;
+}
+
+/* ------------------------------------------------------------------ */
 /* Company + devices matrix                                             */
 /* ------------------------------------------------------------------ */
 
@@ -286,6 +318,7 @@ export type MatrixRow = {
   productCode: string;
   deviceType: string;
   company: string;
+  companyKey: string;
   devices: string[];
   registrations: number;
   productListings: number;
@@ -299,16 +332,17 @@ export type MatrixRow = {
 export type MatrixSort = "code" | "devices" | "company" | "registrations";
 
 /**
- * Groups listing records by product code × company. Only products that pass
- * the product-level filters contribute, and every row is built from records
- * that already satisfy the ANY/ALL code match individually — a company is
- * never assembled from separate listings that each carry one of the codes.
+ * Groups listing records by product code × device type × company. Only
+ * products that pass the product-level filters contribute. With ALL and two
+ * or more codes, rows are kept only for companies whose listings collectively
+ * cover every selected code (see `companiesCoveringAllCodes`).
  */
 export function buildMatrix(items: readonly RecordItem[], filters: ExplorerFilters): MatrixRow[] {
   const groups = new Map<string, {
     productCode: string;
     deviceType: string;
     company: string;
+    companyKey: string;
     devices: Map<string, string>;
     registrationIds: Set<string>;
     productListings: number;
@@ -318,17 +352,21 @@ export function buildMatrix(items: readonly RecordItem[], filters: ExplorerFilte
     countries: Set<string>;
     latestListing: string;
   }>();
+  const keep = codeMatchApplies(filters) ? companiesCoveringAllCodes(items, filters) : null;
   items.forEach((item, recordIndex) => {
     const company = companyName(item);
+    const cKey = companyKey(item);
+    if (keep && !keep.has(cKey)) return;
     const tradeNames = listedDeviceNames(item);
     matchingProducts(item, filters).forEach((product) => {
       const productCode = product.product_code || "—";
       const deviceType = product.openfda?.device_name || "Unspecified device type";
-      const key = `${productCode.toLowerCase()}|${deviceType.toLowerCase()}|${company.toLowerCase()}`;
+      const key = `${productCode.toLowerCase()}|${deviceType.toLowerCase()}|${cKey}`;
       const existing = groups.get(key) || {
         productCode,
         deviceType,
         company,
+        companyKey: cKey,
         devices: new Map<string, string>(),
         registrationIds: new Set<string>(),
         productListings: 0,
@@ -358,6 +396,7 @@ export function buildMatrix(items: readonly RecordItem[], filters: ExplorerFilte
       productCode: value.productCode,
       deviceType: value.deviceType,
       company: value.company,
+      companyKey: value.companyKey,
       devices: [...value.devices.values()].sort((a, b) => a.localeCompare(b)),
       registrations: value.registrationIds.size,
       productListings: value.productListings,
@@ -368,6 +407,11 @@ export function buildMatrix(items: readonly RecordItem[], filters: ExplorerFilte
       latestListing: value.latestListing,
     }))
     .sort((a, b) => a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company));
+}
+
+/** Distinct owner/operators represented in a set of matrix rows. */
+export function matrixCompanyCount(rows: readonly MatrixRow[]) {
+  return new Set(rows.map((row) => row.companyKey)).size;
 }
 
 export function sortMatrixRows(rows: MatrixRow[], sort: MatrixSort) {
@@ -402,6 +446,38 @@ export async function fetchOpenFda<T = unknown>(url: string): Promise<OpenFdaRes
     throw new Error(data.error?.message || `The openFDA request failed (HTTP ${response.status}).`);
   }
   return { meta: data.meta, results: data.results || [] };
+}
+
+/** openFDA serves at most 1,000 records per call and stops at skip 25,000. */
+export const OPENFDA_PAGE = 1000;
+export const EXPORT_CAP = 26000;
+/** How many listings the Company + devices view loads before grouping — enough that company coverage is judged on the full set for any realistic code selection. */
+export const MATRIX_FETCH_CAP = 5000;
+
+/** Pages through a search (1,000 per call) until `cap` records or the last match. `onProgress` receives (loaded, target). */
+export async function fetchListingPages<T>(
+  baseUrl: string,
+  search: string,
+  cap: number,
+  onProgress?: (loaded: number, target: number) => void,
+): Promise<{ results: T[]; meta?: OpenFdaMeta; total: number }> {
+  const results: T[] = [];
+  let meta: OpenFdaMeta | undefined;
+  let total = 0;
+  for (let offset = 0; offset < Math.max(cap, 1); offset += OPENFDA_PAGE) {
+    const params = new URLSearchParams({ limit: String(Math.min(OPENFDA_PAGE, Math.max(cap, 1) - offset)), skip: String(offset) });
+    if (search) params.set("search", search);
+    const page = await fetchOpenFda<T>(`${baseUrl}?${params.toString()}`);
+    if (offset === 0) {
+      meta = page.meta;
+      total = page.meta?.results?.total || 0;
+    }
+    results.push(...page.results);
+    const target = Math.min(total, cap);
+    onProgress?.(results.length, target);
+    if (!page.results.length || results.length >= target) break;
+  }
+  return { results, meta, total };
 }
 
 /** True on the internal dev deployment and local previews — drives the DEV badge. */

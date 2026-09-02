@@ -29,6 +29,8 @@ import {
   CODE_MATCH_MODES,
   CODE_NAMES,
   EMPTY_FILTERS,
+  EXPORT_CAP,
+  MATRIX_FETCH_CAP,
   PRESET,
   PRESET_CODES,
   type CodeMatchMode,
@@ -36,11 +38,13 @@ import {
   type ExplorerView as ViewMode,
   type MatrixRow,
   type MatrixSort,
+  type OpenFdaMeta,
   type RecordItem,
-  applyCodeMatch,
   buildMatrix,
   buildSearch,
+  codeMatchApplies,
   companyName,
+  fetchListingPages,
   fetchOpenFda,
   filtersFromParams,
   filtersToParams,
@@ -48,6 +52,7 @@ import {
   listedDeviceNames,
   locationSummary,
   matchingProducts,
+  matrixCompanyCount,
   parseCodes,
   premarketSummary,
   productFilterActive,
@@ -94,8 +99,6 @@ const MATRIX_COLUMN_OPTIONS: { key: MatrixColumn; label: string; hint: string }[
 const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice", "productCodes", "listedProducts", "location", "deviceClass"];
 const DEFAULT_MATRIX_COLUMNS: MatrixColumn[] = ["productCode", "deviceType", "company", "listedDeviceCount", "registeredDevices", "registrations"];
 
-const EXPORT_CAP = 26000; // openFDA pagination ceiling: skip<=25000 + limit<=1000
-
 const ESTABLISHMENT_TYPES = [
   "Manufacture Medical Device",
   "Manufacture Medical Device for Another Party (Contract Manufacturer)",
@@ -136,6 +139,7 @@ export default function Home() {
   const [limit, setLimit] = useState(25);
   const [skip, setSkip] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingNote, setLoadingNote] = useState("");
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RecordItem | null>(null);
   const [exportProgress, setExportProgress] = useState("");
@@ -184,18 +188,24 @@ export default function Home() {
     filters.productCodes.length === PRESET_CODES.length &&
     PRESET_CODES.every((code) => filters.productCodes.includes(code));
 
-  /** ALL only changes anything once two or more codes are applied. */
-  const allTogether = appliedFilters.codeMatch === "all" && appliedFilters.productCodes.length > 1;
+  /** ALL only exists in the Company + devices view, and only changes anything with two or more applied codes. */
+  const allTogether = viewMode === "matrix" && codeMatchApplies(appliedFilters);
   const matchHint = filters.codeMatch === "all"
     ? (filters.productCodes.length > 1
-      ? "Only listings that carry every selected code together."
-      : "All needs two or more codes — add another to require them on the same listing.")
-    : "Listings that carry at least one selected code.";
+      ? "Only companies whose listings cover every selected code."
+      : "All needs two or more codes — add another to require every code per company.")
+    : "Companies with a listing for at least one selected code.";
 
-  /** Client-side guard: every displayed listing must itself satisfy the ANY/ALL rule, whatever the API returned. */
-  const visibleRecords = useMemo(
-    () => applyCodeMatch(records, appliedFilters.productCodes, appliedFilters.codeMatch),
-    [records, appliedFilters.productCodes, appliedFilters.codeMatch],
+  /** Company + devices groups; with ALL, only companies covering every selected code survive. */
+  const matrixRows = useMemo(
+    () => sortMatrixRows(buildMatrix(records, appliedFilters), matrixSort),
+    [records, appliedFilters, matrixSort],
+  );
+  const matrixCompanies = useMemo(() => matrixCompanyCount(matrixRows), [matrixRows]);
+  /** How many companies hold at least one selected code — the ANY answer, shown when ALL comes up empty. */
+  const anyCompanies = useMemo(
+    () => matrixCompanyCount(buildMatrix(records, { ...appliedFilters, codeMatch: "any" })),
+    [records, appliedFilters],
   );
 
   const runSearch = useCallback(
@@ -204,14 +214,20 @@ export default function Home() {
       setError("");
       setSelected(null);
       setLoading(true);
+      setLoadingNote("");
       try {
-        const params = new URLSearchParams({
-          limit: String(requestedView === "matrix" ? 1000 : nextLimit),
-          skip: String(requestedView === "matrix" ? 0 : nextSkip),
-        });
         const search = buildSearch(nextFilters);
-        if (search) params.set("search", search);
-        const data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+        let data: { results: RecordItem[]; meta?: OpenFdaMeta };
+        if (requestedView === "matrix") {
+          // Company coverage must be judged on the whole match set, so the matrix pages well past one call.
+          data = await fetchListingPages<RecordItem>(API, search, MATRIX_FETCH_CAP, (loaded, target) => {
+            if (seq === searchSeq.current && target > 1000) setLoadingNote(`Loading listings ${loaded.toLocaleString()} of ${target.toLocaleString()}…`);
+          });
+        } else {
+          const params = new URLSearchParams({ limit: String(nextLimit), skip: String(nextSkip) });
+          if (search) params.set("search", search);
+          data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+        }
         if (seq !== searchSeq.current) return;
         setRecords(data.results);
         setTotal(data.meta?.results?.total || 0);
@@ -222,11 +238,8 @@ export default function Home() {
         if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
         syncUrl(nextFilters, requestedView);
         if (nextFilters.productCodes.length) {
-          // Per-code counts always use ANY semantics so each code's individual reach stays visible.
-          // In ALL mode the results total already says how many listings carry every code together.
-          const countSearch = buildSearch({ ...nextFilters, codeMatch: "any" });
           const countParams = new URLSearchParams({ count: "products.product_code", limit: "1000" });
-          if (countSearch) countParams.set("search", countSearch);
+          if (search) countParams.set("search", search);
           fetchOpenFda<{ term?: string; count?: number }>(`${API}?${countParams.toString()}`)
             .then((countData) => {
               if (seq !== searchSeq.current) return;
@@ -244,7 +257,10 @@ export default function Home() {
         setCodeCounts(null);
         setError(caught instanceof Error ? caught.message : "Unable to reach the FDA API.");
       } finally {
-        if (seq === searchSeq.current) setLoading(false);
+        if (seq === searchSeq.current) {
+          setLoading(false);
+          setLoadingNote("");
+        }
       }
     },
     [filters, limit, viewMode],
@@ -383,19 +399,14 @@ export default function Home() {
     }
   };
 
-  /** ANY/ALL applies immediately: with two or more codes it re-queries openFDA, otherwise the result set cannot change. */
+  /** ANY/ALL is a client-side rollup over the listings already loaded, so switching is instant — no new request. */
   const setCodeMatch = (mode: CodeMatchMode) => {
     if (filters.codeMatch === mode && appliedFilters.codeMatch === mode) return;
-    const next = { ...filters, codeMatch: mode };
-    setFilters(next);
+    setFilters((current) => ({ ...current, codeMatch: mode }));
     if (!hasSearched) return;
-    if (Math.max(next.productCodes.length, appliedFilters.productCodes.length) > 1) {
-      runSearch(0, viewMode, next);
-    } else {
-      const applied = { ...appliedFilters, codeMatch: mode };
-      setAppliedFilters(applied);
-      syncUrl(applied, viewMode);
-    }
+    const applied = { ...appliedFilters, codeMatch: mode };
+    setAppliedFilters(applied);
+    syncUrl(applied, viewMode);
   };
 
   const changeLimit = (nextLimit: number) => {
@@ -426,6 +437,7 @@ export default function Home() {
     setSkip(0);
     setError("");
     setLoading(false);
+    setLoadingNote("");
     setSelected(null);
     setFetchedAt(null);
     syncUrl(EMPTY_FILTERS, viewMode);
@@ -433,20 +445,11 @@ export default function Home() {
 
   const fetchAllMatching = async () => {
     const cap = Math.min(total, EXPORT_CAP);
-    const all: RecordItem[] = [];
-    const search = buildSearch(appliedFilters);
-    for (let offset = 0; offset < cap; offset += 1000) {
-      setExportProgress(`Downloading ${Math.min(offset + 1000, cap).toLocaleString()} of ${cap.toLocaleString()} records…`);
-      const params = new URLSearchParams({
-        limit: String(Math.min(1000, cap - offset)),
-        skip: String(offset),
-      });
-      if (search) params.set("search", search);
-      const data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
-      all.push(...data.results);
-      if (!data.results.length) break;
-    }
-    return all;
+    setExportProgress(`Downloading 0 of ${cap.toLocaleString()} records…`);
+    const { results } = await fetchListingPages<RecordItem>(API, buildSearch(appliedFilters), cap, (loaded, target) => {
+      setExportProgress(`Downloading ${loaded.toLocaleString()} of ${target.toLocaleString()} records…`);
+    });
+    return results;
   };
 
   const exportBaseName = () => {
@@ -460,9 +463,7 @@ export default function Home() {
     if (!total || exportProgress) return;
     setError("");
     try {
-      const fetched = exportScope === "page" ? visibleRecords : await fetchAllMatching();
-      // Export honours the same ANY/ALL guard as the table, so a workbook never contains a listing the view would hide.
-      const all = applyCodeMatch(fetched, appliedFilters.productCodes, appliedFilters.codeMatch);
+      const all = exportScope === "page" ? records : await fetchAllMatching();
       if (viewMode === "matrix") {
         const labels: Record<MatrixColumn, string> = {
           productCode: "Product code", deviceType: "Device type", company: "Company",
@@ -487,6 +488,7 @@ export default function Home() {
         })[column];
         const exportColumns = (exportColumnIds.filter((id) => MATRIX_COLUMN_OPTIONS.some((option) => option.key === id)) as MatrixColumn[]);
         const chosen = exportColumns.length ? exportColumns : matrixColumns;
+        // buildMatrix applies the same ANY/ALL company rollup the table uses, on the full export set.
         const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
           .map((row) => chosen.map((column) => value(row, column)));
         downloadExcel({
@@ -551,13 +553,8 @@ export default function Home() {
 
   const rangeLabel = useMemo(() => {
     if (!total) return "0 records";
-    return `${(skip + 1).toLocaleString()}–${Math.min(skip + visibleRecords.length, total).toLocaleString()} of ${total.toLocaleString()}`;
-  }, [visibleRecords.length, skip, total]);
-
-  const matrixRows = useMemo(
-    () => sortMatrixRows(buildMatrix(visibleRecords, appliedFilters), matrixSort),
-    [visibleRecords, appliedFilters, matrixSort],
-  );
+    return `${(skip + 1).toLocaleString()}–${Math.min(skip + records.length, total).toLocaleString()} of ${total.toLocaleString()}`;
+  }, [records.length, skip, total]);
 
   const drawerProducts = useMemo(() => {
     if (!selected) return [];
@@ -586,21 +583,22 @@ export default function Home() {
   const exportCount = Math.min(total, EXPORT_CAP);
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const freshnessHint = "\"FDA data as of\" is the date openFDA last rebuilt this dataset — records newer than that aren't published yet. \"Pulled\" is when this page last called the live API.";
-  const showNoResults = hasSearched && !loading && !error && !visibleRecords.length;
-  const showEmpty = !visibleRecords.length && !loading && !showNoResults;
+  const nothingToShow = viewMode === "matrix" ? !matrixRows.length : !records.length;
+  const showNoResults = hasSearched && !loading && !error && nothingToShow;
+  const showEmpty = nothingToShow && !loading && !showNoResults;
   const appliedCodesLabel = appliedFilters.productCodes.join(" + ");
 
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="code-count-strip" aria-label="Matches per product code">
-      <span className="strip-label"><Filter size={12} /> {allTogether ? "Per code · individually" : "Per code"}</span>
+      <span className="strip-label"><Filter size={12} /> Per code</span>
       {codeCounts.map(({ code, count }) => (
         <span key={code} className={`code-count${count ? "" : " zero"}`} title={CODE_NAMES.get(code) || `Product code ${code}`}>
           <b>{code}</b> {count.toLocaleString()}
         </span>
       ))}
       {allTogether && (
-        <span className={`code-count together${total ? "" : " zero"}`} title={`Listings that carry ${appliedCodesLabel} on the same record`}>
-          <b>All {appliedFilters.productCodes.length} together</b> {total.toLocaleString()}
+        <span className={`code-count together${matrixCompanies ? "" : " zero"}`} title={`Companies whose listings cover ${appliedCodesLabel}`}>
+          <b>All {appliedFilters.productCodes.length} codes</b> {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"}
         </span>
       )}
     </div>
@@ -678,24 +676,30 @@ export default function Home() {
               />
             </div>
             <datalist id="product-code-options">{PRESET.map((item) => <option key={item.code} value={item.code} label={item.name} />)}</datalist>
-            <div className="match-mode" role="group" aria-label="How several product codes combine">
-              <span className="match-mode-label">Match</span>
-              <div className="match-mode-switch">
-                {CODE_MATCH_MODES.map((mode) => (
-                  <button
-                    key={mode.value}
-                    type="button"
-                    className={filters.codeMatch === mode.value ? "active" : ""}
-                    aria-pressed={filters.codeMatch === mode.value}
-                    title={mode.hint}
-                    onClick={() => setCodeMatch(mode.value)}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <small className="field-hint">{matchHint}</small>
+            {viewMode === "matrix" ? (
+              <>
+                <div className="match-mode" role="group" aria-label="How several product codes combine per company">
+                  <span className="match-mode-label">Match</span>
+                  <div className="match-mode-switch">
+                    {CODE_MATCH_MODES.map((mode) => (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        className={filters.codeMatch === mode.value ? "active" : ""}
+                        aria-pressed={filters.codeMatch === mode.value}
+                        title={mode.hint}
+                        onClick={() => setCodeMatch(mode.value)}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <small className="field-hint">{matchHint}</small>
+              </>
+            ) : (
+              <small className="field-hint">Add several codes — listings match any of them. Switch to Company + devices to require every code per company.</small>
+            )}
           </div>
 
           <button
@@ -746,7 +750,7 @@ export default function Home() {
               <button className="icon-button filter-toggle" onClick={() => { setFiltersCollapsed(false); setFiltersOpen(true); }} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
               <div>
                 <span>03 / RESULTS</span>
-                <h2>{visibleRecords.length ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : showNoResults ? "0 records" : "Search records"}</h2>
+                <h2>{!nothingToShow ? (viewMode === "matrix" ? `${matrixRows.length.toLocaleString()} grouped rows` : rangeLabel) : showNoResults ? (viewMode === "matrix" ? "0 companies" : "0 records") : "Search records"}</h2>
                 {fetchedAt && (
                   <small className="fetch-meta" title={freshnessHint}>
                     {`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`}
@@ -823,18 +827,17 @@ export default function Home() {
               {codeCountStrip}
               <div className="empty-state no-results" role="status">
                 <PackageSearch size={34} />
-                <h3>No records match.</h3>
-                {allTogether ? (
+                <h3>{allTogether && records.length ? "No company holds every code." : "No records match."}</h3>
+                {allTogether && records.length ? (
                   <p>
-                    No single FDA listing carries <b>{appliedCodesLabel}</b> together. Each openFDA record is one product listing,
-                    so a company with separate listings for these codes does not count. Switch to <b>Any selected code</b> to see
-                    listings that carry at least one of them.
+                    No owner / operator has listings covering all of <b>{appliedCodesLabel}</b>.
+                    {" "}{anyCompanies.toLocaleString()} {anyCompanies === 1 ? "company holds" : "companies hold"} at least one of them — switch to <b>Any selected code</b> to see them.
                   </p>
                 ) : (
                   <p>Nothing in the openFDA registration and listing dataset matches this combination. Try fewer filters, another country, or double-check the product codes.</p>
                 )}
                 <div className="empty-actions">
-                  {allTogether && <button className="primary" onClick={() => setCodeMatch("any")}>Match any selected code</button>}
+                  {allTogether && records.length > 0 && <button className="primary" onClick={() => setCodeMatch("any")}>Match any selected code</button>}
                   <button className="secondary" onClick={reset}>Clear all filters</button>
                 </div>
               </div>
@@ -844,8 +847,8 @@ export default function Home() {
               {codeCountStrip}
               {viewMode === "matrix" && (
                 <div className="matrix-note">
-                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device groups</b> from {visibleRecords.length.toLocaleString()} matching records</span></div>
-                  <span>{total > 1000 && `Grouping the first 1,000 of ${total.toLocaleString()} matches · `}{allTogether && `Only listings carrying ${appliedCodesLabel} together are grouped · `}Listed devices counts unique proprietary names; Excel export fetches every available match.</span>
+                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device groups</b> · {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"} · from {records.length.toLocaleString()} matching listings</span></div>
+                  <span>{total > MATRIX_FETCH_CAP && `Grouping the first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()} matches — coverage beyond that isn't checked · `}{allTogether && `Only companies whose listings cover ${appliedCodesLabel} are shown · `}Listed devices counts unique proprietary names; Excel export fetches every available match.</span>
                 </div>
               )}
               <div className="table-wrap" aria-live="polite">
@@ -866,7 +869,7 @@ export default function Home() {
                     <th aria-label="Open record" />
                   </tr></thead>
                   <tbody>
-                    {visibleRecords.map((item, index) => {
+                    {records.map((item, index) => {
                       const matched = matchingProducts(item, appliedFilters);
                       const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
                       const primary = shown[0];
@@ -935,11 +938,11 @@ export default function Home() {
               </div>
               {viewMode === "records" && <div className="pagination">
                 <span>{rangeLabel}</span>
-                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + visibleRecords.length >= total || loading}>Next <ArrowRight size={15} /></button></div>
+                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + records.length >= total || loading}>Next <ArrowRight size={15} /></button></div>
               </div>}
             </>
           )}
-          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || "Searching openFDA…"}</span></div>}
+          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || loadingNote || "Searching openFDA…"}</span></div>}
         </section>
       </section>
 
@@ -992,12 +995,12 @@ export default function Home() {
         filename={exportFilename}
         scope={exportScope}
         clickableLinks={false}
-        pageCount={visibleRecords.length}
+        pageCount={records.length}
         allCount={exportCount}
         filters={[
           appliedFilters.keyword,
           ...appliedFilters.productCodes,
-          allTogether ? "All codes on the same listing" : "",
+          allTogether ? "Companies holding all codes" : "",
           appliedFilters.country,
           appliedFilters.deviceClass && `Class ${appliedFilters.deviceClass}`,
         ].filter(Boolean) as string[]}

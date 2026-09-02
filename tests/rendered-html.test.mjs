@@ -32,8 +32,8 @@ test("keeps FDA Explorer and Monitoring content intact", async () => {
   assert.match(explorer, /FDA DEVICE DATA/);
   assert.match(explorer, /Device registrations/);
   assert.match(explorer, /Product codes/);
-  assert.match(explorer, /Any selected code/);
-  assert.match(explorer, /All selected codes/);
+  assert.match(explorer, /listings match any of them/);
+  assert.match(explorer, /Company \+ devices/);
 
   const monitoring = await (await render("/fda/monitoring")).text();
   assert.match(monitoring, /REGULATORY MONITORING/);

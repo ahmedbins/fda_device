@@ -33,7 +33,7 @@ That creates six main workflows:
 
 | Workflow | What it is for |
 | --- | --- |
-| **FDA Explorer** | Search registration and listing records; filter by product codes (match **any** or **all** selected codes on the same listing), class, country and role; customize columns; inspect record details; export Excel workbooks. |
+| **FDA Explorer** | Search registration and listing records; filter by product codes, class, country and role; group by company and, with several codes, keep only companies holding **all** of them; customize columns; inspect record details; export Excel workbooks. |
 | **FDA Monitoring** | Review recent 510(k), recall, and adverse-event activity. |
 | **FCC Explorer** | Search complete or partial FCC IDs; group results by confirmed grantee; inspect authorization history, exhibits, and evidence. |
 | **FCC Monitoring** | Review recent original authorizations and FCC-labelled authorization changes for configured scopes. |
