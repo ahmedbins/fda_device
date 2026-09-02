@@ -73,3 +73,16 @@ test("rejects invalid FCC API scope without contacting the upstream source", asy
   assert.equal(response.status, 400);
   assert.match(await response.text(), /at least three/i);
 });
+
+test("server-renders the design-preview hub and FDA Explorer", async () => {
+  const hub = await (await render("/next")).text();
+  assert.match(hub, /Design preview/);
+  assert.match(hub, /One workbench for public regulatory records/);
+  assert.match(hub, /Regulatory Data Hub/);
+
+  const explorer = await (await render("/next/fda/explorer")).text();
+  assert.match(explorer, /Run search/);
+  assert.match(explorer, /Any code/);
+  assert.match(explorer, /All codes/);
+  assert.match(explorer, /Hearing aids/);
+});

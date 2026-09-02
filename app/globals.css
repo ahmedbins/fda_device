@@ -308,6 +308,8 @@ td > span:not(.code-pill):not(.class-badge) { display: block; max-width: 280px; 
 .code-count.zero { opacity: .55; }
 .code-count.together b { color: #fff; background: var(--coral); }
 
+.nav-preview-link { padding: 6px 9px; border: 1px dashed #b9a56a; border-radius: 4px; background: #fbf6e6; color: #6b4d18; font: 700 9px var(--font-roboto), sans-serif; letter-spacing: .06em; text-transform: uppercase; text-decoration: none; white-space: nowrap; }
+.nav-preview-link:hover { background: #f2e8cc; }
 .dev-badge { margin-left: 4px; padding: 4px 7px; border-radius: 3px; background: #f2e8cc; color: #775828; font: 700 9px var(--font-roboto), sans-serif; letter-spacing: .08em; }
 .topbar-right { display: flex; align-items: center; gap: 22px; }
 .top-nav { display: flex; gap: 4px; padding: 3px; background: var(--paper-2); border-radius: 15px; }

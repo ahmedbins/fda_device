@@ -52,6 +52,7 @@ export default function SourceNav({ source, view, status, statusState = "ready" 
       </button>
 
       <div className="topbar-right regulatory-nav">
+        {devHost && <a className="nav-preview-link" href="/next" title="Preview of the redesigned workbench (internal only)">New design ↗</a>}
         <div className="nav-dimension">
           <span>Source</span>
           <nav className="top-nav" aria-label="Regulatory source">
