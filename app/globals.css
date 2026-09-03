@@ -343,6 +343,7 @@ th.sortable:hover .th-inner .dim { opacity: 1; }
 .col-resizer::after { content: ""; position: absolute; top: 10px; bottom: 10px; left: 4px; width: 1px; background: #c5cfd3; transition: background .15s ease, top .15s ease, bottom .15s ease; }
 .col-resizer:hover::after, th.resizing .col-resizer::after { top: 0; bottom: 0; width: 2px; left: 4px; background: var(--coral); }
 th:last-child .col-resizer { display: none; }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none; }
 .open-col { width: 48px; }
 .table-fixed td { overflow: hidden; }
 .column-menu-head > span { display: flex; gap: 10px; }

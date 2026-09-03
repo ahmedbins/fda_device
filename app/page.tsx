@@ -230,13 +230,11 @@ function PremarketLinks({ item, stop = false }: { item: RecordItem; stop?: boole
 type HeaderSpec = { key: string; label: string; numeric?: boolean; sortable: boolean; dir: SortDir | null; hint: string; open?: boolean };
 
 /** A table header that sorts when openFDA (or the loaded rows) can, explains itself when it cannot, and carries a drag handle for resizing. */
-function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeMove, onResizeEnd, onResizeReset }: {
+function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeReset }: {
   spec: HeaderSpec;
   resizing: string;
   onSort: (spec: HeaderSpec) => void;
   onResizeStart: (event: ReactPointerEvent<HTMLElement>, key: string) => void;
-  onResizeMove: (event: ReactPointerEvent<HTMLElement>) => void;
-  onResizeEnd: () => void;
   onResizeReset: (key: string) => void;
 }) {
   const handle = (
@@ -247,9 +245,6 @@ function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeMove, onRes
       aria-label="Resize column"
       title="Drag to resize · double-click to reset"
       onPointerDown={(event) => onResizeStart(event, spec.key)}
-      onPointerMove={onResizeMove}
-      onPointerUp={onResizeEnd}
-      onPointerCancel={onResizeEnd}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => { event.stopPropagation(); onResizeReset(spec.key); }}
     />
@@ -566,6 +561,38 @@ export default function Home() {
     if (!colWidthsReady) return;
     COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(`fda-col-widths-${view}`, JSON.stringify(colWidths[view] || {})));
   }, [colWidthsReady, colWidths]);
+
+  /** While a header is being dragged, follow the pointer anywhere on the page and stop on any release, cancel or window blur. */
+  useEffect(() => {
+    if (!resizing) return;
+    const move = (event: PointerEvent) => {
+      const active = resizeRef.current;
+      if (!active) return;
+      if (event.buttons === 0) {
+        resizeRef.current = null;
+        setResizing("");
+        return;
+      }
+      const width = Math.max(56, Math.round(active.startWidth + event.clientX - active.startX));
+      setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: width } }));
+    };
+    const end = () => {
+      resizeRef.current = null;
+      setResizing("");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    window.addEventListener("blur", end);
+    document.body.classList.add("col-resizing");
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      window.removeEventListener("blur", end);
+      document.body.classList.remove("col-resizing");
+    };
+  }, [resizing]);
 
 
   useEffect(() => {
@@ -1068,22 +1095,7 @@ export default function Home() {
     });
     setColWidths((current) => (Object.keys(current[view] || {}).length ? current : { ...current, [view]: measured }));
     resizeRef.current = { view, key, startX: event.clientX, startWidth: th.getBoundingClientRect().width };
-    try {
-      handle.setPointerCapture(event.pointerId);
-    } catch {
-      // Synthetic or already-released pointers cannot be captured; dragging still works while the pointer stays on the handle.
-    }
     setResizing(key);
-  };
-  const moveResize = (event: ReactPointerEvent<HTMLElement>) => {
-    const active = resizeRef.current;
-    if (!active) return;
-    const width = Math.max(56, Math.round(active.startWidth + event.clientX - active.startX));
-    setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: width } }));
-  };
-  const endResize = () => {
-    resizeRef.current = null;
-    setResizing("");
   };
   const resetWidth = (key: string) => setColWidths((current) => {
     const next = { ...(current[viewMode] || {}) };
@@ -1122,7 +1134,7 @@ export default function Home() {
     if (spec.key === "expiry") changeRecordSort(cycleSort(recordSort, "expiry", "expirySoonest"));
     else changeRecordSort(cycleSort(recordSort, "newest", "oldest"));
   };
-  const headerProps = { resizing, onSort: sortByHeader, onResizeStart: startResize, onResizeMove: moveResize, onResizeEnd: endResize, onResizeReset: resetWidth };
+  const headerProps = { resizing, onSort: sortByHeader, onResizeStart: startResize, onResizeReset: resetWidth };
 
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="code-count-strip" aria-label="Matches per product code">
