@@ -251,7 +251,7 @@ function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeReset }: {
   );
   if (spec.open) return <th aria-label={spec.label} className={`open-col${resizing === spec.key ? " resizing" : ""}`}>{handle}</th>;
   if (!spec.sortable) {
-    return <th className={`${spec.numeric ? "numeric-head" : ""}${resizing === spec.key ? " resizing" : ""}`}><span className="th-inner">{spec.label}</span>{handle}</th>;
+    return <th className={`${spec.numeric ? "numeric-head" : ""}${resizing === spec.key ? " resizing" : ""}`}><span className="th-inner"><span className="th-label">{spec.label}</span></span>{handle}</th>;
   }
   return (
     <th
@@ -260,7 +260,7 @@ function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeReset }: {
       title={spec.hint}
       onClick={() => onSort(spec)}
     >
-      <span className="th-inner">{spec.label}{spec.dir === "asc" ? <ArrowUp size={12} /> : spec.dir === "desc" ? <ArrowDown size={12} /> : <ArrowUpDown size={12} className="dim" />}</span>
+      <span className="th-inner"><span className="th-label">{spec.label}</span>{spec.dir === "asc" ? <ArrowUp size={12} /> : spec.dir === "desc" ? <ArrowDown size={12} /> : <ArrowUpDown size={12} className="dim" />}</span>
       {handle}
     </th>
   );
@@ -575,7 +575,7 @@ export default function Home() {
         setResizing("");
         return;
       }
-      const width = Math.max(56, Math.round(active.startWidth + event.clientX - active.startX));
+      const width = Math.max(64, Math.round(active.startWidth + event.clientX - active.startX));
       setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: width } }));
     };
     const end = () => {
