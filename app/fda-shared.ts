@@ -432,13 +432,50 @@ export function matrixCompanyCount(rows: readonly MatrixRow[]) {
   return new Set(rows.map((row) => row.companyKey)).size;
 }
 
-export function sortMatrixRows(rows: MatrixRow[], sort: MatrixSort) {
+export type SortDir = "asc" | "desc";
+export type MatrixSortKey = "productCode" | "deviceType" | "company" | "listedDeviceCount" | "registeredDevices" | "registrations" | "productListings" | "establishments" | "deviceClass" | "specialty" | "countries" | "latestListing";
+export const MATRIX_NUMERIC_KEYS: readonly MatrixSortKey[] = ["listedDeviceCount", "registeredDevices", "registrations", "productListings", "establishments"];
+
+function matrixSortValue(row: MatrixRow, key: MatrixSortKey): string | number {
+  switch (key) {
+    case "productCode": return row.productCode;
+    case "deviceType": return row.deviceType;
+    case "company": return row.company;
+    case "listedDeviceCount":
+    case "registeredDevices": return row.devices.length;
+    case "registrations": return row.registrations;
+    case "productListings": return row.productListings;
+    case "establishments": return row.establishments;
+    case "deviceClass": return row.deviceClasses.join(" ");
+    case "specialty": return row.specialties.join(" ");
+    case "countries": return row.countries.join(" ");
+    case "latestListing": return row.latestListing;
+  }
+}
+
+/** Client-side sort of Company + devices rows by any column; ties fall back to company then product code so groups stay stable. */
+export function sortMatrixBy(rows: readonly MatrixRow[], key: MatrixSortKey, dir: SortDir) {
+  const sign = dir === "desc" ? -1 : 1;
   return [...rows].sort((a, b) => {
-    if (sort === "devices") return b.devices.length - a.devices.length || a.company.localeCompare(b.company);
-    if (sort === "registrations") return b.registrations - a.registrations || a.company.localeCompare(b.company);
-    if (sort === "company") return a.company.localeCompare(b.company) || a.productCode.localeCompare(b.productCode);
-    return a.productCode.localeCompare(b.productCode) || a.company.localeCompare(b.company);
+    const x = matrixSortValue(a, key);
+    const y = matrixSortValue(b, key);
+    const primary = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, { sensitivity: "base", numeric: true });
+    if (primary) return primary * sign;
+    return a.company.localeCompare(b.company) || a.productCode.localeCompare(b.productCode);
   });
+}
+
+/** The four preset orders offered in the sort menu, expressed as column + direction. */
+export const MATRIX_SORT_PRESETS: Record<MatrixSort, { key: MatrixSortKey; dir: SortDir }> = {
+  code: { key: "productCode", dir: "asc" },
+  company: { key: "company", dir: "asc" },
+  devices: { key: "listedDeviceCount", dir: "desc" },
+  registrations: { key: "registrations", dir: "desc" },
+};
+
+export function sortMatrixRows(rows: MatrixRow[], sort: MatrixSort) {
+  const preset = MATRIX_SORT_PRESETS[sort];
+  return sortMatrixBy(rows, preset.key, preset.dir);
 }
 
 /* ------------------------------------------------------------------ */
@@ -505,13 +542,14 @@ export async function fetchListingPages<T>(
 /* ------------------------------------------------------------------ */
 
 /** openFDA only sorts non-analyzed fields, so names are out; dates and years work. */
-export type RecordSort = "relevance" | "newest" | "oldest" | "expiry";
+export type RecordSort = "relevance" | "newest" | "oldest" | "expiry" | "expirySoonest";
 
 export const RECORD_SORT_OPTIONS: { value: RecordSort; label: string; openFda: string }[] = [
   { value: "relevance", label: "openFDA order", openFda: "" },
   { value: "newest", label: "Newest listing first", openFda: "products.created_date:desc" },
   { value: "oldest", label: "Oldest listing first", openFda: "products.created_date:asc" },
   { value: "expiry", label: "Latest expiry first", openFda: "registration.reg_expiry_date_year:desc" },
+  { value: "expirySoonest", label: "Earliest expiry first", openFda: "registration.reg_expiry_date_year:asc" },
 ];
 
 export function asRecordSort(value: unknown): RecordSort {

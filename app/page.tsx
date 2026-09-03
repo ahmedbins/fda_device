@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
+  ArrowDown,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
+  ArrowUpDown,
   ArrowUpRight,
   Barcode,
   Building2,
@@ -17,6 +20,7 @@ import {
   ExternalLink,
   Filter,
   History,
+  Info,
   Link2,
   ListFilter,
   LoaderCircle,
@@ -36,6 +40,8 @@ import {
   EMPTY_FILTERS,
   EXPORT_CAP,
   MATRIX_FETCH_CAP,
+  MATRIX_NUMERIC_KEYS,
+  MATRIX_SORT_PRESETS,
   PRESET,
   PRESET_CODES,
   RECENT_SEARCHES_KEY,
@@ -46,10 +52,12 @@ import {
   type ExplorerView as ViewMode,
   type MatrixRow,
   type MatrixSort,
+  type MatrixSortKey,
   type OpenFdaMeta,
   type RecentSearch,
   type RecordItem,
   type RecordSort,
+  type SortDir,
   asRecordSort,
   buildMatrix,
   buildSearch,
@@ -77,7 +85,7 @@ import {
   productFilterActive,
   recordSortParam,
   rememberSearch,
-  sortMatrixRows,
+  sortMatrixBy,
 } from "./fda-shared";
 import {
   UDI_ALIASES_KEY,
@@ -101,7 +109,7 @@ import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
 type CountryOption = { code: string; count: number; name: string };
-type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "deviceClass" | "premarket" | "expiry" | "registrationNumber" | "feiNumber";
+type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "listed" | "deviceClass" | "premarket" | "expiry" | "registrationNumber" | "feiNumber";
 type MatrixColumn = "productCode" | "deviceType" | "company" | "coverage" | "listedDeviceCount" | "registeredDevices" | "registrations" | "productListings" | "establishments" | "deviceClass" | "specialty" | "countries" | "latestListing";
 type UdiColumn = "company" | "brand" | "model" | "primaryDi" | "codes" | "premarket" | "rxOtc" | "published" | "status" | "description" | "gmdn" | "catalog" | "identifiers";
 
@@ -113,6 +121,7 @@ const RECORD_COLUMN_OPTIONS: { key: RecordColumn; label: string; hint: string }[
   { key: "listedProducts", label: "Listed products", hint: "Matching product entries on the record" },
   { key: "tradeNames", label: "Trade names", hint: "Proprietary device names" },
   { key: "location", label: "Location", hint: "City, state and country" },
+  { key: "listed", label: "Listed", hint: "Date the matching product entry was created — sortable" },
   { key: "deviceClass", label: "Device class", hint: "FDA regulatory class" },
   { key: "premarket", label: "510(k) / PMA", hint: "Premarket submission behind the listing, linked to FDA" },
   { key: "expiry", label: "Expiry year", hint: "Registration expiry year" },
@@ -153,7 +162,12 @@ const UDI_COLUMN_OPTIONS: { key: UdiColumn; label: string; hint: string }[] = [
   { key: "identifiers", label: "Identifiers", hint: "How many DIs (primary, package, …) the record carries" },
 ];
 
-const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice", "productCodes", "listedProducts", "location", "deviceClass"];
+const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice", "productCodes", "listedProducts", "location", "listed", "deviceClass"];
+const COLUMN_WIDTH_VIEWS = ["records", "matrix", "udi"] as const;
+
+function latestListed(products: readonly { created_date?: string }[]) {
+  return products.reduce((max, product) => (product.created_date && product.created_date > max ? product.created_date : max), "");
+}
 const DEFAULT_MATRIX_COLUMNS: MatrixColumn[] = ["productCode", "deviceType", "company", "coverage", "listedDeviceCount", "registeredDevices", "registrations"];
 const DEFAULT_UDI_COLUMNS: UdiColumn[] = ["company", "brand", "model", "primaryDi", "codes", "premarket", "rxOtc", "published"];
 
@@ -214,6 +228,47 @@ function PremarketLinks({ item, stop = false }: { item: RecordItem; stop?: boole
   );
 }
 
+type HeaderSpec = { key: string; label: string; numeric?: boolean; sortable: boolean; dir: SortDir | null; hint: string; open?: boolean };
+
+/** A table header that sorts when openFDA (or the loaded rows) can, explains itself when it cannot, and carries a drag handle for resizing. */
+function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeMove, onResizeEnd, onResizeReset }: {
+  spec: HeaderSpec;
+  resizing: string;
+  onSort: (spec: HeaderSpec) => void;
+  onResizeStart: (event: ReactPointerEvent<HTMLElement>, key: string) => void;
+  onResizeMove: (event: ReactPointerEvent<HTMLElement>) => void;
+  onResizeEnd: () => void;
+  onResizeReset: (key: string) => void;
+}) {
+  const handle = (
+    <div
+      className="col-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize column"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={(event) => onResizeStart(event, spec.key)}
+      onPointerMove={onResizeMove}
+      onPointerUp={onResizeEnd}
+      onPointerCancel={onResizeEnd}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => { event.stopPropagation(); onResizeReset(spec.key); }}
+    />
+  );
+  if (spec.open) return <th aria-label={spec.label} className={`open-col${resizing === spec.key ? " resizing" : ""}`}>{handle}</th>;
+  return (
+    <th
+      className={`${spec.numeric ? "numeric-head " : ""}${spec.sortable ? "sortable" : "unsortable"}${spec.dir ? " sorted" : ""}${resizing === spec.key ? " resizing" : ""}`}
+      aria-sort={spec.sortable ? (spec.dir === "asc" ? "ascending" : spec.dir === "desc" ? "descending" : "none") : undefined}
+      title={spec.sortable ? spec.hint : `Can't sort by ${spec.label}: ${spec.hint}`}
+      onClick={() => onSort(spec)}
+    >
+      <span className="th-inner">{spec.label}{spec.sortable ? (spec.dir === "asc" ? <ArrowUp size={12} /> : spec.dir === "desc" ? <ArrowDown size={12} /> : <ArrowUpDown size={12} className="dim" />) : <Info size={11} className="dim" />}</span>
+      {handle}
+    </th>
+  );
+}
+
 function loadColumns<T extends string>(key: string, options: readonly { key: T }[]): T[] | null {
   try {
     const saved = JSON.parse(localStorage.getItem(key) || "null") as T[] | null;
@@ -267,7 +322,13 @@ export default function Home() {
   const [columnPrefsReady, setColumnPrefsReady] = useState(false);
   const [apiCountries, setApiCountries] = useState<CountryOption[]>([]);
   // With ALL on, a company's codes belong together, so company order is the natural default.
-  const [matrixSort, setMatrixSort] = useState<MatrixSort>(initial.filters.codeMatch === "all" ? "company" : "code");
+  const [matrixSortKey, setMatrixSortKey] = useState<MatrixSortKey>(initial.filters.codeMatch === "all" ? "company" : "productCode");
+  const [matrixDir, setMatrixDir] = useState<SortDir>("asc");
+  const [colWidths, setColWidths] = useState<Record<string, Record<string, number>>>({});
+  const [colWidthsReady, setColWidthsReady] = useState(false);
+  const [resizing, setResizing] = useState("");
+  const [sortNote, setSortNote] = useState("");
+  const resizeRef = useRef<{ view: string; key: string; startX: number; startWidth: number } | null>(null);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [filterPanelPrefsReady, setFilterPanelPrefsReady] = useState(false);
   const codeInput = useRef<HTMLInputElement>(null);
@@ -316,8 +377,8 @@ export default function Home() {
 
   /** Company + devices groups; with ALL, only companies covering every selected code survive. */
   const matrixRows = useMemo(
-    () => sortMatrixRows(buildMatrix(records, appliedFilters), matrixSort),
-    [records, appliedFilters, matrixSort],
+    () => sortMatrixBy(buildMatrix(records, appliedFilters), matrixSortKey, matrixDir),
+    [records, appliedFilters, matrixSortKey, matrixDir],
   );
   const matrixCompanies = useMemo(() => matrixCompanyCount(matrixRows), [matrixRows]);
   /** How many companies hold at least one selected code — the ANY answer, shown when ALL comes up empty. */
@@ -452,7 +513,7 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const validRecords = loadColumns("fda-record-columns", RECORD_COLUMN_OPTIONS);
+      let validRecords = loadColumns("fda-record-columns", RECORD_COLUMN_OPTIONS);
       let validMatrix = loadColumns("fda-matrix-columns", MATRIX_COLUMN_OPTIONS);
       const validUdi = loadColumns("fda-udi-columns", UDI_COLUMN_OPTIONS);
       // One-time migration: surface the "Codes held" column for people who saved their columns before it existed.
@@ -461,15 +522,35 @@ export default function Home() {
         validMatrix = at >= 0 ? [...validMatrix.slice(0, at + 1), "coverage", ...validMatrix.slice(at + 1)] : [...validMatrix, "coverage"];
       }
       localStorage.setItem("fda-matrix-columns-coverage", "1");
+      // One-time migration: surface the sortable "Listed" date column for saved column sets that predate it.
+      if (validRecords?.length && !validRecords.includes("listed") && !localStorage.getItem("fda-record-columns-listed")) {
+        const at = validRecords.indexOf("location");
+        validRecords = at >= 0 ? [...validRecords.slice(0, at + 1), "listed", ...validRecords.slice(at + 1)] : [...validRecords, "listed"];
+      }
+      localStorage.setItem("fda-record-columns-listed", "1");
+      const widths: Record<string, Record<string, number>> = {};
+      COLUMN_WIDTH_VIEWS.forEach((view) => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(`fda-col-widths-${view}`) || "null") as Record<string, unknown> | null;
+          if (parsed && typeof parsed === "object") widths[view] = Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0));
+        } catch {
+          // Ignore malformed widths.
+        }
+      });
       queueMicrotask(() => {
         if (validRecords) setRecordColumns(validRecords);
         if (validMatrix) setMatrixColumns(validMatrix);
         if (validUdi) setUdiColumns(validUdi);
+        setColWidths(widths);
+        setColWidthsReady(true);
         setColumnPrefsReady(true);
       });
     } catch {
       // Ignore malformed local preferences and use the defaults.
-      queueMicrotask(() => setColumnPrefsReady(true));
+      queueMicrotask(() => {
+        setColWidthsReady(true);
+        setColumnPrefsReady(true);
+      });
     }
   }, []);
 
@@ -479,6 +560,17 @@ export default function Home() {
     localStorage.setItem("fda-matrix-columns", JSON.stringify(matrixColumns));
     localStorage.setItem("fda-udi-columns", JSON.stringify(udiColumns));
   }, [columnPrefsReady, recordColumns, matrixColumns, udiColumns]);
+
+  useEffect(() => {
+    if (!colWidthsReady) return;
+    COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(`fda-col-widths-${view}`, JSON.stringify(colWidths[view] || {})));
+  }, [colWidthsReady, colWidths]);
+
+  useEffect(() => {
+    if (!sortNote) return;
+    const timer = setTimeout(() => setSortNote(""), 6000);
+    return () => clearTimeout(timer);
+  }, [sortNote]);
 
   useEffect(() => {
     const saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
@@ -620,7 +712,10 @@ export default function Home() {
    * in Devices (UDI) it changes the query itself (a device record either carries every code or not).
    */
   const setCodeMatch = (mode: CodeMatchMode) => {
-    if (mode === "all" && matrixSort === "code") setMatrixSort("company");
+    if (mode === "all" && matrixSortKey === "productCode") {
+      setMatrixSortKey("company");
+      setMatrixDir("asc");
+    }
     if (filters.codeMatch === mode && appliedFilters.codeMatch === mode) return;
     const next = { ...filters, codeMatch: mode };
     setFilters(next);
@@ -701,7 +796,10 @@ export default function Home() {
     setViewMode(state.view);
     setRecordSort(sort);
     setCodeDraft("");
-    if (state.filters.codeMatch === "all" && matrixSort === "code") setMatrixSort("company");
+    if (state.filters.codeMatch === "all" && matrixSortKey === "productCode") {
+      setMatrixSortKey("company");
+      setMatrixDir("asc");
+    }
     runSearch(0, state.view, state.filters, limit, sort);
   };
 
@@ -797,9 +895,9 @@ export default function Home() {
             latestListing: row.latestListing,
           })[column];
           const exportColumns = (exportColumnIds.filter((id) => MATRIX_COLUMN_OPTIONS.some((option) => option.key === id)) as MatrixColumn[]);
-          const chosen = orderMatrixColumns(exportColumns.length ? exportColumns : matrixColumns, matrixSort);
+          const chosen = orderMatrixColumns(exportColumns.length ? exportColumns : matrixColumns, matrixSortKey);
           // buildMatrix applies the same ANY/ALL company rollup the table uses, on the full export set.
-          const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
+          const rows = sortMatrixBy(buildMatrix(all, appliedFilters), matrixSortKey, matrixDir)
             .map((row) => chosen.map((column) => value(row, column)));
           downloadExcel({
             filename: sanitizeExportFilename(exportFilename, exportBaseName()),
@@ -824,6 +922,7 @@ export default function Home() {
               tradeNames: listedDeviceNames(item).join("; "),
               location: locationSummary(item),
               deviceClass: [...new Set(shown.map((p) => p.openfda?.device_class).filter(Boolean))].join("; "),
+              listed: latestListed(shown),
               premarket: premarketSummary(item),
               expiry: item.registration?.reg_expiry_date_year ?? "",
               registrationNumber: item.registration?.registration_number ?? "",
@@ -909,7 +1008,7 @@ export default function Home() {
   const showNoResults = hasSearched && !loading && !error && nothingToShow;
   const showEmpty = nothingToShow && !loading && !showNoResults;
   const appliedCodesLabel = appliedFilters.productCodes.join(" + ");
-  const visibleMatrixColumns = orderMatrixColumns(matrixColumns, matrixSort);
+  const visibleMatrixColumns = orderMatrixColumns(matrixColumns, matrixSortKey);
   const showCodeNames = selectedCodes.length > 0 && selectedCodes.length <= 3;
   const activeDatasetDate = isUdi ? udiUpdated : datasetUpdated;
 
@@ -933,6 +1032,104 @@ export default function Home() {
     else if (chip.kind === "class") applyValueFilter({ deviceClass: "" });
     else applyValueFilter({ establishment: "" });
   };
+
+  /* ---- header sorting, explanations and column resizing ---- */
+  const RECORD_UNSORTABLE = "openFDA can only order listing records by dates and years (the Listed and Expiry columns); names, codes and places are full-text fields it cannot sort.";
+  const UDI_UNSORTABLE = "openFDA can only order GUDID records by publish date; labeler, brand, model and codes are full-text fields it cannot sort.";
+  const cycleSort = (current: RecordSort, desc: RecordSort, asc: RecordSort): RecordSort => (current === desc ? asc : current === asc ? "relevance" : desc);
+  const sortDirOf = (current: RecordSort, desc: RecordSort, asc: RecordSort): SortDir | null => (current === desc ? "desc" : current === asc ? "asc" : null);
+  const matrixPreset = (Object.entries(MATRIX_SORT_PRESETS).find(([, preset]) => preset.key === matrixSortKey && preset.dir === matrixDir)?.[0] as MatrixSort | undefined) || "custom";
+  const applyMatrixPreset = (value: string) => {
+    if (!(value in MATRIX_SORT_PRESETS)) return;
+    const preset = MATRIX_SORT_PRESETS[value as MatrixSort];
+    setMatrixSortKey(preset.key);
+    setMatrixDir(preset.dir);
+  };
+
+  const visibleRecordKeys: string[] = [...RECORD_COLUMN_OPTIONS.filter((option) => recordColumns.includes(option.key)).map((option) => option.key), "open"];
+  const visibleUdiKeys: string[] = [...UDI_COLUMN_OPTIONS.filter((option) => udiColumns.includes(option.key)).map((option) => option.key), "open"];
+  const activeKeys: string[] = isUdi ? visibleUdiKeys : isMatrix ? visibleMatrixColumns : visibleRecordKeys;
+  const widths = colWidths[viewMode] || {};
+  const fixedLayout = Object.keys(widths).length > 0;
+  const widthOf = (key: string) => widths[key] ?? (key === "open" ? 48 : 160);
+  const tableStyle = fixedLayout ? { tableLayout: "fixed" as const, width: `max(${activeKeys.reduce((sum, key) => sum + widthOf(key), 0)}px, 100%)`, minWidth: 0 } : undefined;
+  const colgroup = fixedLayout ? <colgroup>{activeKeys.map((key) => <col key={key} style={{ width: `${widthOf(key)}px` }} />)}</colgroup> : null;
+
+  const startResize = (event: ReactPointerEvent<HTMLElement>, key: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const th = handle.parentElement;
+    const table = th?.closest("table");
+    if (!th || !table) return;
+    const view = viewMode;
+    const keys = activeKeys;
+    // Capture every column's current width so switching to a fixed layout does not shift anything.
+    const measured: Record<string, number> = {};
+    table.querySelectorAll("thead th").forEach((cell, index) => {
+      const columnKey = keys[index];
+      if (columnKey) measured[columnKey] = Math.round(cell.getBoundingClientRect().width);
+    });
+    setColWidths((current) => (Object.keys(current[view] || {}).length ? current : { ...current, [view]: measured }));
+    resizeRef.current = { view, key, startX: event.clientX, startWidth: th.getBoundingClientRect().width };
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic or already-released pointers cannot be captured; dragging still works while the pointer stays on the handle.
+    }
+    setResizing(key);
+  };
+  const moveResize = (event: ReactPointerEvent<HTMLElement>) => {
+    const active = resizeRef.current;
+    if (!active) return;
+    const width = Math.max(56, Math.round(active.startWidth + event.clientX - active.startX));
+    setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: width } }));
+  };
+  const endResize = () => {
+    resizeRef.current = null;
+    setResizing("");
+  };
+  const resetWidth = (key: string) => setColWidths((current) => {
+    const next = { ...(current[viewMode] || {}) };
+    delete next[key];
+    return { ...current, [viewMode]: next };
+  });
+  const recordHeaderSpec = (key: RecordColumn): HeaderSpec => {
+    const option = RECORD_COLUMN_OPTIONS.find((entry) => entry.key === key)!;
+    if (key === "listed") return { key, label: option.label, sortable: true, dir: sortDirOf(recordSort, "newest", "oldest"), hint: "Sort by listing date (openFDA)" };
+    if (key === "expiry") return { key, label: option.label, sortable: true, dir: sortDirOf(recordSort, "expiry", "expirySoonest"), hint: "Sort by registration expiry year (openFDA)" };
+    if (key === "listedProducts") return { key, label: option.label, numeric: true, sortable: false, dir: null, hint: "this count is computed from the rows on this page, not stored by openFDA." };
+    return { key, label: option.label, sortable: false, dir: null, hint: RECORD_UNSORTABLE };
+  };
+  const matrixHeaderSpec = (column: MatrixColumn): HeaderSpec => {
+    const option = MATRIX_COLUMN_OPTIONS.find((entry) => entry.key === column)!;
+    if (column === "coverage") return { key: column, label: option.label, sortable: false, dir: null, hint: "it shows which selected codes each company holds; there is no single value to order by." };
+    return { key: column, label: option.label, numeric: option.numeric, sortable: true, dir: matrixSortKey === column ? matrixDir : null, hint: "Sort by this column (every loaded row, on this device)" };
+  };
+  const udiHeaderSpec = (key: UdiColumn): HeaderSpec => {
+    const option = UDI_COLUMN_OPTIONS.find((entry) => entry.key === key)!;
+    if (key === "published") return { key, label: option.label, sortable: true, dir: sortDirOf(recordSort, "newest", "oldest"), hint: "Sort by GUDID publish date (openFDA)" };
+    if (key === "identifiers") return { key, label: option.label, numeric: true, sortable: false, dir: null, hint: "this count comes from the record itself; openFDA cannot order by it." };
+    return { key, label: option.label, sortable: false, dir: null, hint: UDI_UNSORTABLE };
+  };
+  const sortByHeader = (spec: HeaderSpec) => {
+    if (!spec.sortable) {
+      setSortNote(`Can't sort by ${spec.label}. ${spec.hint}`);
+      return;
+    }
+    if (isMatrix) {
+      const key = spec.key as MatrixSortKey;
+      if (matrixSortKey === key) setMatrixDir(matrixDir === "asc" ? "desc" : "asc");
+      else {
+        setMatrixSortKey(key);
+        setMatrixDir(MATRIX_NUMERIC_KEYS.includes(key) ? "desc" : "asc");
+      }
+      return;
+    }
+    if (spec.key === "expiry") changeRecordSort(cycleSort(recordSort, "expiry", "expirySoonest"));
+    else changeRecordSort(cycleSort(recordSort, "newest", "oldest"));
+  };
+  const headerProps = { resizing, onSort: sortByHeader, onResizeStart: startResize, onResizeMove: moveResize, onResizeEnd: endResize, onResizeReset: resetWidth };
 
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="code-count-strip" aria-label="Matches per product code">
@@ -1225,7 +1422,7 @@ export default function Home() {
                 <div className="column-menu">
                   <div className="column-menu-head">
                     <div><b>Display columns</b><span>Saved on this device</span></div>
-                    <button type="button" onClick={resetActiveColumns}>Reset</button>
+                    <span>{fixedLayout && <button type="button" onClick={() => setColWidths((current) => ({ ...current, [viewMode]: {} }))}>Reset widths</button>}<button type="button" onClick={resetActiveColumns}>Reset</button></span>
                   </div>
                   <div className="column-options">
                     {activeColumnOptions.map((option) => {
@@ -1241,7 +1438,7 @@ export default function Home() {
                   </div>
                 </div>
               </details>
-              {isMatrix && <label className="matrix-sort">Sort <select value={matrixSort} onChange={(e) => setMatrixSort(e.target.value as MatrixSort)} aria-label="Sort company and device rows"><option value="company">Company A–Z</option><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option></select></label>}
+              {isMatrix && <label className="matrix-sort">Sort <select value={matrixPreset} onChange={(e) => applyMatrixPreset(e.target.value)} aria-label="Sort company and device rows"><option value="company">Company A–Z</option><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option>{matrixPreset === "custom" && <option value="custom">{`${MATRIX_COLUMN_OPTIONS.find((option) => option.key === matrixSortKey)?.label || "Column"} ${matrixDir === "asc" ? "↑" : "↓"}`}</option>}</select></label>}
               {viewMode === "records" && <label className="matrix-sort">Sort <select value={recordSort} onChange={(e) => changeRecordSort(asRecordSort(e.target.value))} aria-label="Sort records">{RECORD_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {isUdi && <label className="matrix-sort">Sort <select value={UDI_SORT_OPTIONS.some((option) => option.value === recordSort) ? recordSort : "relevance"} onChange={(e) => changeRecordSort(asRecordSort(e.target.value))} aria-label="Sort devices">{UDI_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
@@ -1267,6 +1464,14 @@ export default function Home() {
             </div>
           )}
 
+          {sortNote && (
+            <div className="sort-note" role="status">
+              <Info size={13} />
+              <span>{sortNote}</span>
+              <button type="button" onClick={() => setSortNote("")} aria-label="Dismiss"><X size={12} /></button>
+            </div>
+          )}
+
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>Search interrupted</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
 
           {showEmpty ? (
@@ -1281,9 +1486,14 @@ export default function Home() {
               </div>
               {recent.length > 0 && (
                 <div className="recent-searches" aria-label="Recent searches">
-                  <span><History size={11} /> Recent searches on this device</span>
+                  <span><History size={11} /> Recent searches on this device <button type="button" className="text-button" onClick={() => setRecent([])}>Clear</button></span>
                   <div>
-                    {recent.map((entry) => <button key={entry.params} type="button" onClick={() => applyRecent(entry)} title={entry.label}>{entry.label}</button>)}
+                    {recent.map((entry) => (
+                      <span key={entry.params} className="recent-chip">
+                        <button type="button" onClick={() => applyRecent(entry)} title={entry.label}>{entry.label}</button>
+                        <button type="button" className="recent-remove" onClick={() => setRecent((current) => current.filter((item) => item.params !== entry.params))} aria-label={`Forget ${entry.label}`} title="Forget this search"><X size={11} /></button>
+                      </span>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1321,7 +1531,7 @@ export default function Home() {
               {isMatrix && (
                 <div className="matrix-note">
                   <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device rows</b> · {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"} · from {records.length.toLocaleString()} matching listings</span></div>
-                  <span>{total > MATRIX_FETCH_CAP && `Grouping the first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()} matches — coverage beyond that isn't checked · `}{allTogether && `Only companies whose listings cover ${appliedCodesLabel} are shown · `}{matrixSort === "company" ? "Each company's codes are listed together" : "Listed devices counts unique proprietary names"}; the barcode button checks GUDID devices for a company.</span>
+                  <span>{total > MATRIX_FETCH_CAP && `Grouping the first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()} matches — coverage beyond that isn't checked · `}{allTogether && `Only companies whose listings cover ${appliedCodesLabel} are shown · `}{matrixSortKey === "company" ? "Each company's codes are listed together" : "Listed devices counts unique proprietary names"}; the barcode button checks GUDID devices for a company.</span>
                 </div>
               )}
               {isUdi && (
@@ -1331,21 +1541,11 @@ export default function Home() {
                 </div>
               )}
               <div className="table-wrap" aria-live="polite">
-                {viewMode === "records" ? <table className="records-table">
+                {viewMode === "records" ? <table className={`records-table${fixedLayout ? " table-fixed" : ""}`} style={tableStyle}>
+                  {colgroup}
                   <thead><tr>
-                    {recordColumns.includes("establishment") && <th>Establishment</th>}
-                    {recordColumns.includes("ownerOperator") && <th>Owner / operator</th>}
-                    {recordColumns.includes("primaryDevice") && <th>Primary device</th>}
-                    {recordColumns.includes("productCodes") && <th>Product codes</th>}
-                    {recordColumns.includes("listedProducts") && <th className="numeric-head">Listed products</th>}
-                    {recordColumns.includes("tradeNames") && <th>Trade names</th>}
-                    {recordColumns.includes("location") && <th>Location</th>}
-                    {recordColumns.includes("deviceClass") && <th>Class</th>}
-                    {recordColumns.includes("premarket") && <th>510(k) / PMA</th>}
-                    {recordColumns.includes("expiry") && <th>Expiry</th>}
-                    {recordColumns.includes("registrationNumber") && <th>Registration #</th>}
-                    {recordColumns.includes("feiNumber") && <th>FEI number</th>}
-                    <th aria-label="Open record" />
+                    {RECORD_COLUMN_OPTIONS.filter((option) => recordColumns.includes(option.key)).map((option) => <HeaderCell key={option.key} spec={recordHeaderSpec(option.key)} {...headerProps} />)}
+                    <HeaderCell spec={{ key: "open", label: "Open record", sortable: false, dir: null, hint: "", open: true }} {...headerProps} />
                   </tr></thead>
                   <tbody>
                     {records.map((item, index) => {
@@ -1370,6 +1570,7 @@ export default function Home() {
                           {recordColumns.includes("listedProducts") && <td className="count-cell"><b>{shown.length.toLocaleString()}</b><span>{productFilterActive(appliedFilters) ? `${matched.length} of ${listingCount} match` : "Product entries"}</span></td>}
                           {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{tradeNames.length ? tradeNames.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{tradeNames.length > 5 && <em>+{tradeNames.length - 5} more</em>}</div></td>}
                           {recordColumns.includes("location") && <td><b>{[item.registration?.city, item.registration?.state_code].filter(Boolean).join(", ") || (item.registration?.iso_country_code ? "" : "Location unavailable")}</b>{item.registration?.iso_country_code && <span><button type="button" className={`code-pill neutral clickable${appliedFilters.country === item.registration.iso_country_code ? " hit" : ""}`} onClick={(e) => { e.stopPropagation(); toggleCountryFilter(item.registration?.iso_country_code || ""); }} title={`${regionName(item.registration.iso_country_code)} — click to filter by this country`}>{item.registration.iso_country_code}</button></span>}</td>}
+                          {recordColumns.includes("listed") && <td><b className="mono-value">{latestListed(shown) || "—"}</b></td>}
                           {recordColumns.includes("deviceClass") && <td>{primary?.openfda?.device_class ? <button type="button" className={`class-badge clickable class-${primary.openfda.device_class}`} onClick={(e) => { e.stopPropagation(); toggleClassFilter(primary.openfda?.device_class || ""); }} title="Click to filter by this device class">Class {primary.openfda.device_class}</button> : <span className="class-badge class-u">—</span>}</td>}
                           {recordColumns.includes("premarket") && <td><PremarketLinks item={item} stop /></td>}
                           {recordColumns.includes("expiry") && <td><b>{item.registration?.reg_expiry_date_year || "—"}</b></td>}
@@ -1380,17 +1581,15 @@ export default function Home() {
                       );
                     })}
                   </tbody>
-                </table> : isMatrix ? <table className="matrix-table">
+                </table> : isMatrix ? <table className={`matrix-table${fixedLayout ? " table-fixed" : ""}`} style={tableStyle}>
+                  {colgroup}
                   <thead><tr>
-                    {visibleMatrixColumns.map((column) => {
-                      const option = MATRIX_COLUMN_OPTIONS.find((entry) => entry.key === column)!;
-                      return <th key={column} className={option.numeric ? "numeric-head" : undefined}>{option.label}</th>;
-                    })}
+                    {visibleMatrixColumns.map((column) => <HeaderCell key={column} spec={matrixHeaderSpec(column)} {...headerProps} />)}
                   </tr></thead>
                   <tbody>
                     {matrixRows.map((row, index) => {
                       const sameCompanyAsPrevious = index > 0 && matrixRows[index - 1].companyKey === row.companyKey;
-                      const grouped = matrixSort === "company";
+                      const grouped = matrixSortKey === "company";
                       return (
                         <tr key={row.key} className={grouped && index > 0 && !sameCompanyAsPrevious ? "group-start" : undefined}>
                           {visibleMatrixColumns.map((column) => matrixCell(row, column, grouped && sameCompanyAsPrevious))}
@@ -1398,10 +1597,11 @@ export default function Home() {
                       );
                     })}
                   </tbody>
-                </table> : <table className="records-table udi-table">
+                </table> : <table className={`records-table udi-table${fixedLayout ? " table-fixed" : ""}`} style={tableStyle}>
+                  {colgroup}
                   <thead><tr>
-                    {UDI_COLUMN_OPTIONS.filter((option) => udiColumns.includes(option.key)).map((option) => <th key={option.key} className={option.key === "identifiers" ? "numeric-head" : undefined}>{option.label}</th>)}
-                    <th aria-label="Open device" />
+                    {UDI_COLUMN_OPTIONS.filter((option) => udiColumns.includes(option.key)).map((option) => <HeaderCell key={option.key} spec={udiHeaderSpec(option.key)} {...headerProps} />)}
+                    <HeaderCell spec={{ key: "open", label: "Open device", sortable: false, dir: null, hint: "", open: true }} {...headerProps} />
                   </tr></thead>
                   <tbody>
                     {udiDevices.map((device) => (
@@ -1556,7 +1756,7 @@ export default function Home() {
 }
 
 /** Company first when rows are grouped by company; otherwise the canonical column order. */
-function orderMatrixColumns(columns: readonly MatrixColumn[], sort: MatrixSort): MatrixColumn[] {
-  const order: MatrixColumn[] = sort === "company" ? ["company", "coverage", ...MATRIX_KEYS.filter((key) => key !== "company" && key !== "coverage")] : MATRIX_KEYS;
+function orderMatrixColumns(columns: readonly MatrixColumn[], sortKey: MatrixSortKey): MatrixColumn[] {
+  const order: MatrixColumn[] = sortKey === "company" ? ["company", "coverage", ...MATRIX_KEYS.filter((key) => key !== "company" && key !== "coverage")] : MATRIX_KEYS;
   return order.filter((key) => columns.includes(key));
 }

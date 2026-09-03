@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EMPTY_FILTERS,
+  MATRIX_SORT_PRESETS,
   RECENT_SEARCHES_MAX,
   RECORD_SORT_OPTIONS,
   asRecordSort,
@@ -16,6 +17,8 @@ import {
   recordSortParam,
   rememberSearch,
   seedCodeInfo,
+  sortMatrixBy,
+  sortMatrixRows,
 } from "../app/fda-shared.ts";
 
 function withMockFetch(bodyFor, run) {
@@ -37,6 +40,8 @@ test("record sorting only exposes fields openFDA can sort on, and falls back to 
   assert.equal(recordSortParam("newest"), "products.created_date:desc");
   assert.equal(recordSortParam("oldest"), "products.created_date:asc");
   assert.equal(recordSortParam("expiry"), "registration.reg_expiry_date_year:desc");
+  assert.equal(recordSortParam("expirySoonest"), "registration.reg_expiry_date_year:asc");
+  assert.equal(asRecordSort("expirySoonest"), "expirySoonest");
   assert.ok(RECORD_SORT_OPTIONS.every((option) => !option.openFda.includes("registration.name")), "text fields cannot be sorted");
 });
 
@@ -127,4 +132,15 @@ test("pending filter changes compare draft and applied filters per view", () => 
   assert.deepEqual(pendingFilterChanges({ ...applied, codeMatch: "all" }, applied, "matrix"), ["match mode"]);
   assert.deepEqual(pendingFilterChanges({ ...applied, country: "CH", state: "ZH", establishment: "Manufacture Medical Device" }, applied, "udi"), [], "GUDID ignores location and role");
   assert.deepEqual(pendingFilterChanges({ ...applied, country: "CH", deviceClass: "2" }, applied, "records"), ["device class", "country"]);
+});
+
+test("Company + devices rows sort by any column in either direction with stable tie-breaks", () => {
+  const row = (company, productCode, devices, registrations, latestListing = "") => ({ key: `${company}|${productCode}`, productCode, deviceType: "", company, companyKey: company.toLowerCase(), devices, registrations, productListings: 1, establishments: 1, deviceClasses: [], specialties: [], countries: [], latestListing });
+  const rows = [row("Beta", "OSM", ["a", "b"], 3, "2024-01-01"), row("Alpha", "KLW", ["a"], 5, "2026-01-01"), row("Alpha", "OSM", ["a", "b", "c"], 5, "2025-01-01")];
+  assert.deepEqual(sortMatrixBy(rows, "company", "asc").map((r) => r.key), ["Alpha|KLW", "Alpha|OSM", "Beta|OSM"]);
+  assert.deepEqual(sortMatrixBy(rows, "listedDeviceCount", "desc").map((r) => r.key), ["Alpha|OSM", "Beta|OSM", "Alpha|KLW"]);
+  assert.deepEqual(sortMatrixBy(rows, "registrations", "desc").map((r) => r.key), ["Alpha|KLW", "Alpha|OSM", "Beta|OSM"], "ties fall back to company then code");
+  assert.deepEqual(sortMatrixBy(rows, "latestListing", "asc").map((r) => r.latestListing), ["2024-01-01", "2025-01-01", "2026-01-01"]);
+  assert.deepEqual(sortMatrixRows(rows, "devices").map((r) => r.key), sortMatrixBy(rows, MATRIX_SORT_PRESETS.devices.key, MATRIX_SORT_PRESETS.devices.dir).map((r) => r.key));
+  assert.deepEqual(sortMatrixRows(rows, "code").map((r) => r.key), ["Alpha|KLW", "Alpha|OSM", "Beta|OSM"]);
 });
