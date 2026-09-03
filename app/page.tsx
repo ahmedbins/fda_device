@@ -20,7 +20,6 @@ import {
   ExternalLink,
   Filter,
   History,
-  Info,
   Link2,
   ListFilter,
   LoaderCircle,
@@ -256,14 +255,17 @@ function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeMove, onRes
     />
   );
   if (spec.open) return <th aria-label={spec.label} className={`open-col${resizing === spec.key ? " resizing" : ""}`}>{handle}</th>;
+  if (!spec.sortable) {
+    return <th className={`${spec.numeric ? "numeric-head" : ""}${resizing === spec.key ? " resizing" : ""}`}><span className="th-inner">{spec.label}</span>{handle}</th>;
+  }
   return (
     <th
-      className={`${spec.numeric ? "numeric-head " : ""}${spec.sortable ? "sortable" : "unsortable"}${spec.dir ? " sorted" : ""}${resizing === spec.key ? " resizing" : ""}`}
-      aria-sort={spec.sortable ? (spec.dir === "asc" ? "ascending" : spec.dir === "desc" ? "descending" : "none") : undefined}
-      title={spec.sortable ? spec.hint : `Can't sort by ${spec.label}: ${spec.hint}`}
+      className={`${spec.numeric ? "numeric-head " : ""}sortable${spec.dir ? " sorted" : ""}${resizing === spec.key ? " resizing" : ""}`}
+      aria-sort={spec.dir === "asc" ? "ascending" : spec.dir === "desc" ? "descending" : "none"}
+      title={spec.hint}
       onClick={() => onSort(spec)}
     >
-      <span className="th-inner">{spec.label}{spec.sortable ? (spec.dir === "asc" ? <ArrowUp size={12} /> : spec.dir === "desc" ? <ArrowDown size={12} /> : <ArrowUpDown size={12} className="dim" />) : <Info size={11} className="dim" />}</span>
+      <span className="th-inner">{spec.label}{spec.dir === "asc" ? <ArrowUp size={12} /> : spec.dir === "desc" ? <ArrowDown size={12} /> : <ArrowUpDown size={12} className="dim" />}</span>
       {handle}
     </th>
   );
@@ -327,7 +329,6 @@ export default function Home() {
   const [colWidths, setColWidths] = useState<Record<string, Record<string, number>>>({});
   const [colWidthsReady, setColWidthsReady] = useState(false);
   const [resizing, setResizing] = useState("");
-  const [sortNote, setSortNote] = useState("");
   const resizeRef = useRef<{ view: string; key: string; startX: number; startWidth: number } | null>(null);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [filterPanelPrefsReady, setFilterPanelPrefsReady] = useState(false);
@@ -566,11 +567,6 @@ export default function Home() {
     COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(`fda-col-widths-${view}`, JSON.stringify(colWidths[view] || {})));
   }, [colWidthsReady, colWidths]);
 
-  useEffect(() => {
-    if (!sortNote) return;
-    const timer = setTimeout(() => setSortNote(""), 6000);
-    return () => clearTimeout(timer);
-  }, [sortNote]);
 
   useEffect(() => {
     const saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
@@ -1034,8 +1030,8 @@ export default function Home() {
   };
 
   /* ---- header sorting, explanations and column resizing ---- */
-  const RECORD_UNSORTABLE = "openFDA can only order listing records by dates and years (the Listed and Expiry columns); names, codes and places are full-text fields it cannot sort.";
-  const UDI_UNSORTABLE = "openFDA can only order GUDID records by publish date; labeler, brand, model and codes are full-text fields it cannot sort.";
+  const RECORD_UNSORTABLE = "";
+  const UDI_UNSORTABLE = "";
   const cycleSort = (current: RecordSort, desc: RecordSort, asc: RecordSort): RecordSort => (current === desc ? asc : current === asc ? "relevance" : desc);
   const sortDirOf = (current: RecordSort, desc: RecordSort, asc: RecordSort): SortDir | null => (current === desc ? "desc" : current === asc ? "asc" : null);
   const matrixPreset = (Object.entries(MATRIX_SORT_PRESETS).find(([, preset]) => preset.key === matrixSortKey && preset.dir === matrixDir)?.[0] as MatrixSort | undefined) || "custom";
@@ -1113,10 +1109,7 @@ export default function Home() {
     return { key, label: option.label, sortable: false, dir: null, hint: UDI_UNSORTABLE };
   };
   const sortByHeader = (spec: HeaderSpec) => {
-    if (!spec.sortable) {
-      setSortNote(`Can't sort by ${spec.label}. ${spec.hint}`);
-      return;
-    }
+    if (!spec.sortable) return;
     if (isMatrix) {
       const key = spec.key as MatrixSortKey;
       if (matrixSortKey === key) setMatrixDir(matrixDir === "asc" ? "desc" : "asc");
@@ -1461,14 +1454,6 @@ export default function Home() {
               <span className="strip-label"><Filter size={12} /> Applied</span>
               {appliedChips.map((chip) => <span key={chip.key} className="applied-chip">{chip.label}<button type="button" onClick={() => removeChip(chip)} aria-label={`Remove filter ${chip.label}`} title="Remove this filter"><X size={11} /></button></span>)}
               <button type="button" className="text-button" onClick={reset}>Clear all</button>
-            </div>
-          )}
-
-          {sortNote && (
-            <div className="sort-note" role="status">
-              <Info size={13} />
-              <span>{sortNote}</span>
-              <button type="button" onClick={() => setSortNote("")} aria-label="Dismiss"><X size={12} /></button>
             </div>
           )}
 

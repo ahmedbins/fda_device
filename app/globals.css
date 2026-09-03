@@ -13,7 +13,7 @@
   --line: #d9e0e3;
   --muted: #707774;
   /* Content shell: full-bleed backgrounds, but text and tables stop growing past this width and centre on wide monitors. */
-  --shell: 1760px;
+  --shell: 1920px;
   --edge: max(0px, calc((100% - var(--shell)) / 2));
   --gutter: clamp(20px, 4vw, 64px);
 }
@@ -335,19 +335,16 @@ tr:hover .row-filter, .row-filter:focus-visible { opacity: 1; }
 .udi-report > span { flex: 1 1 260px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 th.sortable { cursor: pointer; }
 th.sortable:hover .th-inner, th.sorted .th-inner { color: var(--ink); }
-th.unsortable { cursor: help; }
 .th-inner { display: inline-flex; align-items: center; gap: 4px; }
 .th-inner .dim { opacity: .4; }
-th.sortable:hover .th-inner .dim, th.unsortable:hover .th-inner .dim { opacity: 1; }
+th.sortable:hover .th-inner .dim { opacity: 1; }
 .numeric-head .th-inner { justify-content: flex-end; width: 100%; }
-.col-resizer { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
-.col-resizer:hover, th.resizing .col-resizer { background: rgba(0,127,190,.32); }
+.col-resizer { position: absolute; top: 0; right: -5px; width: 10px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
+.col-resizer::after { content: ""; position: absolute; top: 10px; bottom: 10px; left: 4px; width: 1px; background: #c5cfd3; transition: background .15s ease, top .15s ease, bottom .15s ease; }
+.col-resizer:hover::after, th.resizing .col-resizer::after { top: 0; bottom: 0; width: 2px; left: 4px; background: var(--coral); }
+th:last-child .col-resizer { display: none; }
 .open-col { width: 48px; }
 .table-fixed td { overflow: hidden; }
-.sort-note { display: flex; align-items: center; gap: 8px; margin: 12px clamp(18px, 3vw, 38px) 0; padding: 10px 12px; color: #15415d; background: #edf6fa; border: 1px solid #cfe1e9; border-radius: 6px; font-size: 12px; line-height: 1.45; }
-.sort-note > svg { flex: 0 0 auto; color: var(--coral); }
-.sort-note span { flex: 1; }
-.sort-note button { padding: 0; border: 0; background: none; color: inherit; display: grid; place-items: center; }
 .column-menu-head > span { display: flex; gap: 10px; }
 .pagination { min-height: 76px; padding: 16px clamp(18px, 3vw, 38px); display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); }
 .pagination > span { color: var(--muted); font: 11px var(--font-roboto), sans-serif; }
