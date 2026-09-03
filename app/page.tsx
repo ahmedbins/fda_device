@@ -325,6 +325,7 @@ export default function Home() {
   const [colWidthsReady, setColWidthsReady] = useState(false);
   const [resizing, setResizing] = useState("");
   const resizeRef = useRef<{ view: string; key: string; startX: number; startWidth: number } | null>(null);
+  const dragEndedAt = useRef(0);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [filterPanelPrefsReady, setFilterPanelPrefsReady] = useState(false);
   const codeInput = useRef<HTMLInputElement>(null);
@@ -570,6 +571,7 @@ export default function Home() {
       if (!active) return;
       if (event.buttons === 0) {
         resizeRef.current = null;
+        dragEndedAt.current = Date.now();
         setResizing("");
         return;
       }
@@ -578,6 +580,7 @@ export default function Home() {
     };
     const end = () => {
       resizeRef.current = null;
+      dragEndedAt.current = Date.now();
       setResizing("");
     };
     window.addEventListener("pointermove", move);
@@ -1122,6 +1125,8 @@ export default function Home() {
   };
   const sortByHeader = (spec: HeaderSpec) => {
     if (!spec.sortable) return;
+    // The click that ends a column drag lands on the header; never let it change the sort.
+    if (resizeRef.current || Date.now() - dragEndedAt.current < 500) return;
     if (isMatrix) {
       const key = spec.key as MatrixSortKey;
       if (matrixSortKey === key) setMatrixDir(matrixDir === "asc" ? "desc" : "asc");
