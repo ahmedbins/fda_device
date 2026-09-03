@@ -12,6 +12,7 @@ import {
   fetchCodeInfo,
   fetchListingPages,
   parseRecentSearches,
+  pendingFilterChanges,
   recordSortParam,
   rememberSearch,
   seedCodeInfo,
@@ -114,4 +115,16 @@ test("product-code lookup names known codes, flags unknown ones and caches both"
       assert.equal(cachedCodeInfo("NEVER"), undefined);
     },
   );
+});
+
+test("pending filter changes compare draft and applied filters per view", () => {
+  const applied = { ...EMPTY_FILTERS, productCodes: ["OSM", "KLW"], country: "us", codeMatch: "any" };
+  assert.deepEqual(pendingFilterChanges({ ...applied, productCodes: ["KLW", "OSM"], country: "US" }, applied, "records"), [], "order and case do not count as changes");
+  assert.deepEqual(pendingFilterChanges({ ...applied, keyword: "Sonova" }, applied, "records"), ["keywords"]);
+  assert.deepEqual(pendingFilterChanges(applied, applied, "records", "QDD"), ["product codes"], "a typed but uncommitted code counts");
+  assert.deepEqual(pendingFilterChanges({ ...applied, productCodes: ["OSM"] }, applied, "records"), ["product codes"]);
+  assert.deepEqual(pendingFilterChanges({ ...applied, codeMatch: "all" }, applied, "records"), [], "match mode is irrelevant in Records");
+  assert.deepEqual(pendingFilterChanges({ ...applied, codeMatch: "all" }, applied, "matrix"), ["match mode"]);
+  assert.deepEqual(pendingFilterChanges({ ...applied, country: "CH", state: "ZH", establishment: "Manufacture Medical Device" }, applied, "udi"), [], "GUDID ignores location and role");
+  assert.deepEqual(pendingFilterChanges({ ...applied, country: "CH", deviceClass: "2" }, applied, "records"), ["device class", "country"]);
 });

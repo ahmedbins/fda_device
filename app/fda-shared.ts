@@ -228,6 +228,23 @@ export function filtersFromParams(params: URLSearchParams) {
   return { filters, view, autorun };
 }
 
+/** Which draft filters differ from the applied ones — shown next to Search so stale results are obvious. */
+export function pendingFilterChanges(draft: ExplorerFilters, applied: ExplorerFilters, view: ExplorerView, codeDraft = ""): string[] {
+  const changes: string[] = [];
+  if (draft.keyword.trim() !== applied.keyword.trim()) changes.push("keywords");
+  const draftCodes = normalizeCodes(draft.productCodes);
+  const appliedCodes = normalizeCodes(applied.productCodes);
+  if (codeDraft.trim() || draftCodes.length !== appliedCodes.length || draftCodes.some((code) => !appliedCodes.includes(code))) changes.push("product codes");
+  if (view !== "records" && draft.codeMatch !== applied.codeMatch) changes.push("match mode");
+  if (draft.deviceClass !== applied.deviceClass) changes.push("device class");
+  if (view !== "udi") {
+    if (normalizeCode(draft.country) !== normalizeCode(applied.country)) changes.push("country");
+    if (normalizeCode(draft.state) !== normalizeCode(applied.state)) changes.push("state");
+    if (draft.establishment !== applied.establishment) changes.push("establishment role");
+  }
+  return changes;
+}
+
 /* ------------------------------------------------------------------ */
 /* Record helpers                                                       */
 /* ------------------------------------------------------------------ */

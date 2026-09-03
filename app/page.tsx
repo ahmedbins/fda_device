@@ -18,6 +18,7 @@ import {
   Filter,
   History,
   Link2,
+  ListFilter,
   LoaderCircle,
   MapPin,
   PackageSearch,
@@ -70,7 +71,9 @@ import {
   normalizeCodes,
   parseCodes,
   parseRecentSearches,
+  pendingFilterChanges,
   premarketSummary,
+  productCodeClause,
   productFilterActive,
   recordSortParam,
   rememberSearch,
@@ -249,6 +252,7 @@ export default function Home() {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [codeCounts, setCodeCounts] = useState<{ code: string; count: number }[] | null>(null);
+  const [presetCounts, setPresetCounts] = useState<Map<string, number> | null>(null);
   const [codeInfo, setCodeInfo] = useState<Map<string, CodeInfo | null>>(() => new Map());
   const [recent, setRecent] = useState<RecentSearch[]>([]);
   const [recentReady, setRecentReady] = useState(false);
@@ -433,6 +437,10 @@ export default function Home() {
           .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
         setApiCountries(countries);
       })
+      .catch(() => {});
+    const presetParams = new URLSearchParams({ search: productCodeClause(PRESET_CODES), count: "products.product_code", limit: "100" });
+    fetchOpenFda<{ term?: string; count?: number }>(`${API}?${presetParams.toString()}`)
+      .then((data) => setPresetCounts(new Map(data.results.map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]))))
       .catch(() => {});
     if (initial.autorun) queueMicrotask(() => runSearch(0, initial.view, initial.filters, 25, initial.sort));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -633,6 +641,21 @@ export default function Home() {
     setUdiCompany(null);
     runSearch(0, "records", next);
   };
+
+  /** Filter by a value clicked in the results (code pill, class badge, country, name); pending sidebar edits go with it. */
+  const applyValueFilter = (patch: Partial<Filters>) => {
+    const next = { ...filters, ...patch };
+    setFilters(next);
+    setCodeDraft("");
+    runSearch(0, viewMode, next);
+  };
+  const addCodeFilter = (code: string) => {
+    const value = code.trim().toUpperCase();
+    if (!value || filters.productCodes.includes(value)) return;
+    applyValueFilter({ productCodes: [...filters.productCodes, value] });
+  };
+  const toggleClassFilter = (deviceClass: string) => applyValueFilter({ deviceClass: filters.deviceClass === deviceClass ? "" : deviceClass });
+  const toggleCountryFilter = (country: string) => applyValueFilter({ country: filters.country === country ? "" : country });
 
   /** Open the Devices (UDI) view for one labeler and the current codes. */
   const openUdiView = (labeler: string, codes?: string[]) => {
@@ -865,6 +888,27 @@ export default function Home() {
   const showCodeNames = selectedCodes.length > 0 && selectedCodes.length <= 3;
   const activeDatasetDate = isUdi ? udiUpdated : datasetUpdated;
 
+  const pendingChanges = hasSearched ? pendingFilterChanges(filters, appliedFilters, viewMode, codeDraft) : [];
+  type AppliedChip = { key: string; label: string; kind: "keyword" | "code" | "match" | "country" | "state" | "class" | "establishment"; value: string };
+  const appliedChips: AppliedChip[] = hasSearched ? [
+    ...(appliedFilters.keyword.trim() ? [{ key: "kw", label: `“${appliedFilters.keyword.trim()}”`, kind: "keyword" as const, value: "" }] : []),
+    ...appliedFilters.productCodes.map((code) => ({ key: `code-${code}`, label: code, kind: "code" as const, value: code })),
+    ...(allTogether ? [{ key: "match", label: isUdi ? "Every code on the device" : "Every code per company", kind: "match" as const, value: "" }] : []),
+    ...(appliedFilters.country.trim() && !isUdi ? [{ key: "country", label: regionName(appliedFilters.country.trim().toUpperCase()), kind: "country" as const, value: "" }] : []),
+    ...(appliedFilters.state.trim() && !isUdi ? [{ key: "state", label: `State ${appliedFilters.state.trim().toUpperCase()}`, kind: "state" as const, value: "" }] : []),
+    ...(appliedFilters.deviceClass ? [{ key: "class", label: appliedFilters.deviceClass === "U" ? "Unclassified" : `Class ${appliedFilters.deviceClass}`, kind: "class" as const, value: "" }] : []),
+    ...(appliedFilters.establishment && !isUdi ? [{ key: "est", label: appliedFilters.establishment.split(" ").slice(0, 4).join(" "), kind: "establishment" as const, value: "" }] : []),
+  ] : [];
+  const removeChip = (chip: AppliedChip) => {
+    if (chip.kind === "code") removeCode(chip.value);
+    else if (chip.kind === "match") setCodeMatch("any");
+    else if (chip.kind === "keyword") applyValueFilter({ keyword: "" });
+    else if (chip.kind === "country") applyValueFilter({ country: "" });
+    else if (chip.kind === "state") applyValueFilter({ state: "" });
+    else if (chip.kind === "class") applyValueFilter({ deviceClass: "" });
+    else applyValueFilter({ establishment: "" });
+  };
+
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="code-count-strip" aria-label="Matches per product code">
       <span className="strip-label"><Filter size={12} /> Per code{isUdi ? " · devices" : ""}</span>
@@ -891,7 +935,7 @@ export default function Home() {
   const matrixCell = (row: MatrixRow, column: MatrixColumn, repeat: boolean) => {
     switch (column) {
       case "productCode":
-        return <td key={column}><span className="code-pill" title={codeLabel(row.productCode)}>{row.productCode}</span></td>;
+        return <td key={column}><button type="button" className="code-pill clickable" title={`${codeLabel(row.productCode)} — click to filter by this code`} onClick={() => addCodeFilter(row.productCode)}>{row.productCode}</button></td>;
       case "deviceType":
         return <td key={column}><b>{row.deviceType}</b></td>;
       case "company":
@@ -951,7 +995,7 @@ export default function Home() {
         return (
           <td key={column}>
             <div className="pill-row">
-              {device.codeList.map((code) => <span key={code} className={`code-pill${selectedCodes.includes(code) ? " hit" : " neutral"}`} title={codeLabel(code)}>{code}</span>)}
+              {device.codeList.map((code) => <button key={code} type="button" className={`code-pill clickable${selectedCodes.includes(code) ? " hit" : " neutral"}`} title={`${codeLabel(code)} — click to filter by this code`} onClick={(e) => { e.stopPropagation(); addCodeFilter(code); }}>{code}</button>)}
               {!device.codeList.length && <span className="code-pill">—</span>}
             </div>
           </td>
@@ -1013,6 +1057,7 @@ export default function Home() {
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="Device data explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
+          <div className="filter-panel-inner">
           <div className="panel-heading">
             <div><span>02</span><h2>Filters</h2></div>
             <div className="panel-heading-actions">
@@ -1061,30 +1106,7 @@ export default function Home() {
               />
             </div>
             <datalist id="product-code-options">{PRESET.map((item) => <option key={item.code} value={item.code} label={item.name} />)}</datalist>
-            {viewMode !== "records" ? (
-              <>
-                <div className="match-mode" role="group" aria-label={isUdi ? "How several product codes combine per device" : "How several product codes combine per company"}>
-                  <span className="match-mode-label">Match</span>
-                  <div className="match-mode-switch">
-                    {CODE_MATCH_MODES.map((mode) => (
-                      <button
-                        key={mode.value}
-                        type="button"
-                        className={filters.codeMatch === mode.value ? "active" : ""}
-                        aria-pressed={filters.codeMatch === mode.value}
-                        title={mode.hint}
-                        onClick={() => setCodeMatch(mode.value)}
-                      >
-                        {mode.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <small className="field-hint">{matchHint}</small>
-              </>
-            ) : (
-              <small className="field-hint">Add several codes — listings match any of them. Company + devices and Devices (UDI) can require every code.</small>
-            )}
+            <small className="field-hint">{viewMode === "records" ? "Add several codes — listings match any of them. Click a code in the results to add it." : "Type codes separated by commas, or click a code in the results to add it."}</small>
           </div>
 
           <button
@@ -1095,9 +1117,30 @@ export default function Home() {
             title={PRESET.map((p) => `${p.code} — ${p.name}`).join("\n")}
           >
             <Ear size={16} />
-            <span className="preset-copy"><b>Hearing aid preset</b><em>{PRESET_CODES.join(" · ")}</em></span>
+            <span className="preset-copy"><b>Hearing aid preset</b><em title={presetCounts ? "Listings per code in openFDA right now" : undefined}>{PRESET_CODES.map((code) => (presetCounts ? `${code} ${(presetCounts.get(code) ?? 0).toLocaleString()}` : code)).join(" · ")}</em></span>
             <span className="preset-state">{presetActive ? <><Check size={12} /> ON</> : "OFF"}</span>
           </button>
+
+          {viewMode !== "records" && (
+            <div className="field match-field" role="group" aria-label={isUdi ? "How several product codes combine per device" : "How several product codes combine per company"}>
+              <span>Match</span>
+              <div className="match-mode-switch">
+                {CODE_MATCH_MODES.map((mode) => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    className={filters.codeMatch === mode.value ? "active" : ""}
+                    aria-pressed={filters.codeMatch === mode.value}
+                    title={mode.hint}
+                    onClick={() => setCodeMatch(mode.value)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <small className="field-hint">{matchHint}</small>
+            </div>
+          )}
 
           <div className="filter-group-heading narrow-heading">
             <span>Narrow</span>
@@ -1106,9 +1149,8 @@ export default function Home() {
 
           <div className="two-col">
             <label className="field"><span>Device class</span><span className="select-wrap"><select value={filters.deviceClass} onChange={(e) => setFilters({ ...filters, deviceClass: e.target.value })}><option value="">Any class</option><option value="1">Class I</option><option value="2">Class II</option><option value="3">Class III</option><option value="U">Unclassified</option></select><ChevronDown size={14} /></span></label>
-            <label className={`field${isUdi ? " inactive" : ""}`}><span>Country</span><input value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value.toUpperCase().slice(0, 2) })} list="country-options" placeholder="US" maxLength={2} autoComplete="off" onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
+            <label className={`field${isUdi ? " inactive" : ""}`}><span>Country</span><span className="select-wrap"><select value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} aria-label="Country"><option value="">Any country</option>{filters.country && !countryOptions.some((country) => country.code === filters.country) && <option value={filters.country}>{regionName(filters.country)}</option>}{countryOptions.map((country) => <option key={country.code} value={country.code}>{country.name} · {country.count.toLocaleString()}</option>)}</select><ChevronDown size={14} /></span></label>
           </div>
-          <datalist id="country-options">{countryOptions.map((country) => <option key={country.code} value={country.code} label={`${country.name} · ${country.count.toLocaleString()} records`} />)}</datalist>
 
           {!!topCountries.length && !isUdi && <div className="country-quick" aria-label="Common countries">
             <span>Top</span>
@@ -1126,8 +1168,10 @@ export default function Home() {
           </details>
 
           <div className="query-actions">
-            <button className="primary" onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} {isUdi ? "Search devices" : "Search records"}</button>
+            <button className={`primary${pendingChanges.length ? " attention" : ""}`} onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} {isUdi ? "Search devices" : "Search records"}</button>
             <button className="text-button" onClick={reset}>Clear all</button>
+          </div>
+          {pendingChanges.length > 0 && <small className="pending-note" role="status">{pendingChanges.length} unapplied change{pendingChanges.length === 1 ? "" : "s"} ({pendingChanges.join(", ")}) — press Search to update the results.</small>}
           </div>
         </aside>
 
@@ -1189,6 +1233,14 @@ export default function Home() {
               <button className="icon-button" onClick={() => runSearch(skip, viewMode, appliedFilters)} disabled={loading} aria-label="Refresh results" title="Re-run this search"><RefreshCw className={loading ? "spin" : ""} size={18} /></button>
             </div>
           </div>
+
+          {appliedChips.length > 0 && (
+            <div className="applied-filters" aria-label="Applied filters">
+              <span className="strip-label"><Filter size={12} /> Applied</span>
+              {appliedChips.map((chip) => <span key={chip.key} className="applied-chip">{chip.label}<button type="button" onClick={() => removeChip(chip)} aria-label={`Remove filter ${chip.label}`} title="Remove this filter"><X size={11} /></button></span>)}
+              <button type="button" className="text-button" onClick={reset}>Clear all</button>
+            </div>
+          )}
 
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>Search interrupted</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
 
@@ -1280,20 +1332,20 @@ export default function Home() {
                       const tradeNames = listedDeviceNames(item);
                       return (
                         <tr key={`${item.registration?.registration_number || "record"}-${index}`} onClick={() => setSelected(item)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelected(item)}>
-                          {recordColumns.includes("establishment") && <td><b>{firmName(item)}</b><span>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
-                          {recordColumns.includes("ownerOperator") && <td><b>{companyName(item)}</b><span>Operator {item.registration?.owner_operator?.owner_operator_number || "—"}</span></td>}
+                          {recordColumns.includes("establishment") && <td><div className="name-cell"><b>{firmName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: firmName(item) }); }} aria-label={`Only listings named ${firmName(item)}`} title="Only listings with this name"><ListFilter size={12} /></button></div><span>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
+                          {recordColumns.includes("ownerOperator") && <td><div className="name-cell"><b>{companyName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: companyName(item) }); }} aria-label={`Only listings for ${companyName(item)}`} title="Only listings for this owner / operator"><ListFilter size={12} /></button></div><span>Operator {item.registration?.owner_operator?.owner_operator_number || "—"}</span></td>}
                           {recordColumns.includes("primaryDevice") && <td><b>{primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device"}</b><span>{primary?.openfda?.medical_specialty_description || "Specialty unavailable"}</span></td>}
                           {recordColumns.includes("productCodes") && <td>
                             <div className="pill-row">
-                              {codes.slice(0, 3).map((code) => <span key={code} className="code-pill" title={codeLabel(code)}>{code}</span>)}
+                              {codes.slice(0, 3).map((code) => <button key={code} type="button" className="code-pill clickable" title={`${codeLabel(code)} — click to filter by this code`} onClick={(e) => { e.stopPropagation(); addCodeFilter(code); }}>{code}</button>)}
                               {codes.length > 3 && <span className="pill-more">+{codes.length - 3}</span>}
                               {!codes.length && <span className="code-pill">—</span>}
                             </div>
                           </td>}
                           {recordColumns.includes("listedProducts") && <td className="count-cell"><b>{shown.length.toLocaleString()}</b><span>{productFilterActive(appliedFilters) ? `${matched.length} of ${listingCount} match` : "Product entries"}</span></td>}
                           {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{tradeNames.length ? tradeNames.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{tradeNames.length > 5 && <em>+{tradeNames.length - 5} more</em>}</div></td>}
-                          {recordColumns.includes("location") && <td><b>{locationSummary(item)}</b></td>}
-                          {recordColumns.includes("deviceClass") && <td><span className={`class-badge class-${primary?.openfda?.device_class || "u"}`}>{primary?.openfda?.device_class ? `Class ${primary.openfda.device_class}` : "—"}</span></td>}
+                          {recordColumns.includes("location") && <td><b>{[item.registration?.city, item.registration?.state_code].filter(Boolean).join(", ") || (item.registration?.iso_country_code ? "" : "Location unavailable")}</b>{item.registration?.iso_country_code && <span><button type="button" className={`code-pill neutral clickable${appliedFilters.country === item.registration.iso_country_code ? " hit" : ""}`} onClick={(e) => { e.stopPropagation(); toggleCountryFilter(item.registration?.iso_country_code || ""); }} title={`${regionName(item.registration.iso_country_code)} — click to filter by this country`}>{item.registration.iso_country_code}</button></span>}</td>}
+                          {recordColumns.includes("deviceClass") && <td>{primary?.openfda?.device_class ? <button type="button" className={`class-badge clickable class-${primary.openfda.device_class}`} onClick={(e) => { e.stopPropagation(); toggleClassFilter(primary.openfda?.device_class || ""); }} title="Click to filter by this device class">Class {primary.openfda.device_class}</button> : <span className="class-badge class-u">—</span>}</td>}
                           {recordColumns.includes("premarket") && <td><PremarketLinks item={item} stop /></td>}
                           {recordColumns.includes("expiry") && <td><b>{item.registration?.reg_expiry_date_year || "—"}</b></td>}
                           {recordColumns.includes("registrationNumber") && <td><b className="mono-value">{item.registration?.registration_number || "—"}</b></td>}
