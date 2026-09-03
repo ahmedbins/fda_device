@@ -194,7 +194,7 @@ export function matchingProducts(item: RecordItem, filters: ExplorerFilters) {
 /* URL state                                                            */
 /* ------------------------------------------------------------------ */
 
-export type ExplorerView = "records" | "matrix";
+export type ExplorerView = "records" | "matrix" | "udi";
 
 export function filtersToParams(filters: ExplorerFilters, view: ExplorerView) {
   const params = new URLSearchParams();
@@ -205,7 +205,7 @@ export function filtersToParams(filters: ExplorerFilters, view: ExplorerView) {
   if (filters.state.trim()) params.set("state", filters.state.trim().toUpperCase());
   if (filters.deviceClass) params.set("class", filters.deviceClass);
   if (filters.establishment) params.set("est", filters.establishment);
-  if (view === "matrix") params.set("view", "matrix");
+  if (view !== "records") params.set("view", view);
   return params;
 }
 
@@ -219,7 +219,8 @@ export function filtersFromParams(params: URLSearchParams) {
     deviceClass: params.get("class") || "",
     establishment: params.get("est") || "",
   };
-  const view: ExplorerView = params.get("view") === "matrix" ? "matrix" : "records";
+  const rawView = params.get("view");
+  const view: ExplorerView = rawView === "matrix" || rawView === "udi" ? rawView : "records";
   const autorun = !!(
     filters.keyword || filters.productCodes.length || filters.country ||
     filters.state || filters.deviceClass || filters.establishment
@@ -584,13 +585,14 @@ export const RECENT_SEARCHES_MAX = 6;
 export function describeFilters(filters: ExplorerFilters, view: ExplorerView) {
   const parts: string[] = [];
   if (filters.productCodes.length) parts.push(filters.productCodes.join(" + "));
-  if (view === "matrix" && codeMatchApplies(filters)) parts.push("All codes");
+  if (view !== "records" && codeMatchApplies(filters)) parts.push("All codes");
   if (filters.keyword.trim()) parts.push(`“${filters.keyword.trim()}”`);
   if (filters.country.trim()) parts.push(filters.country.trim().toUpperCase());
   if (filters.state.trim()) parts.push(filters.state.trim().toUpperCase());
   if (filters.deviceClass) parts.push(`Class ${filters.deviceClass}`);
   if (filters.establishment) parts.push(filters.establishment.split(" ").slice(0, 3).join(" "));
   if (view === "matrix") parts.push("Company + devices");
+  if (view === "udi") parts.push("Devices (UDI)");
   return parts.join(" · ") || "All records";
 }
 

@@ -99,5 +99,6 @@ Equipment descriptions, RF characteristics, and equipment class are not invented
 - grouped grantee behavior;
 - route server rendering;
 - FDA company-level ANY/ALL product-code matching, openFDA query building and URL filter state;
+- FDA GUDID (UDI) normalization, device-level ANY/ALL queries and registration cross-reference queries;
 - FDA Explorer and Monitoring regression checks;
 - API input validation.

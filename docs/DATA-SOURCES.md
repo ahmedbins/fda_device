@@ -19,6 +19,15 @@ The application uses public regulatory sources and keeps their fields distinguis
 - Used by: FDA Explorer, to name any product code a user enters (device name, class, regulation) and to flag codes FDA does not know. Results are cached per session.
 - Deep links: 510(k) numbers open `cfpmn/pmn.cfm`, De Novo numbers `cfpmn/denovo.cfm`, PMA numbers `cfpma/pma.cfm`, and product codes `cfpcd/classification.cfm` on accessdata.fda.gov.
 
+### Unique Device Identification (GUDID)
+
+- Endpoint: `https://api.fda.gov/device/udi.json`
+- Used by: FDA Explorer — the **Devices (UDI)** view, the GUDID panel on every registration record, and the barcode action on each company in Company + devices.
+- Record granularity: one result is one device identifier record published by a labeler: `identifiers[]` (primary DI, usually a GS1 GTIN, plus package DIs), `product_codes[]` (a device routinely carries several — a hearing aid with a tinnitus masker is filed under OSM and KLW at once), `premarket_submissions[]` (`submission_number`, `supplement_number`) as declared by the labeler, `is_pm_exempt`, Rx/OTC, GMDN terms, publish/version dates and distribution status.
+- Product-code matching in this view is device-level: **All** means every selected code on the same device record (`product_codes.code:"A" AND product_codes.code:"B"`).
+- Cross-reference with registrations is by **labeler name + product codes** (`company_name` phrase search, case-insensitive) because GUDID carries no registration or FEI number. Labelers file under their own legal or brand entity, so a registration owner/operator (e.g. DEMANT A/S) can have its devices under different labelers (Oticon A/S, SBO Hearing A/S); the app says so instead of inventing a link. The per-company panel uses exact server counts (`_exists_:premarket_submissions.submission_number`, `is_pm_exempt:true`) rather than sampled rows.
+- Country, state and establishment role do not exist in GUDID and are ignored (visibly) in the Devices view. Zero-hit searches are HTTP 404 like the other openFDA endpoints. AccessGUDID pages are linked by primary DI.
+
 ### 510(k)
 
 - Endpoint: `https://api.fda.gov/device/510k.json`

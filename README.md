@@ -33,7 +33,7 @@ That creates six main workflows:
 
 | Workflow | What it is for |
 | --- | --- |
-| **FDA Explorer** | Search registration and listing records; filter by product codes (named from FDA's classification, with typos flagged), class, country and role; sort by listing date or expiry; group by company with a codes-held matrix and, with several codes, keep only companies holding **all** of them; jump from a company to its listings; open 510(k), PMA and product-code pages on FDA's site; customize columns; export Excel workbooks; re-run recent searches. |
+| **FDA Explorer** | Search registration and listing records and, on the same page, FDA GUDID device identifiers (UDI): a Devices view with GTINs, product codes and declared premarket submissions, per-company GUDID panels from the company matrix and record drawer, and registration cross-references from each device; filter by product codes (named from FDA's classification, with typos flagged), class, country and role; sort by listing date or expiry; group by company with a codes-held matrix and, with several codes, keep only companies holding **all** of them; jump from a company to its listings; open 510(k), PMA and product-code pages on FDA's site; customize columns; export Excel workbooks; re-run recent searches. |
 | **FDA Monitoring** | Review recent 510(k), recall, and adverse-event activity. |
 | **FCC Explorer** | Search complete or partial FCC IDs; group results by confirmed grantee; inspect authorization history, exhibits, and evidence. |
 | **FCC Monitoring** | Review recent original authorizations and FCC-labelled authorization changes for configured scopes. |
@@ -107,6 +107,8 @@ The page components do not need to understand every source-specific detail:
 
 | File | Responsibility |
 | --- | --- |
+| `app/fda-udi.ts` | openFDA UDI (GUDID) types, normalization, device-level ANY/ALL queries, labeler/listing cross-reference queries. |
+| `app/fda-udi-panel.tsx` | Per-company GUDID summary panel (server-side counts + newest devices) and the full device detail with registration cross-reference. |
 | `app/fda-shared.ts` | FDA constants, the openFDA query builder, ANY/ALL product-code matching, company + devices grouping, URL filter state, the 404-as-empty openFDA fetch helper, and export utilities shared by FDA views. |
 | `app/fcc-core.ts` | FCC XML/JSON parsing, date normalization, conservative purpose mapping, confirmed ID-part derivation, deduplication, grouping, and monitoring windows. |
 | `app/fcc-service.ts` | Orchestrates the FCC snapshot, live request, server proxy, cache, grantee registry, and manual official-response import. |

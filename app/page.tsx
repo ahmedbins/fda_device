@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  Barcode,
   Building2,
   Check,
   ChevronDown,
@@ -75,6 +76,20 @@ import {
   rememberSearch,
   sortMatrixRows,
 } from "./fda-shared";
+import {
+  UDI_API,
+  UDI_SORT_OPTIONS,
+  type UdiDevice,
+  type UdiRaw,
+  accessGudidUrl,
+  buildUdiSearch,
+  listingCodesForUdi,
+  normalizeUdi,
+  udiIgnoredFilters,
+  udiPremarketLabel,
+  udiSortParam,
+} from "./fda-udi";
+import { UdiCompanyPanel, UdiDeviceDetail } from "./fda-udi-panel";
 import SourceNav from "./source-nav";
 import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
@@ -82,6 +97,7 @@ import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 type CountryOption = { code: string; count: number; name: string };
 type RecordColumn = "establishment" | "ownerOperator" | "primaryDevice" | "productCodes" | "listedProducts" | "tradeNames" | "location" | "deviceClass" | "premarket" | "expiry" | "registrationNumber" | "feiNumber";
 type MatrixColumn = "productCode" | "deviceType" | "company" | "coverage" | "listedDeviceCount" | "registeredDevices" | "registrations" | "productListings" | "establishments" | "deviceClass" | "specialty" | "countries" | "latestListing";
+type UdiColumn = "company" | "brand" | "model" | "primaryDi" | "codes" | "premarket" | "rxOtc" | "published" | "status" | "description" | "gmdn" | "catalog" | "identifiers";
 
 const RECORD_COLUMN_OPTIONS: { key: RecordColumn; label: string; hint: string }[] = [
   { key: "establishment", label: "Establishment", hint: "Registered facility name" },
@@ -115,8 +131,25 @@ const MATRIX_COLUMN_OPTIONS: { key: MatrixColumn; label: string; hint: string; n
 ];
 const MATRIX_KEYS = MATRIX_COLUMN_OPTIONS.map((option) => option.key);
 
+const UDI_COLUMN_OPTIONS: { key: UdiColumn; label: string; hint: string }[] = [
+  { key: "company", label: "Labeler", hint: "Company that published the GUDID record" },
+  { key: "brand", label: "Brand", hint: "Brand name on the label" },
+  { key: "model", label: "Version / model", hint: "Version or model number and catalog number" },
+  { key: "primaryDi", label: "Primary DI (GTIN)", hint: "Primary device identifier and issuing agency" },
+  { key: "codes", label: "Product codes", hint: "Every product code on the device record" },
+  { key: "premarket", label: "Premarket submission", hint: "510(k) / PMA / De Novo declared by the labeler, or exemption" },
+  { key: "rxOtc", label: "Rx / OTC", hint: "Prescription or over-the-counter" },
+  { key: "published", label: "Published", hint: "GUDID publish date and current version" },
+  { key: "status", label: "Status", hint: "Record status and commercial distribution" },
+  { key: "description", label: "Description", hint: "Device description from the record" },
+  { key: "gmdn", label: "GMDN", hint: "Global Medical Device Nomenclature terms" },
+  { key: "catalog", label: "Catalog #", hint: "Labeler catalog number" },
+  { key: "identifiers", label: "Identifiers", hint: "How many DIs (primary, package, …) the record carries" },
+];
+
 const DEFAULT_RECORD_COLUMNS: RecordColumn[] = ["establishment", "primaryDevice", "productCodes", "listedProducts", "location", "deviceClass"];
 const DEFAULT_MATRIX_COLUMNS: MatrixColumn[] = ["productCode", "deviceType", "company", "coverage", "listedDeviceCount", "registeredDevices", "registrations"];
+const DEFAULT_UDI_COLUMNS: UdiColumn[] = ["company", "brand", "model", "primaryDi", "codes", "premarket", "rxOtc", "published"];
 
 const ESTABLISHMENT_TYPES = [
   "Manufacture Medical Device",
@@ -139,7 +172,7 @@ function regionName(code: string) {
 function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort) {
   if (typeof window === "undefined") return;
   const params = filtersToParams(filters, view);
-  if (view === "records" && sort !== "relevance") params.set("sort", sort);
+  if (view !== "matrix" && sort !== "relevance") params.set("sort", sort);
   const query = params.toString();
   window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
 }
@@ -175,6 +208,16 @@ function PremarketLinks({ item, stop = false }: { item: RecordItem; stop?: boole
   );
 }
 
+function loadColumns<T extends string>(key: string, options: readonly { key: T }[]): T[] | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null") as T[] | null;
+    const valid = saved?.filter((column) => options.some((option) => option.key === column));
+    return valid?.length ? valid : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
   const [initial] = useState(initialStateFromUrl);
   const [viewMode, setViewMode] = useState<ViewMode>(initial.view);
@@ -182,6 +225,7 @@ export default function Home() {
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [codeDraft, setCodeDraft] = useState("");
   const [records, setRecords] = useState<RecordItem[]>([]);
+  const [udiDevices, setUdiDevices] = useState<UdiDevice[]>([]);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(25);
   const [skip, setSkip] = useState(0);
@@ -190,6 +234,8 @@ export default function Home() {
   const [loadingNote, setLoadingNote] = useState("");
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RecordItem | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<UdiDevice | null>(null);
+  const [udiCompany, setUdiCompany] = useState<{ company: string; alternates: string[]; codes: string[]; mode: CodeMatchMode } | null>(null);
   const [exportProgress, setExportProgress] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"all" | "page">("all");
@@ -198,6 +244,7 @@ export default function Home() {
   const [exportColumnIds, setExportColumnIds] = useState<string[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [datasetUpdated, setDatasetUpdated] = useState("");
+  const [udiUpdated, setUdiUpdated] = useState("");
   const [datasetTotal, setDatasetTotal] = useState(0);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
@@ -208,6 +255,7 @@ export default function Home() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [recordColumns, setRecordColumns] = useState<RecordColumn[]>(DEFAULT_RECORD_COLUMNS);
   const [matrixColumns, setMatrixColumns] = useState<MatrixColumn[]>(DEFAULT_MATRIX_COLUMNS);
+  const [udiColumns, setUdiColumns] = useState<UdiColumn[]>(DEFAULT_UDI_COLUMNS);
   const [columnPrefsReady, setColumnPrefsReady] = useState(false);
   const [apiCountries, setApiCountries] = useState<CountryOption[]>([]);
   // With ALL on, a company's codes belong together, so company order is the natural default.
@@ -240,13 +288,20 @@ export default function Home() {
     filters.productCodes.length === PRESET_CODES.length &&
     PRESET_CODES.every((code) => filters.productCodes.includes(code));
 
-  /** ALL only exists in the Company + devices view, and only changes anything with two or more applied codes. */
-  const allTogether = viewMode === "matrix" && codeMatchApplies(appliedFilters);
-  const matchHint = filters.codeMatch === "all"
-    ? (filters.productCodes.length > 1
-      ? "Only companies whose listings cover every selected code, listed company by company."
-      : "All needs two or more codes — add another to require every code per company.")
-    : "Companies with a listing for at least one selected code.";
+  const isUdi = viewMode === "udi";
+  const isMatrix = viewMode === "matrix";
+  /** ALL only exists in the Company + devices and Devices (UDI) views, and only changes anything with two or more applied codes. */
+  const allTogether = viewMode !== "records" && codeMatchApplies(appliedFilters);
+  const matchHint = isUdi
+    ? (filters.codeMatch === "all"
+      ? (filters.productCodes.length > 1 ? "Only device records that carry every selected code — e.g. a hearing aid filed under OSM and KLW." : "All needs two or more codes — add another to require them on the same device record.")
+      : "Device records carrying at least one selected code.")
+    : filters.codeMatch === "all"
+      ? (filters.productCodes.length > 1
+        ? "Only companies whose listings cover every selected code, listed company by company."
+        : "All needs two or more codes — add another to require every code per company.")
+      : "Companies with a listing for at least one selected code.";
+  const udiIgnored = udiIgnoredFilters(filters);
 
   const codeLabel = (code: string) => codeInfo.get(code)?.name || CODE_NAMES.get(code) || `Product code ${code}`;
   const codeUnknown = (code: string) => codeInfo.has(code) && codeInfo.get(code) === null;
@@ -272,37 +327,64 @@ export default function Home() {
       const seq = ++searchSeq.current;
       setError("");
       setSelected(null);
+      setSelectedDevice(null);
       setLoading(true);
       setLoadingNote("");
       try {
-        const search = buildSearch(nextFilters);
-        let data: { results: RecordItem[]; meta?: OpenFdaMeta };
-        if (requestedView === "matrix") {
-          // Company coverage must be judged on the whole match set, so the matrix pages well past one call.
-          data = await fetchListingPages<RecordItem>(API, search, MATRIX_FETCH_CAP, (loaded, target) => {
-            if (seq === searchSeq.current && target > 1000) setLoadingNote(`Loading listings ${loaded.toLocaleString()} of ${target.toLocaleString()}…`);
-          });
-        } else {
+        let meta: OpenFdaMeta | undefined;
+        let countUrl = "";
+        if (requestedView === "udi") {
+          const search = buildUdiSearch(nextFilters);
           const params = new URLSearchParams({ limit: String(nextLimit), skip: String(nextSkip) });
           if (search) params.set("search", search);
-          const sortParam = recordSortParam(nextSort);
+          const sortParam = udiSortParam(nextSort);
           if (sortParam) params.set("sort", sortParam);
-          data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+          const data = await fetchOpenFda<UdiRaw>(`${UDI_API}?${params.toString()}`);
+          if (seq !== searchSeq.current) return;
+          setUdiDevices(data.results.map(normalizeUdi));
+          meta = data.meta;
+          if (nextFilters.productCodes.length) {
+            const countParams = new URLSearchParams({ count: "product_codes.code", limit: "1000" });
+            if (search) countParams.set("search", search);
+            countUrl = `${UDI_API}?${countParams.toString()}`;
+          }
+        } else {
+          const search = buildSearch(nextFilters);
+          let data: { results: RecordItem[]; meta?: OpenFdaMeta };
+          if (requestedView === "matrix") {
+            // Company coverage must be judged on the whole match set, so the matrix pages well past one call.
+            data = await fetchListingPages<RecordItem>(API, search, MATRIX_FETCH_CAP, (loaded, target) => {
+              if (seq === searchSeq.current && target > 1000) setLoadingNote(`Loading listings ${loaded.toLocaleString()} of ${target.toLocaleString()}…`);
+            });
+          } else {
+            const params = new URLSearchParams({ limit: String(nextLimit), skip: String(nextSkip) });
+            if (search) params.set("search", search);
+            const sortParam = recordSortParam(nextSort);
+            if (sortParam) params.set("sort", sortParam);
+            data = await fetchOpenFda<RecordItem>(`${API}?${params.toString()}`);
+          }
+          if (seq !== searchSeq.current) return;
+          setRecords(data.results);
+          meta = data.meta;
+          if (nextFilters.productCodes.length) {
+            const countParams = new URLSearchParams({ count: "products.product_code", limit: "1000" });
+            if (search) countParams.set("search", search);
+            countUrl = `${API}?${countParams.toString()}`;
+          }
         }
-        if (seq !== searchSeq.current) return;
-        setRecords(data.results);
-        setTotal(data.meta?.results?.total || 0);
+        setTotal(meta?.results?.total || 0);
         setSkip(requestedView === "matrix" ? 0 : nextSkip);
         setAppliedFilters(nextFilters);
         setFetchedAt(new Date());
         setCheckedAt(new Date());
-        if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
+        if (meta?.last_updated) {
+          if (requestedView === "udi") setUdiUpdated(meta.last_updated);
+          else setDatasetUpdated(meta.last_updated);
+        }
         syncUrl(nextFilters, requestedView, nextSort);
         if (nextSkip === 0) setRecent((current) => rememberSearch(current, nextFilters, requestedView));
-        if (nextFilters.productCodes.length) {
-          const countParams = new URLSearchParams({ count: "products.product_code", limit: "1000" });
-          if (search) countParams.set("search", search);
-          fetchOpenFda<{ term?: string; count?: number }>(`${API}?${countParams.toString()}`)
+        if (countUrl) {
+          fetchOpenFda<{ term?: string; count?: number }>(countUrl)
             .then((countData) => {
               if (seq !== searchSeq.current) return;
               const terms = new Map(countData.results.map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]));
@@ -314,7 +396,8 @@ export default function Home() {
         }
       } catch (caught) {
         if (seq !== searchSeq.current) return;
-        setRecords([]);
+        if (requestedView === "udi") setUdiDevices([]);
+        else setRecords([]);
         setTotal(0);
         setCodeCounts(null);
         setError(caught instanceof Error ? caught.message : "Unable to reach the FDA API.");
@@ -357,10 +440,9 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const savedRecords = JSON.parse(localStorage.getItem("fda-record-columns") || "null") as RecordColumn[] | null;
-      const savedMatrix = JSON.parse(localStorage.getItem("fda-matrix-columns") || "null") as MatrixColumn[] | null;
-      const validRecords = savedRecords?.filter((key) => RECORD_COLUMN_OPTIONS.some((option) => option.key === key));
-      let validMatrix = savedMatrix?.filter((key) => MATRIX_COLUMN_OPTIONS.some((option) => option.key === key));
+      const validRecords = loadColumns("fda-record-columns", RECORD_COLUMN_OPTIONS);
+      let validMatrix = loadColumns("fda-matrix-columns", MATRIX_COLUMN_OPTIONS);
+      const validUdi = loadColumns("fda-udi-columns", UDI_COLUMN_OPTIONS);
       // One-time migration: surface the "Codes held" column for people who saved their columns before it existed.
       if (validMatrix?.length && !validMatrix.includes("coverage") && !localStorage.getItem("fda-matrix-columns-coverage")) {
         const at = validMatrix.indexOf("company");
@@ -368,8 +450,9 @@ export default function Home() {
       }
       localStorage.setItem("fda-matrix-columns-coverage", "1");
       queueMicrotask(() => {
-        if (validRecords?.length) setRecordColumns(validRecords);
-        if (validMatrix?.length) setMatrixColumns(validMatrix);
+        if (validRecords) setRecordColumns(validRecords);
+        if (validMatrix) setMatrixColumns(validMatrix);
+        if (validUdi) setUdiColumns(validUdi);
         setColumnPrefsReady(true);
       });
     } catch {
@@ -382,7 +465,8 @@ export default function Home() {
     if (!columnPrefsReady) return;
     localStorage.setItem("fda-record-columns", JSON.stringify(recordColumns));
     localStorage.setItem("fda-matrix-columns", JSON.stringify(matrixColumns));
-  }, [columnPrefsReady, recordColumns, matrixColumns]);
+    localStorage.setItem("fda-udi-columns", JSON.stringify(udiColumns));
+  }, [columnPrefsReady, recordColumns, matrixColumns, udiColumns]);
 
   useEffect(() => {
     const saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
@@ -458,14 +542,8 @@ export default function Home() {
     if (columnPicker.current) columnPicker.current.open = false;
   }, [viewMode]);
 
-  const toggleRecordColumn = (key: RecordColumn) => {
-    setRecordColumns((current) => current.includes(key)
-      ? (current.length > 1 ? current.filter((column) => column !== key) : current)
-      : [...current, key]);
-  };
-
-  const toggleMatrixColumn = (key: MatrixColumn) => {
-    setMatrixColumns((current) => current.includes(key)
+  const toggleColumn = <T extends string>(setter: (update: (current: T[]) => T[]) => void, key: T) => {
+    setter((current) => current.includes(key)
       ? (current.length > 1 ? current.filter((column) => column !== key) : current)
       : [...current, key]);
   };
@@ -504,12 +582,20 @@ export default function Home() {
     }
   };
 
-  /** ANY/ALL is a client-side rollup over the listings already loaded, so switching is instant — no new request. */
+  /**
+   * ANY/ALL: in Company + devices it is a client-side rollup over loaded listings (instant);
+   * in Devices (UDI) it changes the query itself (a device record either carries every code or not).
+   */
   const setCodeMatch = (mode: CodeMatchMode) => {
     if (mode === "all" && matrixSort === "code") setMatrixSort("company");
     if (filters.codeMatch === mode && appliedFilters.codeMatch === mode) return;
-    setFilters((current) => ({ ...current, codeMatch: mode }));
+    const next = { ...filters, codeMatch: mode };
+    setFilters(next);
     if (!hasSearched) return;
+    if (viewMode === "udi") {
+      runSearch(0, "udi", next);
+      return;
+    }
     const applied = { ...appliedFilters, codeMatch: mode };
     setAppliedFilters(applied);
     syncUrl(applied, viewMode, recordSort);
@@ -522,7 +608,7 @@ export default function Home() {
 
   const changeRecordSort = (nextSort: RecordSort) => {
     setRecordSort(nextSort);
-    if (hasSearched && viewMode === "records") runSearch(0, "records", appliedFilters, limit, nextSort);
+    if (hasSearched && viewMode !== "matrix") runSearch(0, viewMode, appliedFilters, limit, nextSort);
   };
 
   const searchNow = () => {
@@ -537,12 +623,26 @@ export default function Home() {
     setFiltersOpen(false);
   };
 
-  /** Jump from a Company + devices row to that company's listings, keeping the current codes and narrowing filters. */
-  const showCompanyListings = (company: string) => {
-    const next = { ...appliedFilters, keyword: company };
+  /** Jump from a company (matrix row or GUDID labeler) to its listings in the Records view, keeping the current codes. */
+  const showCompanyListings = (company: string, codes?: string[]) => {
+    const next = { ...appliedFilters, keyword: company, productCodes: codes?.length ? codes : appliedFilters.productCodes };
     setFilters(next);
     setViewMode("records");
+    setSelected(null);
+    setSelectedDevice(null);
+    setUdiCompany(null);
     runSearch(0, "records", next);
+  };
+
+  /** Open the Devices (UDI) view for one labeler and the current codes. */
+  const openUdiView = (labeler: string, codes?: string[]) => {
+    const next = { ...appliedFilters, keyword: labeler, productCodes: codes?.length ? codes : appliedFilters.productCodes };
+    setFilters(next);
+    setViewMode("udi");
+    setSelected(null);
+    setSelectedDevice(null);
+    setUdiCompany(null);
+    runSearch(0, "udi", next);
   };
 
   const applyRecent = (entry: RecentSearch) => {
@@ -564,12 +664,15 @@ export default function Home() {
     setCodeDraft("");
     setCodeCounts(null);
     setRecords([]);
+    setUdiDevices([]);
     setTotal(0);
     setSkip(0);
     setError("");
     setLoading(false);
     setLoadingNote("");
     setSelected(null);
+    setSelectedDevice(null);
+    setUdiCompany(null);
     setFetchedAt(null);
     setRecordSort("relevance");
     syncUrl(EMPTY_FILTERS, viewMode, "relevance");
@@ -578,9 +681,12 @@ export default function Home() {
   const fetchAllMatching = async () => {
     const cap = Math.min(total, EXPORT_CAP);
     setExportProgress(`Downloading 0 of ${cap.toLocaleString()} records…`);
-    const { results } = await fetchListingPages<RecordItem>(API, buildSearch(appliedFilters), cap, (loaded, target) => {
-      setExportProgress(`Downloading ${loaded.toLocaleString()} of ${target.toLocaleString()} records…`);
-    }, viewMode === "records" ? recordSortParam(recordSort) : "");
+    const progress = (loaded: number, target: number) => setExportProgress(`Downloading ${loaded.toLocaleString()} of ${target.toLocaleString()} records…`);
+    if (viewMode === "udi") {
+      const { results } = await fetchListingPages<UdiRaw>(UDI_API, buildUdiSearch(appliedFilters), cap, progress, udiSortParam(recordSort));
+      return results.map(normalizeUdi);
+    }
+    const { results } = await fetchListingPages<RecordItem>(API, buildSearch(appliedFilters), cap, progress, viewMode === "records" ? recordSortParam(recordSort) : "");
     return results;
   };
 
@@ -588,73 +694,102 @@ export default function Home() {
     const codes = appliedFilters.productCodes;
     const codesPart = codes.length ? codes.join("+") : "all";
     const modePart = allTogether ? "-all-codes" : "";
-    return `${viewMode === "matrix" ? "fda-devices-matrix" : "fda-devices"}-${codesPart}${modePart}-${new Date().toISOString().slice(0, 10)}`;
+    const prefix = viewMode === "matrix" ? "fda-devices-matrix" : viewMode === "udi" ? "fda-udi-devices" : "fda-devices";
+    return `${prefix}-${codesPart}${modePart}-${new Date().toISOString().slice(0, 10)}`;
   };
 
   const exportCsv = async () => {
     if (!total || exportProgress) return;
     setError("");
     try {
-      const all = exportScope === "page" ? records : await fetchAllMatching();
-      if (viewMode === "matrix") {
-        const labels = Object.fromEntries(MATRIX_COLUMN_OPTIONS.map((option) => [option.key, option.label])) as Record<MatrixColumn, string>;
-        const exportCoverage = companyCodeCoverage(all, appliedFilters);
-        const value = (row: MatrixRow, column: MatrixColumn): ExcelValue => ({
-          productCode: row.productCode,
-          deviceType: row.deviceType,
-          company: row.company,
-          coverage: selectedCodes.filter((code) => exportCoverage.get(row.companyKey)?.has(code)).join("; "),
-          listedDeviceCount: row.devices.length,
-          registeredDevices: row.devices.join("; "),
-          registrations: row.registrations,
-          productListings: row.productListings,
-          establishments: row.establishments,
-          deviceClass: row.deviceClasses.join("; "),
-          specialty: row.specialties.join("; "),
-          countries: row.countries.join("; "),
-          latestListing: row.latestListing,
+      if (viewMode === "udi") {
+        const all = (exportScope === "page" ? udiDevices : await fetchAllMatching()) as UdiDevice[];
+        const labels = Object.fromEntries(UDI_COLUMN_OPTIONS.map((option) => [option.key, option.label])) as Record<UdiColumn, string>;
+        const exportColumns = exportColumnIds.filter((id) => UDI_COLUMN_OPTIONS.some((option) => option.key === id)) as UdiColumn[];
+        const chosen = exportColumns.length ? exportColumns : udiColumns;
+        const value = (device: UdiDevice, column: UdiColumn): ExcelValue => ({
+          company: device.company,
+          brand: device.brand,
+          model: device.model,
+          primaryDi: device.primaryDi,
+          codes: device.codeList.join("; "),
+          premarket: device.premarket.length ? udiPremarketLabel(device) : (device.pmExempt ? "Exempt (none listed)" : "None listed"),
+          rxOtc: device.rx ? "Rx" : device.otc ? "OTC" : "",
+          published: device.publishDate,
+          status: [device.recordStatus, device.distributionStatus].filter(Boolean).join(" · "),
+          description: device.description,
+          gmdn: device.gmdn.map((term) => term.name).join("; "),
+          catalog: device.catalog,
+          identifiers: device.identifiers.map((entry) => `${entry.id} (${entry.type || "DI"})`).join("; "),
         })[column];
-        const exportColumns = (exportColumnIds.filter((id) => MATRIX_COLUMN_OPTIONS.some((option) => option.key === id)) as MatrixColumn[]);
-        const chosen = orderMatrixColumns(exportColumns.length ? exportColumns : matrixColumns, matrixSort);
-        // buildMatrix applies the same ANY/ALL company rollup the table uses, on the full export set.
-        const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
-          .map((row) => chosen.map((column) => value(row, column)));
         downloadExcel({
           filename: sanitizeExportFilename(exportFilename, exportBaseName()),
-          sheetName: "Company + devices",
-          columns: chosen.map((column) => ({ header: labels[column], width: 22 })),
-          rows,
+          sheetName: "GUDID devices",
+          columns: chosen.map((column) => ({ header: labels[column], width: 24 })),
+          rows: all.map((device) => chosen.map((column) => value(device, column))),
         });
       } else {
-        const labels = Object.fromEntries(RECORD_COLUMN_OPTIONS.map((option) => [option.key, option.label])) as Record<RecordColumn, string>;
-        const exportColumns = (exportColumnIds.filter((id) => RECORD_COLUMN_OPTIONS.some((option) => option.key === id)) as RecordColumn[]);
-        const chosen = exportColumns.length ? exportColumns : recordColumns;
-        const rows = all.map((item) => {
-          const matched = matchingProducts(item, appliedFilters);
-          const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
-          const primary = shown[0];
-          const values: Record<RecordColumn, ExcelValue> = {
-            establishment: firmName(item),
-            ownerOperator: companyName(item),
-            primaryDevice: primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device",
-            productCodes: [...new Set(shown.map((p) => p.product_code).filter(Boolean))].join("; "),
-            listedProducts: shown.length,
-            tradeNames: listedDeviceNames(item).join("; "),
-            location: locationSummary(item),
-            deviceClass: [...new Set(shown.map((p) => p.openfda?.device_class).filter(Boolean))].join("; "),
-            premarket: premarketSummary(item),
-            expiry: item.registration?.reg_expiry_date_year ?? "",
-            registrationNumber: item.registration?.registration_number ?? "",
-            feiNumber: item.registration?.fei_number ?? "",
-          };
-          return chosen.map((column) => values[column]);
-        });
-        downloadExcel({
-          filename: sanitizeExportFilename(exportFilename, exportBaseName()),
-          sheetName: "FDA records",
-          columns: chosen.map((column) => ({ header: labels[column], width: 22 })),
-          rows,
-        });
+        const all = (exportScope === "page" ? records : await fetchAllMatching()) as RecordItem[];
+        if (viewMode === "matrix") {
+          const labels = Object.fromEntries(MATRIX_COLUMN_OPTIONS.map((option) => [option.key, option.label])) as Record<MatrixColumn, string>;
+          const exportCoverage = companyCodeCoverage(all, appliedFilters);
+          const value = (row: MatrixRow, column: MatrixColumn): ExcelValue => ({
+            productCode: row.productCode,
+            deviceType: row.deviceType,
+            company: row.company,
+            coverage: selectedCodes.filter((code) => exportCoverage.get(row.companyKey)?.has(code)).join("; "),
+            listedDeviceCount: row.devices.length,
+            registeredDevices: row.devices.join("; "),
+            registrations: row.registrations,
+            productListings: row.productListings,
+            establishments: row.establishments,
+            deviceClass: row.deviceClasses.join("; "),
+            specialty: row.specialties.join("; "),
+            countries: row.countries.join("; "),
+            latestListing: row.latestListing,
+          })[column];
+          const exportColumns = (exportColumnIds.filter((id) => MATRIX_COLUMN_OPTIONS.some((option) => option.key === id)) as MatrixColumn[]);
+          const chosen = orderMatrixColumns(exportColumns.length ? exportColumns : matrixColumns, matrixSort);
+          // buildMatrix applies the same ANY/ALL company rollup the table uses, on the full export set.
+          const rows = sortMatrixRows(buildMatrix(all, appliedFilters), matrixSort)
+            .map((row) => chosen.map((column) => value(row, column)));
+          downloadExcel({
+            filename: sanitizeExportFilename(exportFilename, exportBaseName()),
+            sheetName: "Company + devices",
+            columns: chosen.map((column) => ({ header: labels[column], width: 22 })),
+            rows,
+          });
+        } else {
+          const labels = Object.fromEntries(RECORD_COLUMN_OPTIONS.map((option) => [option.key, option.label])) as Record<RecordColumn, string>;
+          const exportColumns = (exportColumnIds.filter((id) => RECORD_COLUMN_OPTIONS.some((option) => option.key === id)) as RecordColumn[]);
+          const chosen = exportColumns.length ? exportColumns : recordColumns;
+          const rows = all.map((item) => {
+            const matched = matchingProducts(item, appliedFilters);
+            const shown = productFilterActive(appliedFilters) ? matched : item.products || [];
+            const primary = shown[0];
+            const values: Record<RecordColumn, ExcelValue> = {
+              establishment: firmName(item),
+              ownerOperator: companyName(item),
+              primaryDevice: primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device",
+              productCodes: [...new Set(shown.map((p) => p.product_code).filter(Boolean))].join("; "),
+              listedProducts: shown.length,
+              tradeNames: listedDeviceNames(item).join("; "),
+              location: locationSummary(item),
+              deviceClass: [...new Set(shown.map((p) => p.openfda?.device_class).filter(Boolean))].join("; "),
+              premarket: premarketSummary(item),
+              expiry: item.registration?.reg_expiry_date_year ?? "",
+              registrationNumber: item.registration?.registration_number ?? "",
+              feiNumber: item.registration?.fei_number ?? "",
+            };
+            return chosen.map((column) => values[column]);
+          });
+          downloadExcel({
+            filename: sanitizeExportFilename(exportFilename, exportBaseName()),
+            sheetName: "FDA records",
+            columns: chosen.map((column) => ({ header: labels[column], width: 22 })),
+            rows,
+          });
+        }
       }
       setExportOpen(false);
     } catch (caught) {
@@ -674,10 +809,11 @@ export default function Home() {
     }
   };
 
+  const pageCount = isUdi ? udiDevices.length : records.length;
   const rangeLabel = useMemo(() => {
-    if (!total) return "0 records";
-    return `${(skip + 1).toLocaleString()}–${Math.min(skip + records.length, total).toLocaleString()} of ${total.toLocaleString()}`;
-  }, [records.length, skip, total]);
+    if (!total) return isUdi ? "0 devices" : "0 records";
+    return `${(skip + 1).toLocaleString()}–${Math.min(skip + pageCount, total).toLocaleString()} of ${total.toLocaleString()}${isUdi ? " devices" : ""}`;
+  }, [pageCount, skip, total, isUdi]);
 
   const drawerProducts = useMemo(() => {
     if (!selected) return [];
@@ -690,6 +826,8 @@ export default function Home() {
   const switchView = (nextView: ViewMode) => {
     if (nextView === viewMode) return;
     setViewMode(nextView);
+    setSelected(null);
+    setSelectedDevice(null);
     if (hasSearched) {
       runSearch(0, nextView, appliedFilters);
     } else {
@@ -697,8 +835,21 @@ export default function Home() {
     }
   };
 
+  const activeColumnOptions: readonly { key: string; label: string; hint: string }[] = isUdi ? UDI_COLUMN_OPTIONS : isMatrix ? MATRIX_COLUMN_OPTIONS : RECORD_COLUMN_OPTIONS;
+  const activeColumns: readonly string[] = isUdi ? udiColumns : isMatrix ? matrixColumns : recordColumns;
+  const toggleActiveColumn = (key: string) => {
+    if (isUdi) toggleColumn<UdiColumn>(setUdiColumns, key as UdiColumn);
+    else if (isMatrix) toggleColumn<MatrixColumn>(setMatrixColumns, key as MatrixColumn);
+    else toggleColumn<RecordColumn>(setRecordColumns, key as RecordColumn);
+  };
+  const resetActiveColumns = () => {
+    if (isUdi) setUdiColumns(DEFAULT_UDI_COLUMNS);
+    else if (isMatrix) setMatrixColumns(DEFAULT_MATRIX_COLUMNS);
+    else setRecordColumns(DEFAULT_RECORD_COLUMNS);
+  };
+
   const openExport = () => {
-    setExportColumnIds(viewMode === "matrix" ? matrixColumns : recordColumns);
+    setExportColumnIds([...activeColumns]);
     if (!exportFilenameCustom) setExportFilename(`${exportBaseName()}.xlsx`);
     setExportOpen(true);
   };
@@ -706,16 +857,17 @@ export default function Home() {
   const exportCount = Math.min(total, EXPORT_CAP);
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const freshnessHint = "\"FDA data as of\" is the date openFDA last rebuilt this dataset — records newer than that aren't published yet. \"Pulled\" is when this page last called the live API.";
-  const nothingToShow = viewMode === "matrix" ? !matrixRows.length : !records.length;
+  const nothingToShow = isUdi ? !udiDevices.length : isMatrix ? !matrixRows.length : !records.length;
   const showNoResults = hasSearched && !loading && !error && nothingToShow;
   const showEmpty = nothingToShow && !loading && !showNoResults;
   const appliedCodesLabel = appliedFilters.productCodes.join(" + ");
   const visibleMatrixColumns = orderMatrixColumns(matrixColumns, matrixSort);
   const showCodeNames = selectedCodes.length > 0 && selectedCodes.length <= 3;
+  const activeDatasetDate = isUdi ? udiUpdated : datasetUpdated;
 
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="code-count-strip" aria-label="Matches per product code">
-      <span className="strip-label"><Filter size={12} /> Per code</span>
+      <span className="strip-label"><Filter size={12} /> Per code{isUdi ? " · devices" : ""}</span>
       {codeCounts.map(({ code, count }) => (
         <span key={code} className={`code-count${count ? "" : " zero"}${codeUnknown(code) ? " unknown" : ""}`} title={codeUnknown(code) ? `openFDA has no product code ${code} — check the spelling` : codeLabel(code)}>
           <b>{code}</b> {count.toLocaleString()}
@@ -723,9 +875,14 @@ export default function Home() {
           {codeUnknown(code) && <small>not an FDA code</small>}
         </span>
       ))}
-      {allTogether && (
+      {allTogether && !isUdi && (
         <span className={`code-count together${matrixCompanies ? "" : " zero"}`} title={`Companies whose listings cover ${appliedCodesLabel}`}>
           <b>All {appliedFilters.productCodes.length} codes</b> {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"}
+        </span>
+      )}
+      {allTogether && isUdi && (
+        <span className={`code-count together${total ? "" : " zero"}`} title={`Device records that carry ${appliedCodesLabel} together`}>
+          <b>All {appliedFilters.productCodes.length} codes</b> {total.toLocaleString()} {total === 1 ? "device" : "devices"}
         </span>
       )}
     </div>
@@ -743,6 +900,7 @@ export default function Home() {
             <div className="company-cell">
               <b>{row.company}</b>
               <button type="button" className="mini-action" onClick={() => showCompanyListings(row.company)} aria-label={`Show listings for ${row.company}`} title="Show this company's listings in the Records view"><ArrowUpRight size={13} /></button>
+              <button type="button" className="mini-action" onClick={() => setUdiCompany({ company: row.company, alternates: [], codes: selectedCodes.length ? selectedCodes : [row.productCode], mode: appliedFilters.codeMatch })} aria-label={`Show GUDID devices for ${row.company}`} title="Check this company's GUDID device records (UDI) for these codes"><Barcode size={13} /></button>
             </div>
           </td>
         );
@@ -779,6 +937,58 @@ export default function Home() {
     }
   };
 
+  const udiCell = (device: UdiDevice, column: UdiColumn) => {
+    switch (column) {
+      case "company":
+        return <td key={column}><b>{device.company || "—"}</b><span>{device.duns ? `DUNS ${device.duns}` : "DUNS not listed"}</span></td>;
+      case "brand":
+        return <td key={column}><b>{device.brand || "Unnamed device"}</b><span>{device.description || "No description"}</span></td>;
+      case "model":
+        return <td key={column}><b className="mono-value">{device.model || "—"}</b><span>{device.catalog ? `Cat. ${device.catalog}` : "No catalog number"}</span></td>;
+      case "primaryDi":
+        return <td key={column}><b className="mono-value">{device.primaryDi || "—"}</b><span>{device.primaryAgency || "Agency unknown"} · {device.identifiers.length} identifier{device.identifiers.length === 1 ? "" : "s"}</span></td>;
+      case "codes":
+        return (
+          <td key={column}>
+            <div className="pill-row">
+              {device.codeList.map((code) => <span key={code} className={`code-pill${selectedCodes.includes(code) ? " hit" : " neutral"}`} title={codeLabel(code)}>{code}</span>)}
+              {!device.codeList.length && <span className="code-pill">—</span>}
+            </div>
+          </td>
+        );
+      case "premarket":
+        return (
+          <td key={column}>
+            <div className="pill-row">
+              {device.premarket.length
+                ? device.premarket.map((entry) => {
+                  const url = fdaPremarketUrl(entry.number);
+                  return url
+                    ? <a key={`${entry.number}-${entry.supplement}`} className="table-link mono-value" href={url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="Open this submission on the FDA website">{entry.number}</a>
+                    : <span key={`${entry.number}-${entry.supplement}`} className="mono-value">{entry.number}</span>;
+                })
+                : <span className="pm-none">None listed</span>}
+              {device.pmExempt && <span className="pm-exempt">PM exempt</span>}
+            </div>
+          </td>
+        );
+      case "rxOtc":
+        return <td key={column}><span className={`class-badge ${device.rx ? "class-2" : device.otc ? "class-1" : "class-u"}`}>{device.rx ? "Rx" : device.otc ? "OTC" : "—"}</span></td>;
+      case "published":
+        return <td key={column}><b className="mono-value">{device.publishDate || "—"}</b><span>{device.versionNumber ? `v${device.versionNumber}` : ""}{device.versionDate ? ` · ${device.versionDate}` : ""}</span></td>;
+      case "status":
+        return <td key={column}><b>{device.recordStatus || "—"}</b><span>{device.distributionStatus || ""}{device.distributionEnd ? ` · ended ${device.distributionEnd}` : ""}</span></td>;
+      case "description":
+        return <td key={column}><span className="cell-list">{device.description || "—"}</span></td>;
+      case "gmdn":
+        return <td key={column}><span className="cell-list">{device.gmdn.map((term) => term.name).join(" · ") || "—"}</span></td>;
+      case "catalog":
+        return <td key={column}><b className="mono-value">{device.catalog || "—"}</b></td>;
+      case "identifiers":
+        return <td key={column} className="count-cell"><b>{device.identifiers.length}</b><span>{device.identifiers.filter((entry) => /package/i.test(entry.type)).length} package</span></td>;
+    }
+  };
+
   return (
     <main>
       <SourceNav source="fda" view="explorer" status={`openFDA live${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`} statusState="connected" />
@@ -788,7 +998,7 @@ export default function Home() {
         <div className="hero-grid">
           <div>
             <h1>Device registrations.<br /><em>Made searchable.</em></h1>
-            <p>Search FDA registrations and listings.</p>
+            <p>Search FDA registrations, listings and GUDID device identifiers.</p>
           </div>
           <div className="dataset-note" title={freshnessHint}>
             <Database size={20} />
@@ -815,7 +1025,7 @@ export default function Home() {
 
           <label className="field keyword-field">
             <span>Keywords</span>
-            <div className="input-shell"><Search size={16} /><input value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} placeholder="Company, device, trade name…" onKeyDown={(e) => e.key === "Enter" && searchNow()} /></div>
+            <div className="input-shell"><Search size={16} /><input value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} placeholder={isUdi ? "Labeler, brand, model, description…" : "Company, device, trade name…"} onKeyDown={(e) => e.key === "Enter" && searchNow()} /></div>
           </label>
 
           <div className="field">
@@ -851,9 +1061,9 @@ export default function Home() {
               />
             </div>
             <datalist id="product-code-options">{PRESET.map((item) => <option key={item.code} value={item.code} label={item.name} />)}</datalist>
-            {viewMode === "matrix" ? (
+            {viewMode !== "records" ? (
               <>
-                <div className="match-mode" role="group" aria-label="How several product codes combine per company">
+                <div className="match-mode" role="group" aria-label={isUdi ? "How several product codes combine per device" : "How several product codes combine per company"}>
                   <span className="match-mode-label">Match</span>
                   <div className="match-mode-switch">
                     {CODE_MATCH_MODES.map((mode) => (
@@ -873,7 +1083,7 @@ export default function Home() {
                 <small className="field-hint">{matchHint}</small>
               </>
             ) : (
-              <small className="field-hint">Add several codes — listings match any of them. Switch to Company + devices to require every code per company.</small>
+              <small className="field-hint">Add several codes — listings match any of them. Company + devices and Devices (UDI) can require every code.</small>
             )}
           </div>
 
@@ -896,16 +1106,18 @@ export default function Home() {
 
           <div className="two-col">
             <label className="field"><span>Device class</span><span className="select-wrap"><select value={filters.deviceClass} onChange={(e) => setFilters({ ...filters, deviceClass: e.target.value })}><option value="">Any class</option><option value="1">Class I</option><option value="2">Class II</option><option value="3">Class III</option><option value="U">Unclassified</option></select><ChevronDown size={14} /></span></label>
-            <label className="field"><span>Country</span><input value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value.toUpperCase().slice(0, 2) })} list="country-options" placeholder="US" maxLength={2} autoComplete="off" onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
+            <label className={`field${isUdi ? " inactive" : ""}`}><span>Country</span><input value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value.toUpperCase().slice(0, 2) })} list="country-options" placeholder="US" maxLength={2} autoComplete="off" onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
           </div>
           <datalist id="country-options">{countryOptions.map((country) => <option key={country.code} value={country.code} label={`${country.name} · ${country.count.toLocaleString()} records`} />)}</datalist>
 
-          {!!topCountries.length && <div className="country-quick" aria-label="Common countries">
+          {!!topCountries.length && !isUdi && <div className="country-quick" aria-label="Common countries">
             <span>Top</span>
             {topCountries.map((country) => <button key={country.code} type="button" className={filters.country === country.code ? "active" : ""} onClick={() => setFilters((current) => ({ ...current, country: current.country === country.code ? "" : country.code }))} title={`${country.name} · ${country.count.toLocaleString()} records`}><b>{country.code}</b><em>{country.count >= 1000 ? `${Math.round(country.count / 1000)}K` : country.count.toLocaleString()}</em></button>)}
           </div>}
 
-          <details className="more-filters" open={Boolean(initial.filters.state || initial.filters.establishment)}>
+          {isUdi && <small className={`field-hint${udiIgnored.length ? " warn" : ""}`}>{udiIgnored.length ? `Ignored in Devices (UDI): ${udiIgnored.join(", ")} — GUDID records carry no location or establishment role.` : "GUDID device records carry no country, state or establishment role, so those filters do not apply here."}</small>}
+
+          <details className={`more-filters${isUdi ? " inactive" : ""}`} open={Boolean(initial.filters.state || initial.filters.establishment)}>
             <summary><span>More filters</span>{(filters.state || filters.establishment) && <b>{[filters.state, filters.establishment].filter(Boolean).length}</b>}<ChevronDown size={14} /></summary>
             <div className="more-filter-fields">
               <label className="field"><span>State / region code</span><input value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value.toUpperCase().slice(0, 3) })} placeholder="CA" maxLength={3} onKeyDown={(e) => e.key === "Enter" && searchNow()} /></label>
@@ -914,7 +1126,7 @@ export default function Home() {
           </details>
 
           <div className="query-actions">
-            <button className="primary" onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} Search records</button>
+            <button className="primary" onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} {isUdi ? "Search devices" : "Search records"}</button>
             <button className="text-button" onClick={reset}>Clear all</button>
           </div>
         </aside>
@@ -924,11 +1136,11 @@ export default function Home() {
             <div className="results-title">
               <button className="icon-button filter-toggle" onClick={() => { setFiltersCollapsed(false); setFiltersOpen(true); }} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
               <div>
-                <span>03 / RESULTS</span>
-                <h2>{!nothingToShow ? (viewMode === "matrix" ? `${matrixCompanies.toLocaleString()} ${matrixCompanies === 1 ? "company" : "companies"}` : rangeLabel) : showNoResults ? (viewMode === "matrix" ? "0 companies" : "0 records") : "Search records"}</h2>
+                <span>03 / RESULTS{isUdi ? " · GUDID" : ""}</span>
+                <h2>{!nothingToShow ? (isMatrix ? `${matrixCompanies.toLocaleString()} ${matrixCompanies === 1 ? "company" : "companies"}` : rangeLabel) : showNoResults ? (isMatrix ? "0 companies" : isUdi ? "0 devices" : "0 records") : (isUdi ? "Search devices" : "Search records")}</h2>
                 {fetchedAt && (
                   <small className="fetch-meta" title={freshnessHint}>
-                    {`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`}
+                    {`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${activeDatasetDate ? ` · FDA data as of ${activeDatasetDate}` : ""}`}
                   </small>
                 )}
               </div>
@@ -937,30 +1149,22 @@ export default function Home() {
               <div className="view-switch" role="group" aria-label="Results view">
                 <button className={viewMode === "records" ? "active" : ""} onClick={() => switchView("records")}>Records</button>
                 <button className={viewMode === "matrix" ? "active" : ""} onClick={() => switchView("matrix")}>Company + devices</button>
+                <button className={viewMode === "udi" ? "active" : ""} onClick={() => switchView("udi")} title="FDA GUDID device identifiers (UDI) for the same codes">Devices (UDI)</button>
               </div>
               <details ref={columnPicker} className="column-picker">
-                <summary className="secondary"><Columns3 size={15} /> Columns · {viewMode === "records" ? recordColumns.length : matrixColumns.length}</summary>
+                <summary className="secondary"><Columns3 size={15} /> Columns · {activeColumns.length}</summary>
                 <div className="column-menu">
                   <div className="column-menu-head">
                     <div><b>Display columns</b><span>Saved on this device</span></div>
-                    <button type="button" onClick={() => viewMode === "records" ? setRecordColumns(DEFAULT_RECORD_COLUMNS) : setMatrixColumns(DEFAULT_MATRIX_COLUMNS)}>Reset</button>
+                    <button type="button" onClick={resetActiveColumns}>Reset</button>
                   </div>
                   <div className="column-options">
-                    {(viewMode === "records" ? RECORD_COLUMN_OPTIONS : MATRIX_COLUMN_OPTIONS).map((option) => {
-                      const checked = viewMode === "records"
-                        ? recordColumns.includes(option.key as RecordColumn)
-                        : matrixColumns.includes(option.key as MatrixColumn);
-                      const onlyVisible = checked && (viewMode === "records" ? recordColumns.length === 1 : matrixColumns.length === 1);
+                    {activeColumnOptions.map((option) => {
+                      const checked = activeColumns.includes(option.key);
+                      const onlyVisible = checked && activeColumns.length === 1;
                       return (
                         <label key={option.key} title={onlyVisible ? "Keep at least one column visible" : undefined}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={onlyVisible}
-                            onChange={() => viewMode === "records"
-                              ? toggleRecordColumn(option.key as RecordColumn)
-                              : toggleMatrixColumn(option.key as MatrixColumn)}
-                          />
+                          <input type="checkbox" checked={checked} disabled={onlyVisible} onChange={() => toggleActiveColumn(option.key)} />
                           <span><b>{option.label}</b><small>{option.hint}</small></span>
                         </label>
                       );
@@ -968,10 +1172,11 @@ export default function Home() {
                   </div>
                 </div>
               </details>
-              {viewMode === "matrix" && <label className="matrix-sort">Sort <select value={matrixSort} onChange={(e) => setMatrixSort(e.target.value as MatrixSort)} aria-label="Sort company and device rows"><option value="company">Company A–Z</option><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option></select></label>}
+              {isMatrix && <label className="matrix-sort">Sort <select value={matrixSort} onChange={(e) => setMatrixSort(e.target.value as MatrixSort)} aria-label="Sort company and device rows"><option value="company">Company A–Z</option><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option></select></label>}
               {viewMode === "records" && <label className="matrix-sort">Sort <select value={recordSort} onChange={(e) => changeRecordSort(asRecordSort(e.target.value))} aria-label="Sort records">{RECORD_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
+              {isUdi && <label className="matrix-sort">Sort <select value={UDI_SORT_OPTIONS.some((option) => option.value === recordSort) ? recordSort : "relevance"} onChange={(e) => changeRecordSort(asRecordSort(e.target.value))} aria-label="Sort devices">{UDI_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
-              {viewMode === "records" && <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>}
+              {!isMatrix && <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>}
               <button
                 className="secondary export-button"
                 onClick={openExport}
@@ -991,10 +1196,10 @@ export default function Home() {
             <div className="empty-state">
               <div className="empty-number">{datasetTotal ? `${Math.round(datasetTotal / 1000)}K` : "FDA"}</div>
               <PackageSearch size={34} />
-              <h3>Search the FDA<br />device registry.</h3>
-              <p>Search live openFDA registration and listing records.</p>
+              <h3>{isUdi ? <>Search FDA<br />device identifiers.</> : <>Search the FDA<br />device registry.</>}</h3>
+              <p>{isUdi ? "Search live openFDA GUDID device records: GTINs, product codes, premarket submissions and labelers." : "Search live openFDA registration and listing records, then cross-check GUDID device identifiers."}</p>
               <div className="empty-actions">
-                <button className="primary" onClick={() => runSearch(0)}><Database size={16} /> View records</button>
+                <button className="primary" onClick={() => runSearch(0)}><Database size={16} /> {isUdi ? "View devices" : "View records"}</button>
                 <button className="secondary" onClick={applyPreset}><Ear size={15} /> Load the 6 hearing-aid codes</button>
               </div>
               {recent.length > 0 && (
@@ -1011,22 +1216,24 @@ export default function Home() {
               {codeCountStrip}
               <div className="empty-state no-results" role="status">
                 <PackageSearch size={34} />
-                <h3>{allTogether && records.length ? "No company holds every code." : "No records match."}</h3>
-                {allTogether && records.length ? (
+                <h3>{isMatrix && allTogether && records.length ? "No company holds every code." : isUdi && allTogether ? "No device carries every code." : isUdi ? "No devices match." : "No records match."}</h3>
+                {isMatrix && allTogether && records.length ? (
                   <p>
                     No owner / operator has listings covering all of <b>{appliedCodesLabel}</b>.
                     {" "}{anyCompanies.toLocaleString()} {anyCompanies === 1 ? "company holds" : "companies hold"} at least one of them — switch to <b>Any selected code</b> to see them.
                   </p>
+                ) : isUdi && allTogether ? (
+                  <p>No GUDID device record carries <b>{appliedCodesLabel}</b> together{appliedFilters.keyword.trim() ? <> for “{appliedFilters.keyword.trim()}”</> : null}. Switch to <b>Any selected code</b> to see devices filed under at least one of them.</p>
                 ) : (
                   <p>
-                    Nothing in the openFDA registration and listing dataset matches this combination.
+                    Nothing in the openFDA {isUdi ? "GUDID device" : "registration and listing"} dataset matches this combination.
                     {unknownApplied.length > 0
                       ? <> <b>{unknownApplied.join(", ")}</b> {unknownApplied.length === 1 ? "is not" : "are not"} in FDA&apos;s product classification — check the spelling.</>
-                      : " Try fewer filters, another country, or double-check the product codes."}
+                      : isUdi ? " Try a brand or labeler name, or fewer codes." : " Try fewer filters, another country, or double-check the product codes."}
                   </p>
                 )}
                 <div className="empty-actions">
-                  {allTogether && records.length > 0 && <button className="primary" onClick={() => setCodeMatch("any")}>Match any selected code</button>}
+                  {allTogether && (records.length > 0 || isUdi) && <button className="primary" onClick={() => setCodeMatch("any")}>Match any selected code</button>}
                   <button className="secondary" onClick={reset}>Clear all filters</button>
                 </div>
               </div>
@@ -1034,10 +1241,16 @@ export default function Home() {
           ) : (
             <>
               {codeCountStrip}
-              {viewMode === "matrix" && (
+              {isMatrix && (
                 <div className="matrix-note">
                   <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device rows</b> · {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"} · from {records.length.toLocaleString()} matching listings</span></div>
-                  <span>{total > MATRIX_FETCH_CAP && `Grouping the first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()} matches — coverage beyond that isn't checked · `}{allTogether && `Only companies whose listings cover ${appliedCodesLabel} are shown · `}{matrixSort === "company" ? "Each company's codes are listed together" : "Listed devices counts unique proprietary names"}; Excel export fetches every available match.</span>
+                  <span>{total > MATRIX_FETCH_CAP && `Grouping the first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()} matches — coverage beyond that isn't checked · `}{allTogether && `Only companies whose listings cover ${appliedCodesLabel} are shown · `}{matrixSort === "company" ? "Each company's codes are listed together" : "Listed devices counts unique proprietary names"}; the barcode button checks GUDID devices for a company.</span>
+                </div>
+              )}
+              {isUdi && (
+                <div className="matrix-note">
+                  <div><Barcode size={16} /><span><b>{total.toLocaleString()} GUDID device {total === 1 ? "record" : "records"}</b>{allTogether ? ` carrying ${appliedCodesLabel} together` : appliedFilters.productCodes.length ? ` under ${appliedFilters.productCodes.join(" / ")}` : ""}{udiUpdated ? ` · GUDID data as of ${udiUpdated}` : ""}</span></div>
+                  <span>One row per device identifier record published by its labeler; “None listed” means the labeler declared no 510(k), PMA or De Novo number. Open a row for identifiers, GMDN terms and the labeler&apos;s registration listings.</span>
                 </div>
               )}
               <div className="table-wrap" aria-live="polite">
@@ -1090,7 +1303,7 @@ export default function Home() {
                       );
                     })}
                   </tbody>
-                </table> : <table className="matrix-table">
+                </table> : isMatrix ? <table className="matrix-table">
                   <thead><tr>
                     {visibleMatrixColumns.map((column) => {
                       const option = MATRIX_COLUMN_OPTIONS.find((entry) => entry.key === column)!;
@@ -1108,15 +1321,28 @@ export default function Home() {
                       );
                     })}
                   </tbody>
+                </table> : <table className="records-table udi-table">
+                  <thead><tr>
+                    {UDI_COLUMN_OPTIONS.filter((option) => udiColumns.includes(option.key)).map((option) => <th key={option.key} className={option.key === "identifiers" ? "numeric-head" : undefined}>{option.label}</th>)}
+                    <th aria-label="Open device" />
+                  </tr></thead>
+                  <tbody>
+                    {udiDevices.map((device) => (
+                      <tr key={device.key} onClick={() => setSelectedDevice(device)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelectedDevice(device)}>
+                        {UDI_COLUMN_OPTIONS.filter((option) => udiColumns.includes(option.key)).map((option) => udiCell(device, option.key))}
+                        <td><ArrowRight size={17} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>}
               </div>
-              {viewMode === "records" && <div className="pagination">
+              {!isMatrix && <div className="pagination">
                 <span>{rangeLabel}</span>
-                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + records.length >= total || loading}>Next <ArrowRight size={15} /></button></div>
+                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + pageCount >= total || loading}>Next <ArrowRight size={15} /></button></div>
               </div>}
             </>
           )}
-          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || loadingNote || "Searching openFDA…"}</span></div>}
+          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || loadingNote || (isUdi ? "Searching FDA GUDID…" : "Searching openFDA…")}</span></div>}
         </section>
       </section>
 
@@ -1161,7 +1387,55 @@ export default function Home() {
                 <div className="chips">{listedDeviceNames(selected).map((name) => <span key={name}>{name}</span>)}</div>
               </section>
             )}
+            <section className="detail-section">
+              <h3><Barcode size={16} /> GUDID devices (UDI) <i className="listing-note">{companyName(selected)} · {listingCodesForUdi(selected, appliedFilters).join(" / ") || "any code"}</i></h3>
+              <UdiCompanyPanel
+                company={companyName(selected)}
+                alternates={[firmName(selected)]}
+                codes={listingCodesForUdi(selected, appliedFilters)}
+                mode="any"
+                onOpenDevicesView={(labeler) => openUdiView(labeler, listingCodesForUdi(selected, appliedFilters))}
+                onSelectDevice={(device) => { setSelected(null); setSelectedDevice(device); }}
+              />
+            </section>
             <section className="detail-section raw-section"><details><summary>View raw JSON <ChevronDown size={15} /></summary><pre>{JSON.stringify(selected, null, 2)}</pre></details></section>
+          </aside>
+        </div>
+      )}
+
+      {selectedDevice && (
+        <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setSelectedDevice(null)}>
+          <aside className="drawer" aria-label="GUDID device details">
+            <div className="drawer-top"><span>GUDID DEVICE · UDI</span><button className="icon-button" onClick={() => setSelectedDevice(null)} aria-label="Close details"><X size={19} /></button></div>
+            <div className="drawer-hero">
+              <span className="record-id">{selectedDevice.company || "Unknown labeler"}</span>
+              <h2>{selectedDevice.brand || "Unnamed device"}</h2>
+              <p><Barcode size={15} /> {selectedDevice.model || "No model number"}{selectedDevice.catalog ? ` · Cat. ${selectedDevice.catalog}` : ""}{selectedDevice.primaryDi && <> · <a href={accessGudidUrl(selectedDevice.primaryDi)} target="_blank" rel="noreferrer">AccessGUDID <ExternalLink size={11} /></a></>}</p>
+            </div>
+            <UdiDeviceDetail device={selectedDevice} highlight={selectedCodes} codeLabel={codeLabel} onShowListings={showCompanyListings} />
+          </aside>
+        </div>
+      )}
+
+      {udiCompany && (
+        <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setUdiCompany(null)}>
+          <aside className="drawer" aria-label="GUDID devices for company">
+            <div className="drawer-top"><span>GUDID DEVICES · UDI</span><button className="icon-button" onClick={() => setUdiCompany(null)} aria-label="Close"><X size={19} /></button></div>
+            <div className="drawer-hero">
+              <span className="record-id">{udiCompany.codes.join(" + ") || "All codes"}{udiCompany.codes.length > 1 ? (udiCompany.mode === "all" ? " · every code per device" : " · any code") : ""}</span>
+              <h2>{udiCompany.company}</h2>
+              <p><Barcode size={15} /> Device identifier records this labeler published to FDA&apos;s GUDID</p>
+            </div>
+            <section className="detail-section">
+              <UdiCompanyPanel
+                company={udiCompany.company}
+                alternates={udiCompany.alternates}
+                codes={udiCompany.codes}
+                mode={udiCompany.mode}
+                onOpenDevicesView={(labeler) => openUdiView(labeler, udiCompany.codes)}
+                onSelectDevice={(device) => { setUdiCompany(null); setSelectedDevice(device); }}
+              />
+            </section>
           </aside>
         </div>
       )}
@@ -1170,27 +1444,27 @@ export default function Home() {
         open={exportOpen}
         title="Pack this workbook."
         countLabel="Choose columns and which rows to include."
-        note={viewMode === "matrix" ? "Uses the company + devices view." : "Uses the records view."}
-        toggles={(viewMode === "matrix" ? MATRIX_COLUMN_OPTIONS : RECORD_COLUMN_OPTIONS).map((option) => ({ id: option.key, label: option.label, hint: option.hint }))}
+        note={isMatrix ? "Uses the company + devices view." : isUdi ? "Uses the Devices (UDI) view." : "Uses the records view."}
+        toggles={activeColumnOptions.map((option) => ({ id: option.key, label: option.label, hint: option.hint }))}
         selected={exportColumnIds}
         confirming={!!exportProgress}
         filename={exportFilename}
         scope={exportScope}
         clickableLinks={false}
-        pageCount={records.length}
+        pageCount={pageCount}
         allCount={exportCount}
         filters={[
           appliedFilters.keyword,
           ...appliedFilters.productCodes,
-          allTogether ? "Companies holding all codes" : "",
-          appliedFilters.country,
+          allTogether ? (isUdi ? "Every code on the device" : "Companies holding all codes") : "",
+          isUdi ? "" : appliedFilters.country,
           appliedFilters.deviceClass && `Class ${appliedFilters.deviceClass}`,
-          viewMode === "records" && recordSort !== "relevance" ? RECORD_SORT_OPTIONS.find((option) => option.value === recordSort)?.label || "" : "",
+          viewMode !== "matrix" && recordSort !== "relevance" ? (isUdi ? UDI_SORT_OPTIONS : RECORD_SORT_OPTIONS).find((option) => option.value === recordSort)?.label || "" : "",
         ].filter(Boolean) as string[]}
         onFilename={(value) => { setExportFilename(value); setExportFilenameCustom(true); }}
         onScope={setExportScope}
         onChange={setExportColumnIds}
-        onUseVisible={() => setExportColumnIds(viewMode === "matrix" ? matrixColumns : recordColumns)}
+        onUseVisible={() => setExportColumnIds([...activeColumns])}
         onCancel={() => !exportProgress && setExportOpen(false)}
         onConfirm={() => void exportCsv()}
       />
