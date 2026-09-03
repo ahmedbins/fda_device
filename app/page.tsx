@@ -80,6 +80,7 @@ import {
   sortMatrixRows,
 } from "./fda-shared";
 import {
+  UDI_ALIASES_KEY,
   UDI_API,
   UDI_SORT_OPTIONS,
   type UdiDevice,
@@ -87,7 +88,9 @@ import {
   accessGudidUrl,
   buildUdiSearch,
   listingCodesForUdi,
+  normalizeLabeler,
   normalizeUdi,
+  parseUdiAliases,
   udiIgnoredFilters,
   udiPremarketLabel,
   udiSortParam,
@@ -256,6 +259,7 @@ export default function Home() {
   const [codeInfo, setCodeInfo] = useState<Map<string, CodeInfo | null>>(() => new Map());
   const [recent, setRecent] = useState<RecentSearch[]>([]);
   const [recentReady, setRecentReady] = useState(false);
+  const [udiAliases, setUdiAliases] = useState<Record<string, string[]>>({});
   const [linkCopied, setLinkCopied] = useState(false);
   const [recordColumns, setRecordColumns] = useState<RecordColumn[]>(DEFAULT_RECORD_COLUMNS);
   const [matrixColumns, setMatrixColumns] = useState<MatrixColumn[]>(DEFAULT_MATRIX_COLUMNS);
@@ -479,8 +483,10 @@ export default function Home() {
   useEffect(() => {
     const saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
     let storedRecent: RecentSearch[] = [];
+    let storedAliases: Record<string, string[]> = {};
     try {
       storedRecent = parseRecentSearches(localStorage.getItem(RECENT_SEARCHES_KEY));
+      storedAliases = parseUdiAliases(localStorage.getItem(UDI_ALIASES_KEY));
     } catch {
       storedRecent = [];
     }
@@ -488,6 +494,7 @@ export default function Home() {
       setFiltersCollapsed(saved);
       setFilterPanelPrefsReady(true);
       setRecent((current) => (current.length ? current : storedRecent));
+      setUdiAliases((current) => (Object.keys(current).length ? current : storedAliases));
       setRecentReady(true);
     });
   }, []);
@@ -501,10 +508,28 @@ export default function Home() {
     if (!recentReady) return;
     try {
       localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(recent));
+      localStorage.setItem(UDI_ALIASES_KEY, JSON.stringify(udiAliases));
     } catch {
-      // Storage may be full or blocked; recent searches are a convenience only.
+      // Storage may be full or blocked; recent searches and aliases are a convenience only.
     }
-  }, [recentReady, recent]);
+  }, [recentReady, recent, udiAliases]);
+
+  /** User-added GUDID labeler names for a company, kept on this device. */
+  const aliasesFor = (company: string) => udiAliases[normalizeLabeler(company)] || [];
+  const addAlias = (company: string, name: string) => {
+    const key = normalizeLabeler(company);
+    const value = name.trim();
+    if (!key || !value) return;
+    setUdiAliases((current) => ({ ...current, [key]: [...new Set([...(current[key] || []), value])] }));
+  };
+  const removeAlias = (company: string, name: string) => {
+    const key = normalizeLabeler(company);
+    setUdiAliases((current) => {
+      const next = { ...current, [key]: (current[key] || []).filter((item) => item !== name) };
+      if (!next[key].length) delete next[key];
+      return next;
+    });
+  };
 
   /** Name every entered code from the FDA classification dataset, so unknown codes can be flagged before searching. */
   useEffect(() => {
@@ -1446,6 +1471,9 @@ export default function Home() {
                 alternates={[firmName(selected)]}
                 codes={listingCodesForUdi(selected, appliedFilters)}
                 mode="any"
+                aliases={aliasesFor(companyName(selected))}
+                onAddAlias={(name) => addAlias(companyName(selected), name)}
+                onRemoveAlias={(name) => removeAlias(companyName(selected), name)}
                 onOpenDevicesView={(labeler) => openUdiView(labeler, listingCodesForUdi(selected, appliedFilters))}
                 onSelectDevice={(device) => { setSelected(null); setSelectedDevice(device); }}
               />
@@ -1484,6 +1512,9 @@ export default function Home() {
                 alternates={udiCompany.alternates}
                 codes={udiCompany.codes}
                 mode={udiCompany.mode}
+                aliases={aliasesFor(udiCompany.company)}
+                onAddAlias={(name) => addAlias(udiCompany.company, name)}
+                onRemoveAlias={(name) => removeAlias(udiCompany.company, name)}
                 onOpenDevicesView={(labeler) => openUdiView(labeler, udiCompany.codes)}
                 onSelectDevice={(device) => { setUdiCompany(null); setSelectedDevice(device); }}
               />

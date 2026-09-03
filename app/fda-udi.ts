@@ -236,9 +236,136 @@ export function buildUdiSearch(filters: ExplorerFilters) {
   return clauses.join(" AND ");
 }
 
-/** Devices one labeler published under the selected codes. `extra` appends e.g. the premarket-exists clause. */
-export function udiCompanySearch(company: string, codes: readonly string[], mode: CodeMatchMode, extra = "") {
-  const clauses = [`company_name:${quote(company)}`];
+/* ------------------------------------------------------------------ */
+/* Labeler groups and aliases                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GUDID labelers file under their own legal or brand entity, so one FDA
+ * registration owner/operator can stand behind several labeler names. These
+ * groups are maintained in the app from public ownership information — they
+ * are not an FDA relationship — and every labeler name here was verified to
+ * exist in the openFDA UDI dataset (2026-09-02). The UI says so wherever a
+ * group is used.
+ */
+export type LabelerGroup = { group: string; owners: string[]; labelers: string[]; note: string };
+
+export const UDI_LABELER_GROUPS: LabelerGroup[] = [
+  {
+    group: "Demant",
+    owners: ["DEMANT A/S", "William Demant"],
+    labelers: ["Oticon A/S", "Sbo Hearing A/S", "Bernafon AG", "Sonic Innovations, Inc."],
+    note: "Oticon, Bernafon and Sonic (and the shared SBO Hearing entity) are Demant hearing-aid brands.",
+  },
+  {
+    group: "Sonova",
+    owners: ["Sonova AG", "Sonova Consumer Hearing GmbH"],
+    labelers: ["Sonova AG", "Phonak AG", "Unitron Hearing Division", "Unitron Hearing Ltd", "Hansaton Akustik GmbH", "Advanced Bionics, LLC", "Advanced Bionics AG", "Advanced Bionics Corporation"],
+    note: "Phonak, Unitron, Hansaton and Advanced Bionics are Sonova companies.",
+  },
+  {
+    group: "WS Audiology",
+    owners: ["WS Audiology USA, Inc.", "WSAUD A/S", "WS Audiology A/S", "Sivantos"],
+    labelers: ["Ws Audiology Usa, Inc.", "Widex A/S"],
+    note: "Widex and the former Sivantos/Signia business merged into WS Audiology.",
+  },
+  {
+    group: "GN",
+    owners: ["GN Hearing A/S", "GN Consumer Hearing Corporation"],
+    labelers: ["Gn Hearing A/S"],
+    note: "GN Hearing (ReSound, Beltone) and GN Consumer Hearing (Jabra) share the GN Hearing labeler in GUDID.",
+  },
+  {
+    group: "Cochlear",
+    owners: ["COCHLEAR AMERICAS", "Cochlear Limited"],
+    labelers: ["COCHLEAR LIMITED", "Cochlear Bone Anchored Solutions AB", "Cochlear Americas Corporation"],
+    note: "Cochlear Americas registers in the US; devices are labeled by Cochlear Limited and Cochlear Bone Anchored Solutions.",
+  },
+  {
+    group: "Persona Medical",
+    owners: ["Magnatone Hearing Aid Corp. dba Persona Medical"],
+    labelers: ["Persona Medical"],
+    note: "Magnatone Hearing Aid Corp. trades as Persona Medical.",
+  },
+  {
+    group: "hearX",
+    owners: ["hearX", "HEARX SA"],
+    labelers: ["HEARX GROUP (PTY) LTD"],
+    note: "hearX (Lexie) labels under HEARX GROUP (PTY) LTD.",
+  },
+  {
+    group: "Xiamen New Sound",
+    owners: ["Xiamen NewSound Technology Co., Ltd"],
+    labelers: ["Xiamen New Sound Technology Co., Ltd."],
+    note: "Same company; the registration spells NewSound as one word.",
+  },
+  {
+    group: "Tomore",
+    owners: ["Tomore Medical (Shenzhen) Co., Ltd"],
+    labelers: ["Tomore Medical (Shenzhen) Co., Ltd", "Tomore Healthcare (Dongguan) Co.,Ltd."],
+    note: "Tomore Medical and Tomore Healthcare label under two entities.",
+  },
+];
+
+/** Case-, punctuation- and whitespace-insensitive key for a company or labeler name. */
+export function normalizeLabeler(name: string) {
+  return String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function namesMatch(a: string, b: string) {
+  const x = normalizeLabeler(a);
+  const y = normalizeLabeler(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const shorter = x.length <= y.length ? x : y;
+  const longer = shorter === x ? y : x;
+  return shorter.length >= 5 && longer.includes(shorter);
+}
+
+/** The app-maintained group a registration owner or GUDID labeler belongs to, if any. */
+export function labelerGroupFor(name: string): LabelerGroup | null {
+  const value = String(name ?? "").trim();
+  if (!value) return null;
+  return UDI_LABELER_GROUPS.find((group) => group.owners.some((owner) => namesMatch(owner, value)) || group.labelers.some((labeler) => namesMatch(labeler, value))) || null;
+}
+
+/** Every labeler name worth querying for a company: the names themselves, their group's labelers, and user-added aliases; de-duplicated, order preserved. */
+export function labelersFor(names: readonly string[], extra: readonly string[] = []) {
+  const out: string[] = [];
+  const push = (name: string) => {
+    const value = String(name ?? "").trim();
+    if (value && !out.some((existing) => normalizeLabeler(existing) === normalizeLabeler(value))) out.push(value);
+  };
+  names.forEach(push);
+  names.forEach((name) => labelerGroupFor(name)?.labelers.forEach(push));
+  extra.forEach(push);
+  return out;
+}
+
+export const UDI_ALIASES_KEY = "fda-udi-labeler-aliases";
+
+/** User-added labeler names per company, keyed by the normalized company name. */
+export function parseUdiAliases(raw: string | null): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string[]> = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+      if (!Array.isArray(value)) return;
+      const names = [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))];
+      if (key && names.length) out[key] = names;
+    });
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Devices one labeler — or every labeler in a group — published under the selected codes. `extra` appends e.g. the premarket-exists clause. */
+export function udiCompanySearch(company: string | readonly string[], codes: readonly string[], mode: CodeMatchMode, extra = "") {
+  const names = (typeof company === "string" ? [company] : [...company]).map((name) => name.trim()).filter(Boolean);
+  const quoted = names.map(quote);
+  const clauses = [quoted.length === 1 ? `company_name:${quoted[0]}` : `company_name:(${quoted.join(" OR ")})`];
   const codeClause = udiCodesClause(codes, mode);
   if (codeClause) clauses.push(codeClause);
   if (extra) clauses.push(extra);
@@ -301,6 +428,82 @@ export const UDI_SORT_OPTIONS: { value: RecordSort; label: string }[] = [
 export function accessGudidUrl(primaryDi: string) {
   const di = text(primaryDi);
   return di ? `https://accessgudid.nlm.nih.gov/devices/${encodeURIComponent(di)}` : "";
+}
+
+/* ------------------------------------------------------------------ */
+/* Premarket gap report                                                 */
+/* ------------------------------------------------------------------ */
+
+/** Rows per workbook. openFDA pages 1,000 per call, so this is at most ten calls per set. */
+export const PREMARKET_GAP_CAP = 10000;
+
+export type PremarketGapRow = {
+  labeler: string;
+  brand: string;
+  model: string;
+  catalog: string;
+  primaryDi: string;
+  codes: string;
+  carriesAll: string;
+  premarket: string;
+  pmExempt: string;
+  rxOtc: string;
+  published: string;
+  recordStatus: string;
+  distribution: string;
+  gmdn: string;
+};
+
+export const PREMARKET_GAP_COLUMNS: { key: keyof PremarketGapRow; header: string; width: number }[] = [
+  { key: "labeler", header: "Labeler", width: 26 },
+  { key: "brand", header: "Brand", width: 20 },
+  { key: "model", header: "Version / model", width: 24 },
+  { key: "catalog", header: "Catalog #", width: 16 },
+  { key: "primaryDi", header: "Primary DI (GTIN)", width: 18 },
+  { key: "codes", header: "Product codes", width: 16 },
+  { key: "carriesAll", header: "Carries every selected code", width: 16 },
+  { key: "premarket", header: "Premarket submission", width: 22 },
+  { key: "pmExempt", header: "Premarket exempt", width: 14 },
+  { key: "rxOtc", header: "Rx / OTC", width: 10 },
+  { key: "published", header: "Published", width: 12 },
+  { key: "recordStatus", header: "Record status", width: 14 },
+  { key: "distribution", header: "Commercial distribution", width: 22 },
+  { key: "gmdn", header: "GMDN", width: 30 },
+];
+
+/**
+ * One row per device for the premarket gap workbook: devices carrying every
+ * selected code first, then those without a submission number, then by
+ * brand — so the question "which OSM + KLW devices cite no 510(k)?" is the
+ * top of the sheet.
+ */
+export function premarketGapRows(devices: readonly UdiDevice[], codes: readonly string[]): PremarketGapRow[] {
+  const selected = normalizeCodes(codes);
+  const rows = devices.map((device) => {
+    const carriesAll = selected.length ? udiDeviceHasCodes(device, selected, "all") : true;
+    return {
+      row: {
+        labeler: device.company,
+        brand: device.brand,
+        model: device.model,
+        catalog: device.catalog,
+        primaryDi: device.primaryDi,
+        codes: device.codeList.join("; "),
+        carriesAll: carriesAll ? "Yes" : "No",
+        premarket: device.premarket.length ? udiPremarketLabel(device) : "None listed",
+        pmExempt: device.pmExempt ? "Yes" : "No",
+        rxOtc: device.rx ? "Rx" : device.otc ? "OTC" : "",
+        published: device.publishDate,
+        recordStatus: device.recordStatus,
+        distribution: [device.distributionStatus, device.distributionEnd ? `ended ${device.distributionEnd}` : ""].filter(Boolean).join(" · "),
+        gmdn: device.gmdn.map((term) => term.name).join("; "),
+      } satisfies PremarketGapRow,
+      carriesAll,
+      missing: device.premarket.length === 0,
+    };
+  });
+  rows.sort((a, b) => Number(b.carriesAll) - Number(a.carriesAll) || Number(b.missing) - Number(a.missing) || a.row.brand.localeCompare(b.row.brand) || a.row.model.localeCompare(b.row.model));
+  return rows.map((entry) => entry.row);
 }
 
 export function udiPremarketLabel(device: UdiDevice) {

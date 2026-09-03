@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Barcode, Building2, CircleAlert, ExternalLink, LoaderCircle, PackageSearch } from "lucide-react";
+import { ArrowUpRight, Barcode, Building2, CircleAlert, ExternalLink, FileSpreadsheet, LoaderCircle, PackageSearch, Plus, X } from "lucide-react";
 import {
   API,
   type CodeMatchMode,
   type RecordItem,
   fdaPremarketUrl,
   fdaProductCodeUrl,
+  fetchListingPages,
   fetchOpenFda,
   firmName,
   locationSummary,
@@ -16,18 +17,26 @@ import {
   recordProductCodes,
 } from "./fda-shared";
 import {
+  PREMARKET_GAP_CAP,
+  PREMARKET_GAP_COLUMNS,
   UDI_API,
   UDI_PM_EXEMPT,
   UDI_PREMARKET_EXISTS,
   type UdiDevice,
   type UdiRaw,
   accessGudidUrl,
+  labelerGroupFor,
+  labelersFor,
   listingSearchForDevice,
+  normalizeLabeler,
   normalizeUdi,
+  premarketGapRows,
   udiCompanySearch,
   udiPremarketLabel,
   udiSortParam,
 } from "./fda-udi";
+import { downloadExcel } from "./excel-export";
+import { sanitizeExportFilename } from "./export-dialog";
 
 const PANEL_LIMIT = 50;
 
@@ -38,7 +47,8 @@ async function countFor(search: string) {
 }
 
 type CompanySummary = {
-  name: string;
+  labelers: string[];
+  breakdown: { name: string; count: number }[];
   any: number;
   all: number | null;
   allPremarket: number | null;
@@ -49,6 +59,10 @@ type CompanySummary = {
 
 function yesNo(value: boolean) {
   return value ? "Yes" : "No";
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "company";
 }
 
 /** One GUDID device as a compact row: brand, model, primary DI, codes, premarket status. */
@@ -62,6 +76,7 @@ export function UdiDeviceRow({ device, highlight = [], onSelect }: { device: Udi
       </div>
       {device.description && <span className="udi-device-desc">{device.description}</span>}
       <div className="udi-meta">
+        <span className="udi-labeler">{device.company}</span>
         {device.codeList.map((code) => <span key={code} className={`code-pill${hits.has(code) ? " hit" : " neutral"}`}>{code}</span>)}
         {device.premarket.length
           ? <span className="pm-yes" title="Premarket submission declared on the GUDID record">{udiPremarketLabel(device)}</span>
@@ -75,16 +90,19 @@ export function UdiDeviceRow({ device, highlight = [], onSelect }: { device: Udi
 }
 
 /**
- * Everything GUDID knows about one labeler for a set of product codes:
- * server-side counts (any code, every code, premarket declared, exempt) and
- * the newest device records. Answers "does this company have devices filed
- * under both OSM and KLW, and do they list a submission number?".
+ * Everything GUDID knows about one company for a set of product codes,
+ * across every labeler name that belongs to it: server-side counts (any
+ * code, every code, premarket declared, exempt), a per-labeler breakdown,
+ * the newest device records, and a one-click premarket gap workbook.
  */
 export function UdiCompanyPanel({
   company,
   alternates = [],
   codes,
   mode,
+  aliases = [],
+  onAddAlias,
+  onRemoveAlias,
   onOpenDevicesView,
   onSelectDevice,
 }: {
@@ -92,6 +110,9 @@ export function UdiCompanyPanel({
   alternates?: readonly string[];
   codes: readonly string[];
   mode: CodeMatchMode;
+  aliases?: readonly string[];
+  onAddAlias?: (labeler: string) => void;
+  onRemoveAlias?: (labeler: string) => void;
   onOpenDevicesView?: (labeler: string) => void;
   onSelectDevice?: (device: UdiDevice) => void;
 }) {
@@ -100,13 +121,18 @@ export function UdiCompanyPanel({
   const [summary, setSummary] = useState<CompanySummary | null>(null);
   const [devices, setDevices] = useState<UdiDevice[]>([]);
   const [listedAll, setListedAll] = useState(false);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const [report, setReport] = useState<{ busy: boolean; note: string }>({ busy: false, note: "" });
   const selected = normalizeCodes(codes);
   const codesKey = selected.join(",");
-  const namesKey = [company, ...alternates].join("|");
+  const labelers = labelersFor([company, ...alternates], aliases);
+  const labelersKey = labelers.join("|");
+  const group = labelerGroupFor(company) || alternates.map((name) => labelerGroupFor(name)).find(Boolean) || null;
+  const aliasSet = new Set(aliases.map(normalizeLabeler));
 
   useEffect(() => {
     let cancelled = false;
-    const names = [...new Set([company, ...alternates].map((name) => name.trim()).filter(Boolean))];
+    const names = labelersKey.split("|").filter(Boolean);
     const wanted = codesKey ? codesKey.split(",") : [];
     const multi = wanted.length > 1;
     (async () => {
@@ -115,16 +141,8 @@ export function UdiCompanyPanel({
       setSummary(null);
       setDevices([]);
       try {
-        let name = names[0] || "";
-        let any = 0;
-        for (const candidate of names) {
-          const total = await countFor(udiCompanySearch(candidate, wanted, "any"));
-          if (total > 0) {
-            name = candidate;
-            any = total;
-            break;
-          }
-        }
+        const any = await countFor(udiCompanySearch(names, wanted, "any"));
+        let breakdown: { name: string; count: number }[] = [];
         let all: number | null = null;
         let allPremarket: number | null = null;
         let allExempt: number | null = null;
@@ -133,16 +151,21 @@ export function UdiCompanyPanel({
         let list: UdiDevice[] = [];
         let listAll = false;
         if (any > 0) {
-          [anyPremarket, anyExempt] = await Promise.all([
-            countFor(udiCompanySearch(name, wanted, "any", UDI_PREMARKET_EXISTS)),
-            countFor(udiCompanySearch(name, wanted, "any", UDI_PM_EXEMPT)),
+          const breakdownParams = new URLSearchParams({ search: udiCompanySearch(names, wanted, "any"), count: "company_name.exact", limit: "50" });
+          const [counts, premarketCount, exemptCount] = await Promise.all([
+            fetchOpenFda<{ term?: string; count?: number }>(`${UDI_API}?${breakdownParams.toString()}`),
+            countFor(udiCompanySearch(names, wanted, "any", UDI_PREMARKET_EXISTS)),
+            countFor(udiCompanySearch(names, wanted, "any", UDI_PM_EXEMPT)),
           ]);
+          breakdown = counts.results.map((entry) => ({ name: String(entry.term ?? ""), count: entry.count || 0 })).filter((entry) => entry.name);
+          anyPremarket = premarketCount;
+          anyExempt = exemptCount;
           if (multi) {
-            all = await countFor(udiCompanySearch(name, wanted, "all"));
+            all = await countFor(udiCompanySearch(names, wanted, "all"));
             if (all > 0) {
               [allPremarket, allExempt] = await Promise.all([
-                countFor(udiCompanySearch(name, wanted, "all", UDI_PREMARKET_EXISTS)),
-                countFor(udiCompanySearch(name, wanted, "all", UDI_PM_EXEMPT)),
+                countFor(udiCompanySearch(names, wanted, "all", UDI_PREMARKET_EXISTS)),
+                countFor(udiCompanySearch(names, wanted, "all", UDI_PM_EXEMPT)),
               ]);
             } else {
               allPremarket = 0;
@@ -150,12 +173,12 @@ export function UdiCompanyPanel({
             }
           }
           listAll = multi && mode === "all" && (all || 0) > 0;
-          const params = new URLSearchParams({ search: udiCompanySearch(name, wanted, listAll ? "all" : "any"), limit: String(PANEL_LIMIT), sort: udiSortParam("newest") });
+          const params = new URLSearchParams({ search: udiCompanySearch(names, wanted, listAll ? "all" : "any"), limit: String(PANEL_LIMIT), sort: udiSortParam("newest") });
           const data = await fetchOpenFda<UdiRaw>(`${UDI_API}?${params.toString()}`);
           list = data.results.map(normalizeUdi);
         }
         if (cancelled) return;
-        setSummary({ name, any, all, allPremarket, allExempt, anyPremarket, anyExempt });
+        setSummary({ labelers: names, breakdown, any, all, allPremarket, allExempt, anyPremarket, anyExempt });
         setDevices(list);
         setListedAll(listAll);
         setStatus("done");
@@ -168,24 +191,104 @@ export function UdiCompanyPanel({
     return () => {
       cancelled = true;
     };
-    // Keys stand in for the arrays so a re-render with equal codes does not refetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [namesKey, codesKey, mode]);
+    // Keys stand in for the arrays so a re-render with equal names/codes does not refetch.
+  }, [labelersKey, codesKey, mode]);
+
+  const submitAlias = () => {
+    const value = aliasDraft.trim();
+    if (!value || !onAddAlias) return;
+    onAddAlias(value);
+    setAliasDraft("");
+  };
+
+  const exportGapReport = async () => {
+    if (report.busy) return;
+    const names = labelersKey.split("|").filter(Boolean);
+    const wanted = codesKey ? codesKey.split(",") : [];
+    setReport({ busy: true, note: "Preparing the workbook…" });
+    try {
+      const multi = wanted.length > 1;
+      const progress = (label: string) => (loaded: number, target: number) => setReport({ busy: true, note: `Downloading ${label}: ${loaded.toLocaleString()} of ${target.toLocaleString()}…` });
+      const devices: UdiDevice[] = [];
+      const seen = new Set<string>();
+      const add = (raw: UdiRaw) => {
+        const device = normalizeUdi(raw);
+        if (seen.has(device.key) || devices.length >= PREMARKET_GAP_CAP) return;
+        seen.add(device.key);
+        devices.push(device);
+      };
+      // Devices carrying every selected code come first and are never crowded out by the cap.
+      let allTotal = 0;
+      let allExported = 0;
+      if (multi) {
+        const all = await fetchListingPages<UdiRaw>(UDI_API, udiCompanySearch(names, wanted, "all"), PREMARKET_GAP_CAP, progress("devices carrying every code"), udiSortParam("newest"));
+        allTotal = all.total;
+        all.results.forEach(add);
+        allExported = devices.length;
+      }
+      let anyTotal = 0;
+      if (devices.length < PREMARKET_GAP_CAP) {
+        const rest = await fetchListingPages<UdiRaw>(UDI_API, udiCompanySearch(names, wanted, "any"), PREMARKET_GAP_CAP, progress("remaining devices"), udiSortParam("newest"));
+        anyTotal = rest.total;
+        rest.results.forEach(add);
+      }
+      const rows = premarketGapRows(devices, wanted);
+      downloadExcel({
+        filename: sanitizeExportFilename("", `gudid-premarket-gap-${slug(company)}-${wanted.join("+") || "all-codes"}-${new Date().toISOString().slice(0, 10)}`),
+        sheetName: "Premarket gap",
+        columns: PREMARKET_GAP_COLUMNS.map((column) => ({ header: column.header, width: column.width })),
+        rows: rows.map((row) => PREMARKET_GAP_COLUMNS.map((column) => row[column.key])),
+      });
+      const truncated = (multi && allTotal > allExported) || anyTotal > rows.length;
+      const note = multi
+        ? `Exported ${allExported.toLocaleString()}${allTotal > allExported ? ` of ${allTotal.toLocaleString()}` : ""} device${allExported === 1 ? "" : "s"} carrying every selected code, plus ${(rows.length - allExported).toLocaleString()} more under any code${truncated ? ` (${PREMARKET_GAP_CAP.toLocaleString()}-row limit; openFDA pages 1,000 per call)` : ""}.`
+        : `Exported ${rows.length.toLocaleString()}${anyTotal > rows.length ? ` of ${anyTotal.toLocaleString()}` : ""} device records${anyTotal > rows.length ? ` (${PREMARKET_GAP_CAP.toLocaleString()}-row limit)` : ""}.`;
+      setReport({ busy: false, note });
+    } catch (caught) {
+      setReport({ busy: false, note: `Export failed: ${caught instanceof Error ? caught.message : "openFDA request failed"}` });
+    }
+  };
+
+  const labelerChips = (
+    <div className="labeler-chips" aria-label="GUDID labeler names searched">
+      <span className="strip-label"><Building2 size={11} /> Labelers</span>
+      {labelers.map((name) => {
+        const key = normalizeLabeler(name);
+        const isAlias = aliasSet.has(key);
+        const isGroup = !isAlias && key !== normalizeLabeler(company) && !alternates.some((alt) => normalizeLabeler(alt) === key);
+        return (
+          <span key={name} className={`applied-chip${isGroup ? " group" : ""}${isAlias ? " alias" : ""}`} title={isGroup ? `${group?.group || "Group"} member (app-maintained alias, from public ownership)` : isAlias ? "Added on this device" : "From the FDA registration"}>
+            {name}
+            {isAlias && onRemoveAlias && <button type="button" onClick={() => onRemoveAlias(name)} aria-label={`Remove labeler ${name}`} title="Remove this labeler name"><X size={11} /></button>}
+          </span>
+        );
+      })}
+      {onAddAlias && (
+        <form className="alias-form" onSubmit={(event) => { event.preventDefault(); submitAlias(); }}>
+          <input value={aliasDraft} onChange={(event) => setAliasDraft(event.target.value)} placeholder="Add a GUDID labeler name…" aria-label="Add a GUDID labeler name" />
+          <button type="submit" className="mini-action" disabled={!aliasDraft.trim()} aria-label="Add labeler name" title="Search this labeler name too"><Plus size={13} /></button>
+        </form>
+      )}
+    </div>
+  );
 
   if (status === "loading") {
-    return <div className="udi-panel-loading"><LoaderCircle className="spin" size={15} /> Checking FDA GUDID for {company}…</div>;
+    return <div className="udi-panel"><div className="udi-panel-loading"><LoaderCircle className="spin" size={15} /> Checking FDA GUDID for {labelers.length > 1 ? `${labelers.length} labeler names` : company}…</div></div>;
   }
   if (status === "error") {
-    return <div className="section-error"><CircleAlert size={15} /> {error}</div>;
+    return <div className="udi-panel"><div className="section-error"><CircleAlert size={15} /> {error}</div>{labelerChips}</div>;
   }
   if (!summary || summary.any === 0) {
     return (
-      <div className="panel-note">
-        <p>
-          No GUDID device records are published under the labeler name <b>{company}</b>
-          {selected.length ? <> for {selected.join(" + ")}</> : null}. Labelers file UDI under their own legal or brand entity — DEMANT A/S devices, for example, appear under Oticon A/S and SBO Hearing A/S — so the registration owner/operator and the GUDID labeler can differ.
-        </p>
-        {onOpenDevicesView && <button type="button" className="secondary" onClick={() => onOpenDevicesView(company)}><Barcode size={14} /> Search Devices (UDI)</button>}
+      <div className="udi-panel">
+        <div className="panel-note">
+          <p>
+            No GUDID device records are published under {labelers.length > 1 ? "these labeler names" : <>the labeler name <b>{company}</b></>}
+            {selected.length ? <> for {selected.join(" + ")}</> : null}. Labelers file UDI under their own legal or brand entity, which can differ from the FDA registration owner/operator — add the labeler name below if you know it.
+          </p>
+          {onOpenDevicesView && <button type="button" className="secondary" onClick={() => onOpenDevicesView(company)}><Barcode size={14} /> Search Devices (UDI)</button>}
+        </div>
+        {labelerChips}
       </div>
     );
   }
@@ -195,15 +298,17 @@ export function UdiCompanyPanel({
   const focusCount = multi ? summary.all ?? 0 : summary.any;
   const focusPremarket = multi ? summary.allPremarket ?? 0 : summary.anyPremarket;
   const focusExempt = multi ? summary.allExempt ?? 0 : summary.anyExempt;
+  const who = summary.breakdown.length > 1 ? `${company} (${summary.breakdown.length} labelers)` : summary.breakdown[0]?.name || company;
   const explanation = multi
     ? focusCount
-      ? `${summary.name} has ${focusCount.toLocaleString()} GUDID device record${focusCount === 1 ? "" : "s"} filed under both ${codesJoined}. ${focusPremarket ? `${focusPremarket.toLocaleString()} of them declare a premarket submission number` : "None of them declares a 510(k), PMA or De Novo number"}; ${focusExempt.toLocaleString()} ${focusExempt === 1 ? "is" : "are"} marked premarket-exempt by the labeler.`
-      : `${summary.name} publishes ${summary.any.toLocaleString()} device record${summary.any === 1 ? "" : "s"} under ${selected.join(" or ")}, but none carries every code on the same device record.`
-    : `${summary.name} publishes ${summary.any.toLocaleString()} device record${summary.any === 1 ? "" : "s"} under ${codesJoined || "these codes"}; ${focusPremarket ? `${focusPremarket.toLocaleString()} declare a premarket submission` : "none declares a premarket submission"} and ${focusExempt.toLocaleString()} ${focusExempt === 1 ? "is" : "are"} marked premarket-exempt.`;
+      ? `${who} has ${focusCount.toLocaleString()} GUDID device record${focusCount === 1 ? "" : "s"} filed under both ${codesJoined}. ${focusPremarket ? `${focusPremarket.toLocaleString()} of them declare a premarket submission number` : "None of them declares a 510(k), PMA or De Novo number"}; ${focusExempt.toLocaleString()} ${focusExempt === 1 ? "is" : "are"} marked premarket-exempt by the labeler.`
+      : `${who} publishes ${summary.any.toLocaleString()} device record${summary.any === 1 ? "" : "s"} under ${selected.join(" or ")}, but none carries every code on the same device record.`
+    : `${who} publishes ${summary.any.toLocaleString()} device record${summary.any === 1 ? "" : "s"} under ${codesJoined || "these codes"}; ${focusPremarket ? `${focusPremarket.toLocaleString()} declare a premarket submission` : "none declares a premarket submission"} and ${focusExempt.toLocaleString()} ${focusExempt === 1 ? "is" : "are"} marked premarket-exempt.`;
 
   return (
     <div className="udi-panel">
-      {summary.name !== company && <p className="panel-note">GUDID labeler name matched: <b>{summary.name}</b></p>}
+      {labelerChips}
+      {group && <p className="panel-note">Group aliases are maintained in this app from public ownership information, not from FDA data: <b>{group.group}</b> — {group.note}</p>}
       <div className="udi-summary">
         <div className="udi-tile"><b>{summary.any.toLocaleString()}</b><span>{multi ? `devices with any of ${selected.join(" / ")}` : `devices under ${codesJoined || "any code"}`}</span></div>
         {multi && <div className="udi-tile"><b>{(summary.all ?? 0).toLocaleString()}</b><span>carry all of {codesJoined}</span></div>}
@@ -211,6 +316,17 @@ export function UdiCompanyPanel({
         <div className="udi-tile"><b>{focusExempt.toLocaleString()}</b><span>{multi ? "of those marked premarket-exempt" : "marked premarket-exempt"}</span></div>
       </div>
       <p className="panel-note">{explanation}</p>
+      {summary.breakdown.length > 1 && (
+        <div className="udi-breakdown" aria-label="Devices per labeler">
+          {summary.breakdown.map((entry) => <span key={entry.name} className="code-count"><b>{entry.name}</b> {entry.count.toLocaleString()}</span>)}
+        </div>
+      )}
+      <div className="udi-report">
+        <button type="button" className="secondary" onClick={() => void exportGapReport()} disabled={report.busy}>
+          {report.busy ? <LoaderCircle className="spin" size={14} /> : <FileSpreadsheet size={14} />} Premarket gap report (Excel)
+        </button>
+        <span>{report.note || `Every device record under ${selected.join(" / ") || "these codes"} with its submission number or “None listed”, devices carrying every selected code first.`}</span>
+      </div>
       {devices.length > 0 && (
         <>
           <div className="udi-list">
@@ -218,7 +334,7 @@ export function UdiCompanyPanel({
           </div>
           <div className="udi-list-foot">
             <span>Showing {devices.length.toLocaleString()} of {(listedAll ? summary.all ?? 0 : summary.any).toLocaleString()} {listedAll ? `devices carrying all of ${codesJoined}` : "devices"} · newest published first</span>
-            {onOpenDevicesView && <button type="button" className="secondary" onClick={() => onOpenDevicesView(summary.name)}>Open in Devices (UDI) <ArrowUpRight size={13} /></button>}
+            {onOpenDevicesView && <button type="button" className="secondary" onClick={() => onOpenDevicesView(summary.breakdown[0]?.name || company)}>Open in Devices (UDI) <ArrowUpRight size={13} /></button>}
           </div>
         </>
       )}

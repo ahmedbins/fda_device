@@ -2,13 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { EMPTY_FILTERS, describeFilters, filtersFromParams, filtersToParams } from "../app/fda-shared.ts";
 import {
+  PREMARKET_GAP_COLUMNS,
+  UDI_LABELER_GROUPS,
   UDI_PM_EXEMPT,
   UDI_PREMARKET_EXISTS,
   accessGudidUrl,
   buildUdiSearch,
+  labelerGroupFor,
+  labelersFor,
   listingCodesForUdi,
   listingSearchForDevice,
+  normalizeLabeler,
   normalizeUdi,
+  parseUdiAliases,
+  premarketGapRows,
   udiCodesClause,
   udiCompanySearch,
   udiDeviceHasCodes,
@@ -159,4 +166,43 @@ test("sorting, AccessGUDID links and the udi view in URL state", () => {
   assert.equal(restored.filters.codeMatch, "all");
   assert.equal(filtersFromParams(new URLSearchParams("view=bogus")).view, "records");
   assert.equal(describeFilters({ ...EMPTY_FILTERS, productCodes: ["OSM", "KLW"], codeMatch: "all" }, "udi"), "OSM + KLW · All codes · Devices (UDI)");
+});
+
+test("labeler groups map registration owners to every GUDID labeler in the group", () => {
+  assert.equal(labelerGroupFor("DEMANT A/S")?.group, "Demant");
+  assert.equal(labelerGroupFor("demant a/s")?.group, "Demant", "case-insensitive");
+  assert.equal(labelerGroupFor("Oticon A/S")?.group, "Demant", "labeler names resolve too");
+  assert.equal(labelerGroupFor("Magnatone Hearing Aid Corp. dba Persona Medical")?.group, "Persona Medical");
+  assert.equal(labelerGroupFor("Starkey Laboratories, Inc."), null, "no group needed when the names already match");
+  assert.equal(labelerGroupFor("GN"), null, "short fragments never match a group");
+  assert.deepEqual(labelersFor(["DEMANT A/S"]), ["DEMANT A/S", "Oticon A/S", "Sbo Hearing A/S", "Bernafon AG", "Sonic Innovations, Inc."]);
+  assert.deepEqual(labelersFor(["Sonova AG", "Sonova Operations Center Vietnam Company Ltd"], ["Custom Labeler Ltd"]).slice(0, 3), ["Sonova AG", "Sonova Operations Center Vietnam Company Ltd", "Phonak AG"]);
+  assert.ok(labelersFor(["Sonova AG"], ["Custom Labeler Ltd", " custom labeler ltd "]).filter((name) => /custom/i.test(name)).length === 1, "aliases de-duplicate");
+  assert.ok(UDI_LABELER_GROUPS.every((group) => group.labelers.length && group.owners.length && group.note));
+  assert.equal(normalizeLabeler("  WS Audiology USA, Inc. "), "ws audiology usa inc");
+});
+
+test("multi-labeler searches use one OR clause, and user aliases parse defensively", () => {
+  assert.equal(udiCompanySearch(["Oticon A/S", "Sbo Hearing A/S"], ["OSM"], "any"), 'company_name:("Oticon A/S" OR "Sbo Hearing A/S") AND product_codes.code:"OSM"');
+  assert.equal(udiCompanySearch(["Oticon A/S"], [], "any"), 'company_name:"Oticon A/S"');
+  assert.deepEqual(parseUdiAliases(null), {});
+  assert.deepEqual(parseUdiAliases("[1,2]"), {});
+  assert.deepEqual(parseUdiAliases(JSON.stringify({ "demant a s": ["Oticon Medical AB", "", "Oticon Medical AB", 3] })), { "demant a s": ["Oticon Medical AB"] });
+});
+
+test("the premarket gap report puts devices with every code and no submission first", () => {
+  const both = normalizeUdi(RAW_HEARING_AID);
+  const withSubmission = normalizeUdi({ ...RAW_WITH_510K, product_codes: [{ code: "OSM" }, { code: "KLW" }], brand_name: "Alpha" });
+  const klwOnly = normalizeUdi({ ...RAW_WITH_510K, product_codes: [{ code: "KLW" }], brand_name: "Zeta" });
+  const rows = premarketGapRows([withSubmission, klwOnly, both], ["OSM", "KLW"]);
+  assert.deepEqual(rows.map((row) => [row.brand, row.carriesAll, row.premarket]), [
+    ["Signia", "Yes", "None listed"],
+    ["Alpha", "Yes", "K130514; P970029/S012"],
+    ["Zeta", "No", "K130514; P970029/S012"],
+  ]);
+  assert.equal(rows[0].pmExempt, "Yes");
+  assert.equal(rows[0].primaryDi, "05714880240504");
+  assert.equal(rows[0].codes, "OSM; KLW");
+  assert.ok(PREMARKET_GAP_COLUMNS.every((column) => column.key in rows[0]), "every column maps to a row field");
+  assert.deepEqual(premarketGapRows([klwOnly], []).map((row) => row.carriesAll), ["Yes"], "no selection means nothing is missing");
 });

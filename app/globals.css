@@ -318,6 +318,16 @@ td > span:not(.code-pill):not(.class-badge) { display: block; max-width: 280px; 
 .name-cell b { flex: 1 1 auto; }
 .row-filter { width: 22px; height: 22px; opacity: .5; }
 tr:hover .row-filter, .row-filter:focus-visible { opacity: 1; }
+.labeler-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.applied-chip.group { background: #f2e8cc; color: #6b4d18; }
+.applied-chip.alias { background: #dff1e4; color: #2f6647; }
+.alias-form { display: inline-flex; align-items: center; gap: 4px; }
+.alias-form input { min-height: 28px; width: 200px; padding: 0 9px; border: 1px solid #c5cfd3; border-radius: 14px; background: var(--white); color: var(--ink); font-size: 11px; }
+.alias-form input:focus { border-color: var(--ink); outline: none; }
+.udi-labeler { color: var(--ink); font-weight: 600; }
+.udi-breakdown { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.udi-report { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 14px; padding: 10px 12px; background: #f6fafc; border: 1px solid #cfe1e9; border-radius: 6px; }
+.udi-report > span { flex: 1 1 260px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .pagination { min-height: 76px; padding: 16px clamp(18px, 3vw, 38px); display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); }
 .pagination > span { color: var(--muted); font: 11px var(--font-roboto), sans-serif; }
 .pagination > div { display: flex; gap: 8px; }
