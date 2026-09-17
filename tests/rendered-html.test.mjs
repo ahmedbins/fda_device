@@ -3,17 +3,17 @@ import test from "node:test";
 
 const workerUrl = new URL(`../dist/server/index.js?test=${process.pid}-${Date.now()}`, import.meta.url);
 
-async function render(pathname) {
+async function render(pathname, init = { headers: { accept: "text/html" } }) {
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
+    new Request(`http://localhost${pathname}`, init),
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
 }
 
 test("server-renders all source and view routes", async () => {
-  for (const pathname of ["/fda/explorer", "/fda/monitoring", "/fcc/explorer", "/fcc/monitoring", "/hc/explorer", "/hc/monitoring"]) {
+  for (const pathname of ["/fda/explorer", "/fda/monitoring", "/fcc/explorer", "/fcc/monitoring", "/hc/explorer", "/hc/monitoring", "/iecee/explorer", "/iecee/monitoring"]) {
     const response = await render(pathname);
     assert.equal(response.status, 200, pathname);
     assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -22,6 +22,7 @@ test("server-renders all source and view routes", async () => {
     assert.match(html, />FDA</);
     assert.match(html, />FCC</);
     assert.match(html, />HC</);
+    assert.match(html, />IECEE</);
     assert.match(html, />Explorer</i);
     assert.match(html, />Monitoring</i);
   }
@@ -73,6 +74,43 @@ test("rejects invalid FCC API scope without contacting the upstream source", asy
   const response = await render("/api/fcc/search?fccId=AB");
   assert.equal(response.status, 400);
   assert.match(await response.text(), /at least three/i);
+});
+
+test("renders IECEE Explorer and Monitoring with honest source language", async () => {
+  const explorer = await (await render("/iecee/explorer")).text();
+  assert.match(explorer, /IECEE CB SCHEME/);
+  assert.match(explorer, /Certificate search/);
+  assert.match(explorer, /Product category/);
+  assert.match(explorer, /Certification body \(NCB\)/);
+  assert.match(explorer, /Electrical equipment for medical use/);
+  assert.match(explorer, /Household and similar equipment/);
+  assert.match(explorer, /first 10,000 matches/);
+  assert.match(explorer, /certificates\.iecee\.org/);
+
+  const monitoring = await (await render("/iecee/monitoring")).text();
+  assert.match(monitoring, /Recently issued certificates/);
+  assert.match(monitoring, /Cancelled or suspended/);
+  assert.match(monitoring, /not snapshot change detection/i);
+});
+
+test("rejects malformed IECEE relay requests without contacting the upstream source", async () => {
+  const badFacet = await render("/api/iecee/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: "sonova", terms: { manufacturer_name: { 1: ["SONOVA AG"] } } }) });
+  assert.equal(badFacet.status, 400);
+  assert.match(await badFacet.text(), /Unknown facet group manufacturer_name/);
+
+  const tooDeep = await render("/api/iecee/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: 9_999, size: 25 }) });
+  assert.equal(tooDeep.status, 400);
+  assert.match(await tooDeep.text(), /first 10,000 results/);
+
+  const notJson = await render("/api/iecee/search", { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+  assert.equal(notJson.status, 400);
+
+  const badId = await render("/api/iecee/certificate?id=abc");
+  assert.equal(badId.status, 400);
+  assert.match(await badId.text(), /numeric IECEE certificate id/);
+
+  const badTrademark = await render("/api/iecee/trademarks?q=%20");
+  assert.equal(badTrademark.status, 400);
 });
 
 test("server-renders the design-preview hub and FDA Explorer", async () => {

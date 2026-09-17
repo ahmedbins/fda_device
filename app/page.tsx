@@ -2,12 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  ArrowDown,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
-  ArrowUpDown,
   ArrowUpRight,
   Barcode,
   Building2,
@@ -104,6 +101,7 @@ import {
 } from "./fda-udi";
 import { UdiCompanyPanel, UdiDeviceDetail } from "./fda-udi-panel";
 import SourceNav from "./source-nav";
+import { HeaderCell, type HeaderSpec } from "./explorer-tools";
 import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
@@ -224,45 +222,6 @@ function PremarketLinks({ item, stop = false }: { item: RecordItem; stop?: boole
         );
       })}
     </>
-  );
-}
-
-type HeaderSpec = { key: string; label: string; numeric?: boolean; sortable: boolean; dir: SortDir | null; hint: string; open?: boolean };
-
-/** A table header that sorts when openFDA (or the loaded rows) can, explains itself when it cannot, and carries a drag handle for resizing. */
-function HeaderCell({ spec, resizing, onSort, onResizeStart, onResizeReset }: {
-  spec: HeaderSpec;
-  resizing: string;
-  onSort: (spec: HeaderSpec) => void;
-  onResizeStart: (event: ReactPointerEvent<HTMLElement>, key: string) => void;
-  onResizeReset: (key: string) => void;
-}) {
-  const handle = (
-    <div
-      className="col-resizer"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize column"
-      title="Drag to resize · double-click to reset"
-      onPointerDown={(event) => onResizeStart(event, spec.key)}
-      onClick={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => { event.stopPropagation(); onResizeReset(spec.key); }}
-    />
-  );
-  if (spec.open) return <th aria-label={spec.label} className={`open-col${resizing === spec.key ? " resizing" : ""}`}>{handle}</th>;
-  if (!spec.sortable) {
-    return <th className={`${spec.numeric ? "numeric-head" : ""}${resizing === spec.key ? " resizing" : ""}`}><span className="th-inner"><span className="th-label">{spec.label}</span></span>{handle}</th>;
-  }
-  return (
-    <th
-      className={`${spec.numeric ? "numeric-head " : ""}sortable${spec.dir ? " sorted" : ""}${resizing === spec.key ? " resizing" : ""}`}
-      aria-sort={spec.dir === "asc" ? "ascending" : spec.dir === "desc" ? "descending" : "none"}
-      title={spec.hint}
-      onClick={() => onSort(spec)}
-    >
-      <span className="th-inner"><span className="th-label">{spec.label}</span>{spec.dir === "asc" ? <ArrowUp size={12} /> : spec.dir === "desc" ? <ArrowDown size={12} /> : <ArrowUpDown size={12} className="dim" />}</span>
-      {handle}
-    </th>
   );
 }
 

@@ -158,12 +158,65 @@ The `licence` endpoint does **not** accept `company_name`. Company searches reso
 
 Confirmed watch scope: SONOVA AG, company ID `113080`.
 
+## IECEE CB Scheme certificates
+
+The IEC System of Conformity Assessment Schemes for Electrotechnical Equipment and Components (IECEE) publishes CB Test Certificates and related certificate types through its Online Certificate System (OCS):
+
+- Public search: [certificates.iecee.org](https://certificates.iecee.org/)
+- Search API used by that site: `POST https://ocs-iecee-api.iecee.org/api/search-es` (an Elasticsearch-style index of about 1.8 million certificates)
+- Certificate record: `GET https://ocs-iecee-api.iecee.org/api/proxy/deliverables/CERT/{id}`
+- Trademark suggestions: `GET https://ocs-iecee-api.iecee.org/api/search-trademarks?q=`
+- Browser CORS: `Access-Control-Allow-Origin: https://certificates.iecee.org` only, so the dashboard cannot call the API directly from a page
+
+### Same-origin relay
+
+Every IECEE request leaves the site through a relay on its own origin: `public/_worker.js` on Cloudflare Pages, the Vite middleware in `cloudflare-spa/vite.config.ts` for local preview, and `app/api/iecee/*` in the full-stack build. The relay:
+
+- accepts only the request shape the official front end sends (`from`, `size`, `query`, `sortBy`, `dateRanges`, `conjunctiveFacetGroups`, `terms`) and rejects anything else with HTTP 400 (`app/iecee-relay.ts`, mirrored in plain JavaScript inside the worker);
+- forwards the request with its own user agent, never forwards cookies in either direction, and caches answers at the edge (searches 5 minutes, certificate records 6 hours, trademark lookups 1 hour);
+- never exposes the certificate PDF, which the public API does not serve (the site links to the official certificate page instead).
+
+### Request and response shape
+
+| Body field | Meaning |
+| --- | --- |
+| `query` | Free text matched against manufacturer, applicant, trademark, product, model and certificate-number text. Quoted phrases are exact. |
+| `from`, `size` | Paging. `size` ≤ 1,000 and `from + size` ≤ 10,000 (the index result window); deeper pages fail upstream, so the app tells the user to narrow the search. |
+| `sortBy` | `[{"issue_date": "desc"}]`, `ref_number` or `last_update_date`. Relevance sorting returns a score of 0 for every hit, so the app defaults to newest issued. |
+| `dateRanges` | `{"issue_date": {"min": "YYYY-MM-DD", "max": "YYYY-MM-DD"}}`. Only `issue_date` filters; other dates are ignored upstream. |
+| `terms` | Facet filters keyed by group then level: `status`, `type`, `scope_categories`, `scopes` (level 1 = base standard, level 2 = edition), `org_name` (certification body), `trademark.for_agg` (lower-cased trademark key). |
+| `conjunctiveFacetGroups` | Groups whose selected values must **all** match. The Explorer uses it for “cites every selected standard”. |
+
+The response carries two searches. `primary` is the search text alone and drives the complete facet list; `secondary` applies the facet and date filters and holds the actual results and per-option counts. The app reads results from `secondary` (falling back to `primary`) and shows counts from both.
+
+### Fields shown
+
+| Index field | Shown as |
+| --- | --- |
+| `ref_number` | Certificate number (link to `https://certificates.iecee.org/deliverables/CERT/{id}`) |
+| `manufacturer_name`, `trademark`, `subject` | Manufacturer, trademark, product |
+| `org_name`, `org.address.country` | Certification body (NCB) and its country |
+| `type.level_1` | Certificate type (CB Test, Component, EMC, Aspect, Cyber Security, PV, statements of test results) |
+| `status.level_1` | Valid, Cancelled or Suspended |
+| `scope_categories` | CB Scheme product-category codes |
+| `scopes` | Standards: level 1 base standard, level 2 edition, level 3 amendment |
+| `issue_date`, `last_update_date`, `expiration_date` | Issued, updated, expiry |
+
+The certificate record adds model(s), ratings, national differences, manufacturer/factory/applicant parties, the NCB address, status message and cancellation details, the scheme code and whether a PDF exists on the IECEE system.
+
+### App-maintained labels
+
+- **Product-category names** (`IECEE_CATEGORIES` in `app/iecee-core.ts`) mirror the IECEE product-category list; the index only carries codes such as `MED` or `ITAV`. Unknown codes are shown as codes.
+- **Certificate families** are found by searching the base certificate number and keeping references that extend it (`-A1`, `/M1`, `-M2`). This is a text match on certificate numbers, not an IECEE relationship field.
+- **Presets** (`app/iecee-config.ts`) are plain text searches (“sonova”, “hearing aid”), not corporate-structure lookups; the Sonova preset currently returns SONOVA AG, Sonova Consumer Hearing GmbH and Sonova Communications AG.
+- **Monitoring** uses issue dates and IECEE last-update timestamps. An update means the record was edited or its status changed; the public record does not say what changed. The updated list checks the 1,000 most recently updated certificates in scope.
+
 ## Refreshing FCC data
 
 When the official snapshot is refreshed:
 
-1. Open the FCC EAS endpoint for each confirmed scope.
-2. Preserve the exact returned records and the UTC capture timestamp.
+1. Open the FCC EAS endpoint for each confirmed scope (`https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=KWC` and `?fccId=2A3UL`). The FCC's edge returns HTTP 403 to command-line clients and scripts, so use a real browser: load the KWC URL, then from that page's console fetch both scopes (same origin) and parse each `<fccidInfo>` element into an object keyed by its child tag names. The 2026-09-17 refresh was captured this way; the records were identical to the 2026-08-11 capture.
+2. Preserve the exact returned records and the UTC capture timestamp in `app/fcc-official-snapshot.ts` (`capturedAt`, `records`); keep the confirmed `scopes` block.
 3. Update only confirmed preset scopes in `app/fcc-config.ts`.
 4. Run `npm test`.
 5. Deploy Internal Use Only and verify Explorer, grouped grantees, dossiers, monitoring windows and source links.

@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
+import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
 import {
   FCC_EAS_API,
@@ -46,8 +47,30 @@ import { clearFccCache, fetchFccExhibits, importOfficialFccResponse, searchFcc }
 import { downloadExcel, type ExcelColumn, type ExcelValue } from "./excel-export";
 import { ExportDialog, asExportLink, defaultExportFilename, loadExportSettings, sanitizeExportFilename, saveExportSettings } from "./export-dialog";
 
-type SortKey = "date-desc" | "date-asc" | "fcc-id" | "grantee";
 type ColumnKey = "fccId" | "grantee" | "granteeCode" | "authorizationDate" | "purpose" | "description" | "equipmentClass" | "rf" | "location" | "source" | "open";
+type SortColumn = Exclude<ColumnKey, "open" | "source">;
+type SortKey = `${SortColumn}-${SortDir}`;
+const SORT_COLUMNS: SortColumn[] = ["fccId", "grantee", "granteeCode", "authorizationDate", "purpose", "description", "equipmentClass", "rf", "location"];
+const DEFAULT_SORT: SortKey = "authorizationDate-desc";
+const SORT_PRESETS: { value: SortKey; label: string }[] = [
+  { value: "authorizationDate-desc", label: "Newest grant" },
+  { value: "authorizationDate-asc", label: "Oldest grant" },
+  { value: "fccId-asc", label: "FCC ID" },
+  { value: "grantee-asc", label: "Grantee" },
+];
+const LEGACY_SORTS: Record<string, SortKey> = { "date-desc": "authorizationDate-desc", "date-asc": "authorizationDate-asc", "fcc-id": "fccId-asc", grantee: "grantee-asc" };
+
+function parseSortKey(value: string | null): SortKey {
+  if (!value) return DEFAULT_SORT;
+  if (LEGACY_SORTS[value]) return LEGACY_SORTS[value];
+  const match = value.match(/^(.+)-(asc|desc)$/);
+  return match && (SORT_COLUMNS as string[]).includes(match[1]) ? value as SortKey : DEFAULT_SORT;
+}
+
+function splitSort(sort: SortKey): { key: SortColumn; dir: SortDir } {
+  const at = sort.lastIndexOf("-");
+  return { key: sort.slice(0, at) as SortColumn, dir: sort.slice(at + 1) as SortDir };
+}
 type ResultView = "records" | "grantees";
 
 const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
@@ -104,7 +127,7 @@ const FCC_VISIBLE_TO_EXPORT: Partial<Record<ColumnKey, string[]>> = {
 
 function initialState() {
   const preset = getFccPreset(DEFAULT_FCC_PRESET);
-  const fallback = { query: "", scopes: preset?.granteeCodes || [] as string[], from: "", to: "", purpose: "", sort: "date-desc" as SortKey, pageSize: 25, resultView: "records" as ResultView, presetId: preset?.id || "", autorun: !!preset };
+  const fallback = { query: "", scopes: preset?.granteeCodes || [] as string[], from: "", to: "", purpose: "", sort: DEFAULT_SORT, pageSize: 25, resultView: "records" as ResultView, presetId: preset?.id || "", autorun: !!preset };
   if (typeof window === "undefined") return fallback;
   const params = new URLSearchParams(window.location.search);
   const query = normalizeFccScope(params.get("q") || "");
@@ -116,8 +139,7 @@ function initialState() {
   const from = params.get("from") || "";
   const to = params.get("to") || "";
   const purpose = params.get("purpose") || "";
-  const sortParam = params.get("sort") as SortKey | null;
-  const sort = (["date-desc", "date-asc", "fcc-id", "grantee"] as SortKey[]).includes(sortParam || "" as SortKey) ? sortParam as SortKey : "date-desc";
+  const sort = parseSortKey(params.get("sort"));
   const requestedSize = Number(params.get("rows"));
   const pageSize = PAGE_SIZES.includes(requestedSize) ? requestedSize : 25;
   const resultView = params.get("view") === "grantees" ? "grantees" as ResultView : "records" as ResultView;
@@ -132,7 +154,7 @@ function syncUrl(query: string, scopes: string[], from: string, to: string, purp
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (purpose) params.set("purpose", purpose);
-  if (sort !== "date-desc") params.set("sort", sort);
+  if (sort !== DEFAULT_SORT) params.set("sort", sort);
   if (pageSize !== 25) params.set("rows", String(pageSize));
   if (resultView !== "records") params.set("view", resultView);
   if (presetId) params.set("preset", presetId);
@@ -140,13 +162,26 @@ function syncUrl(query: string, scopes: string[], from: string, to: string, purp
   window.history.replaceState(null, "", value ? `${window.location.pathname}?${value}` : window.location.pathname);
 }
 
+function sortValue(record: NormalizedFccRecord, key: SortColumn): string | undefined {
+  if (key === "fccId") return record.fccId;
+  if (key === "grantee") return record.granteeName;
+  if (key === "granteeCode") return record.granteeCode;
+  if (key === "authorizationDate") return record.authorizationDate;
+  if (key === "purpose") return record.applicationPurpose;
+  if (key === "description") return record.equipmentDescription;
+  if (key === "equipmentClass") return record.equipmentClasses?.join("; ");
+  if (key === "rf") return formatFccRfBands(record.rfBands) || undefined;
+  return fccLocation(record) === "—" ? undefined : fccLocation(record);
+}
+
 function sortRecords(records: NormalizedFccRecord[], sort: SortKey) {
-  return [...records].sort((a, b) => {
-    if (sort === "fcc-id") return a.fccId.localeCompare(b.fccId) || (b.authorizationDate || "").localeCompare(a.authorizationDate || "");
-    if (sort === "grantee") return (a.granteeName || "").localeCompare(b.granteeName || "") || a.fccId.localeCompare(b.fccId);
-    if (sort === "date-asc") return (a.authorizationDate || "9999").localeCompare(b.authorizationDate || "9999");
-    return (b.authorizationDate || "").localeCompare(a.authorizationDate || "") || a.fccId.localeCompare(b.fccId);
-  });
+  const { key, dir } = splitSort(sort);
+  return [...records].sort((a, b) => compareValues(sortValue(a, key), sortValue(b, key), dir) || a.fccId.localeCompare(b.fccId) || (b.authorizationDate || "").localeCompare(a.authorizationDate || ""));
+}
+
+/** Short label for a search, used by the recent-searches list. */
+function describeSearch(query: string, scopes: string[], purpose: string, from: string, to: string, presetLabel?: string) {
+  return [presetLabel || [query, ...scopes].filter(Boolean).join(" + "), purpose, from ? `from ${from}` : "", to ? `to ${to}` : ""].filter(Boolean).join(" · ") || "FCC search";
 }
 
 function displayDate(value?: string) {
@@ -213,6 +248,9 @@ export default function FccExplorerPage() {
   const scopeInput = useRef<HTMLInputElement>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const request = useRef<AbortController | null>(null);
+  const widthTools = useColumnWidths("fcc-col-widths-records", columns);
+  const recents = useRecentSearches("fcc-recent-searches");
+  const rememberRecent = recents.remember;
 
   const effectiveScopes = useMemo(() => [...new Set([query, ...scopes].filter(Boolean))], [query, scopes]);
   const filteredRecords = useMemo(() => sortRecords(records.filter((record) => {
@@ -254,6 +292,7 @@ export default function FccExplorerPage() {
       setGrantees(next.grantees);
       setSearchMeta(next);
       setRetrievedAt(new Date(next.retrievedAt));
+      rememberRecent(recentSearchParams(window.location.search), describeSearch(query, scopes, purpose, from, to, getFccPreset(presetId)?.label));
       if (next.unresolvedScopes.length) setCoverageNote(`The bundled official FCC snapshot does not cover ${next.unresolvedScopes.join(", ")}. Import the official FCC XML/JSON response below to analyze it here.`);
     } catch (caught) {
       if (controller.signal.aborted) return;
@@ -262,7 +301,7 @@ export default function FccExplorerPage() {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [effectiveScopes, from, pageSize, presetId, purpose, query, resultView, scopes, sort, to]);
+  }, [effectiveScopes, from, pageSize, presetId, purpose, query, rememberRecent, resultView, scopes, sort, to]);
 
   useEffect(() => {
     if (initial.autorun) queueMicrotask(() => runSearch());
@@ -392,9 +431,9 @@ export default function FccExplorerPage() {
   const renderCell = (record: NormalizedFccRecord, column: ColumnKey) => {
     if (column === "fccId") return <b className="fcc-id">{record.fccId}</b>;
     if (column === "grantee") return <><b>{record.granteeName || "—"}</b><span>FCC grantee</span></>;
-    if (column === "granteeCode") return <span className="source-cell">{record.granteeCode || "—"}</span>;
+    if (column === "granteeCode") return record.granteeCode ? <button type="button" className="source-cell clickable" onClick={(event) => { event.stopPropagation(); navigateWithParams((params) => { params.set("ids", record.granteeCode!); params.delete("q"); params.delete("preset"); }); }} title={`Only show authorizations under grantee code ${record.granteeCode}`}>{record.granteeCode}</button> : <span className="source-cell">—</span>;
     if (column === "authorizationDate") return <span className="date-cell">{displayDate(record.authorizationDate)}</span>;
-    if (column === "purpose") return <span className="cell-list">{record.applicationPurpose || "—"}</span>;
+    if (column === "purpose") return record.purposeCategory ? <button type="button" className="cell-list clickable" onClick={(event) => { event.stopPropagation(); setPurpose((current) => current === record.purposeCategory ? "" : record.purposeCategory || ""); setPage(0); }} title={`Only show ${record.purposeCategory} records (FCC-reported purpose: ${record.applicationPurpose || "—"})`}>{record.applicationPurpose || "—"}</button> : <span className="cell-list">{record.applicationPurpose || "—"}</span>;
     if (column === "description") return <span className="cell-list">{record.equipmentDescription || "—"}</span>;
     if (column === "equipmentClass") return <span className="cell-list">{record.equipmentClasses?.join("; ") || "—"}</span>;
     if (column === "rf") return <span className="cell-list">{formatFccRfBands(record.rfBands) || "—"}</span>;
@@ -404,9 +443,47 @@ export default function FccExplorerPage() {
   };
 
   const sourcePresentation = fccSourcePresentation(searchMeta?.sourceMode, !!retrievedAt);
+  const activePreset = getFccPreset(presetId);
+  const sortState = splitSort(sort);
+  const headerSpec = (column: ColumnKey): HeaderSpec => {
+    const option = COLUMN_OPTIONS.find((entry) => entry.key === column)!;
+    if (column === "open") return { key: column, label: option.label, sortable: false, dir: null, open: true };
+    if (column === "source") return { key: column, label: option.label, sortable: false, dir: null };
+    return { key: column, label: option.label, sortable: true, dir: sortState.key === column ? sortState.dir : null, hint: "Sort by this column (every loaded record, on this device)" };
+  };
+  const sortByHeader = (spec: HeaderSpec) => {
+    if (!spec.sortable || widthTools.justDragged()) return;
+    const next = toggleSort(sortState, spec.key as SortColumn);
+    const nextSort: SortKey = `${next.key}-${next.dir}`;
+    setSort(nextSort);
+    setPage(0);
+    syncUrl(query, scopes, from, to, purpose, nextSort, pageSize, resultView, presetId);
+  };
+  const appliedChips: AppliedChip[] = [
+    ...(activePreset ? [{ key: "preset", label: activePreset.label }] : []),
+    ...(query ? [{ key: "query", label: `“${query}”` }] : []),
+    ...scopes.map((scope) => ({ key: `scope:${scope}`, label: `Scope ${scope}` })),
+    ...(purpose ? [{ key: "purpose", label: purpose }] : []),
+    ...(from ? [{ key: "from", label: `Granted from ${from}` }] : []),
+    ...(to ? [{ key: "to", label: `Granted to ${to}` }] : []),
+  ];
+  const removeChip = (chip: AppliedChip) => {
+    if (chip.key === "purpose") { setPurpose(""); setPage(0); return; }
+    if (chip.key === "from") { setFrom(""); setPage(0); return; }
+    if (chip.key === "to") { setTo(""); setPage(0); return; }
+    navigateWithParams((params) => {
+      if (chip.key === "preset") { params.delete("preset"); if (activePreset?.granteeCodes.length && !params.get("ids")) params.delete("ids"); }
+      if (chip.key === "query") params.delete("q");
+      if (chip.key.startsWith("scope:")) {
+        const remaining = scopes.filter((scope) => scope !== chip.key.slice(6));
+        params.delete("preset");
+        if (remaining.length) params.set("ids", remaining.join(",")); else params.delete("ids");
+      }
+    });
+  };
   const limitedCoverage = !!searchMeta?.unresolvedScopes.length && !records.length;
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
-  const selectedHistory = selected ? sortRecords(records.filter((record) => record.fccId === selected.fccId), "date-desc") : [];
+  const selectedHistory = selected ? sortRecords(records.filter((record) => record.fccId === selected.fccId), DEFAULT_SORT) : [];
   const selectedEasParts = selected ? fccOfficialIdParts(selected.fccId) : {};
   const selectedGranteeGroup = selectedGrantee ? groupedRecords.find((group) => group.key === selectedGrantee) : undefined;
   const selectedRegistry = selectedGranteeGroup?.granteeCode ? grantees.find((grantee) => grantee.granteeCode === selectedGranteeGroup.granteeCode) : undefined;
@@ -438,6 +515,7 @@ export default function FccExplorerPage() {
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="FCC equipment authorization explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
+          <div className="filter-panel-inner">
           <div className="panel-heading">
             <div><span>02</span><h2>Filters</h2></div>
             <div className="panel-heading-actions">
@@ -493,6 +571,8 @@ export default function FccExplorerPage() {
             <button className="primary" onClick={() => runSearch()} disabled={loading}><Search size={15} /> Search FCC</button>
             <button className="text-button" onClick={reset}>Reset</button>
           </div>
+          <RecentSearches compact entries={recents.recent} onApply={(entry) => window.location.assign(`${window.location.pathname}?${entry.params}`)} onForget={recents.forget} onClear={recents.clear} />
+          </div>
         </aside>
 
         <section className="results-panel">
@@ -501,10 +581,10 @@ export default function FccExplorerPage() {
             <div className="toolbar-actions">
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <div className="view-toggle"><button className={resultView === "records" ? "active" : ""} onClick={() => { setResultView("records"); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, pageSize, "records", presetId); }}>Records</button><button className={resultView === "grantees" ? "active" : ""} onClick={() => { setResultView("grantees"); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, pageSize, "grantees", presetId); }}>Grantees</button></div>
-              {resultView === "records" && <label className="matrix-sort">Sort <select value={sort} onChange={(event) => { const next = event.target.value as SortKey; setSort(next); setPage(0); syncUrl(query, scopes, from, to, purpose, next, pageSize, resultView, presetId); }}><option value="date-desc">Newest grant</option><option value="date-asc">Oldest grant</option><option value="fcc-id">FCC ID</option><option value="grantee">Grantee</option></select></label>}
+              {resultView === "records" && <label className="matrix-sort">Sort <select value={sort} onChange={(event) => { const next = event.target.value as SortKey; setSort(next); setPage(0); syncUrl(query, scopes, from, to, purpose, next, pageSize, resultView, presetId); }}>{SORT_PRESETS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}{!SORT_PRESETS.some((option) => option.value === sort) && <option value={sort}>{`${COLUMN_OPTIONS.find((option) => option.key === sortState.key)?.label || sortState.key} ${sortState.dir === "asc" ? "↑" : "↓"}`}</option>}</select></label>}
               {resultView === "records" && <details ref={columnPicker} className="column-picker">
                 <summary className="secondary"><Columns3 size={14} /> Columns <ChevronDown size={13} /></summary>
-                <div className="column-menu"><div className="column-menu-head"><div><b>Visible columns</b><span>Choose FCC fields</span></div><button onClick={() => setColumns(DEFAULT_COLUMNS)}>Reset</button></div><div className="column-options">{COLUMN_OPTIONS.map((option) => <label key={option.key}><input type="checkbox" checked={columns.includes(option.key)} onChange={() => toggleColumn(option.key)} disabled={columns.length === 1 && columns.includes(option.key)} /><span><b>{option.label}</b><small>{option.hint}</small></span></label>)}</div></div>
+                <div className="column-menu"><div className="column-menu-head"><div><b>Visible columns</b><span>Choose FCC fields</span></div><span>{widthTools.fixedLayout && <button type="button" onClick={widthTools.resetWidths}>Reset widths</button>}<button type="button" onClick={() => setColumns(DEFAULT_COLUMNS)}>Reset</button></span></div><div className="column-options">{COLUMN_OPTIONS.map((option) => <label key={option.key}><input type="checkbox" checked={columns.includes(option.key)} onChange={() => toggleColumn(option.key)} disabled={columns.length === 1 && columns.includes(option.key)} /><span><b>{option.label}</b><small>{option.hint}</small></span></label>)}</div></div>
               </details>}
               {resultView === "records" && <label className="page-size">Rows <select value={pageSize} onChange={(event) => { const next = Number(event.target.value); setPageSize(next); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, next, resultView, presetId); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>}
               <button className="icon-button" onClick={copyLink} aria-label="Copy shareable FCC URL" title="Copy shareable URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
@@ -514,6 +594,7 @@ export default function FccExplorerPage() {
             </div>
           </div>
 
+          <AppliedFilters chips={appliedChips} onRemove={removeChip} onClear={reset} />
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>FCC search needs attention</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
           {coverageNote && <div className="coverage-banner"><Database size={17} /><div><b>Official source coverage</b><span>{coverageNote}</span>{searchMeta?.unresolvedScopes[0] && <a href={`${FCC_EAS_API}?fccId=${encodeURIComponent(searchMeta.unresolvedScopes[0])}`} target="_blank" rel="noreferrer">Open the official FCC response <ExternalLink size={12} /></a>}</div></div>}
           {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting the FCC Equipment Authorization source…</div>}
@@ -521,7 +602,7 @@ export default function FccExplorerPage() {
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p></div>
           : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>{limitedCoverage ? "This FCC scope is not in the bundled snapshot." : "No approved FCC IDs matched."}</h3><p>{limitedCoverage ? "The live FCC source is unavailable from this app, so an empty result here does not mean the FCC ID is unapproved. Open the official response and import it below." : "Check the FCC ID, use a shorter prefix, or remove the date filters."}</p><div className="empty-actions">{!limitedCoverage && <button className="secondary" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}<button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
           : resultView === "records" && filteredRecords.length > 0 && <>
-            <div className="table-wrap"><table className="fcc-table"><thead><tr>{columns.map((column) => <th key={column}>{COLUMN_OPTIONS.find((option) => option.key === column)?.label}</th>)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
+            <div className="table-wrap"><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
             <div className="pagination"><span>{filteredRecords.length.toLocaleString()} matching authorization record{filteredRecords.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}</span><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>
           </>}
           {resultView === "grantees" && groupedRecords.length > 0 && <div className="fcc-grantee-grid">{groupedRecords.map((group) => <button key={group.key} className="fcc-grantee-card" onClick={() => setSelectedGrantee(group.key)}><span className="grantee-code">{group.granteeCode || "FCC"}</span><h3>{group.granteeName || "Unidentified grantee"}</h3><p>{group.fccIds} FCC IDs · {group.records.length} authorization records</p><dl><div><dt>Most recent</dt><dd>{displayDate(group.latestAuthorization)}</dd></div><div><dt>Location</dt><dd>{fccLocation(group.records[0])}</dd></div></dl><span className="open-profile">Open grantee profile →</span></button>)}</div>}

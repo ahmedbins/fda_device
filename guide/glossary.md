@@ -21,6 +21,7 @@ Every technical term used in this guide, in plain language. Alphabetical.
 | **HTML** | The file type that describes a page's *content and structure* — headings, tables, buttons. |
 | **JavaScript** | The programming language browsers run; it makes pages interactive and fetches data. |
 | **JSON** | The structured text format APIs answer in — labels and values in curly braces, made for programs to read. |
+| **IECEE / CB Scheme** | The IEC's worldwide conformity-assessment system for electrical equipment. A CB Test Certificate shows a product was tested against an IEC standard by a recognised laboratory; the site searches the public certificate register. |
 | **MDALL** | Health Canada's Medical Devices Active Licence Listing — the registry of devices licensed for sale in Canada. |
 | **Monitoring** | The site's "what happened recently?" view for each source. Its counterpart is **Explorer**, the search view. |
 | **Normalization** | Translating each source's vocabulary and formats into one consistent internal shape — while always keeping the original wording attached. |

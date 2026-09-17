@@ -32,6 +32,8 @@ Before a release, manually verify:
 - FDA Monitoring loads 510(k), recall and adverse-event sections.
 - Health Canada / MDALL Explorer loads SONOVA AG licences from the official API.
 - Health Canada / MDALL Monitoring shows first-issued and ended licences for the selected window.
+- IECEE Explorer loads the Sonova group preset through the `/api/iecee/search` relay, facet counts appear, and a certificate drawer loads model, ratings and standards.
+- IECEE Monitoring shows issued, updated and cancelled/suspended certificates for the selected window.
 - FCC Explorer defaults to verified records rather than a blank state.
 - Complete and partial FCC-ID searches work for covered scopes.
 - Grantee cards, profiles and authorization dossiers open.
@@ -64,7 +66,7 @@ The working tree should be clean, and the SHA should match the internally tested
 
 ### 3. Verify Main
 
-Smoke-test all six regulatory routes and confirm that the deployed source/provenance labels match the validated Internal deployment.
+Smoke-test all eight regulatory routes and confirm that the deployed source/provenance labels match the validated Internal deployment.
 
 ## Build details
 

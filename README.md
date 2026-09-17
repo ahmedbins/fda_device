@@ -1,6 +1,6 @@
 # Sonova Regulatory Data Hub
 
-One workspace for searching and monitoring public FDA medical-device records, FCC equipment authorizations, and Health Canada MDALL licences.
+One workspace for searching and monitoring public FDA medical-device records, FCC equipment authorizations, Health Canada MDALL licences, and IECEE CB Scheme certificates.
 
 ![Sonova Regulatory Data Hub](public/og-regulatory.png)
 
@@ -26,10 +26,10 @@ Everything below this point is the quicker, more technical reference for people 
 
 The top navigation has two independent choices:
 
-1. **Source:** FDA, FCC, or HC (Health Canada / MDALL)
+1. **Source:** FDA, FCC, HC (Health Canada / MDALL), or IECEE (CB Scheme certificates)
 2. **View:** Explorer or Monitoring
 
-That creates six main workflows:
+That creates eight main workflows:
 
 | Workflow | What it is for |
 | --- | --- |
@@ -39,6 +39,8 @@ That creates six main workflows:
 | **FCC Monitoring** | Review recent original authorizations and FCC-labelled authorization changes for configured scopes. |
 | **HC Explorer** | Search Health Canada MDALL licences, companies, device names, and identifiers. |
 | **HC Monitoring** | Review recently issued and ended Canadian medical device licences. |
+| **IECEE Explorer** | Search the IECEE CB Scheme certificate index by manufacturer, trademark, model, product or certificate number; narrow by status, product category, standard (any or every selected standard), certification body, trademark and issue date; open the full certificate record with model, ratings, standards with editions, national differences and parties; find a certificate's amendments; export Excel workbooks. |
+| **IECEE Monitoring** | Review recently issued certificates, older certificates that IECEE updated, and cancellations or suspensions for a manufacturer, trademark or watch scope. |
 
 Every workflow keeps source links and timestamps visible. FCC views also distinguish official source fields from app-derived labels and preserve the raw FCC record.
 
@@ -58,7 +60,7 @@ The normal release path is:
 
 1. Build and test a commit.
 2. Deploy it to Internal Use Only.
-3. Verify all FDA, FCC and Health Canada routes.
+3. Verify all FDA, FCC, Health Canada and IECEE routes.
 4. Deploy that exact commit to Main.
 
 This keeps the two sites consistent while giving unfinished changes a safe validation target. ([Friendly Guide, Chapter 8](guide/08-how-the-website-goes-live.md) tells this story in plain language.)
@@ -88,7 +90,7 @@ That command creates a production build and runs the parsing, provenance, render
 
 ### 1. Routes stay small
 
-The route files under `app/fda/`, `app/fcc/` and `app/hc/` select shared page components. Most feature code lives in a small number of clearly named modules:
+The route files under `app/fda/`, `app/fcc/`, `app/hc/` and `app/iecee/` select shared page components. Most feature code lives in a small number of clearly named modules:
 
 | File | Responsibility |
 | --- | --- |
@@ -98,7 +100,10 @@ The route files under `app/fda/`, `app/fcc/` and `app/hc/` select shared page co
 | `app/fcc-monitor-page.tsx` | FCC watchlists, date windows, activity summaries, authorization tables, and change categories. |
 | `app/mdall-explorer-page.tsx` | Health Canada MDALL search, licence dossiers, company profiles, and CSV export. |
 | `app/mdall-monitor-page.tsx` | Health Canada watchlists and recent issued/ended licences. |
-| `app/source-nav.tsx` | Shared FDA/FCC/HC and Explorer/Monitoring navigation. |
+| `app/iecee-explorer-page.tsx` | IECEE certificate search UI, facet filters, certificate drawer, certificate families, and Excel export. |
+| `app/iecee-monitor-page.tsx` | IECEE watch scopes, date windows, issued/updated/cancelled certificate tables. |
+| `app/source-nav.tsx` | Shared FDA/FCC/HC/IECEE and Explorer/Monitoring navigation. |
+| `app/explorer-tools.tsx` | Shared explorer tools: sortable and resizable table headers with widths remembered per device, applied-filter chips, and recent searches (used by every Explorer). |
 | `app/globals.css` | Shared responsive visual system for every route. |
 
 ### 2. Data logic is separate from the UI
@@ -116,7 +121,12 @@ The page components do not need to understand every source-specific detail:
 | `app/fcc-official-snapshot.ts` | Exact provenance-labelled FCC EAS records used for reliable covered-scope startup. |
 | `app/mdall-core.ts` | Health Canada MDALL normalization, status labels, and grouping. |
 | `app/mdall-service.ts` | Official MDALL API search, company joins, and device lookup. |
+| `app/iecee-core.ts` | IECEE search-body builder, response parsing (results, facets, primary/secondary searches), certificate and detail normalization, URL state, certificate families. |
+| `app/iecee-service.ts` | IECEE searches, certificate records, trademark suggestions and export paging through the same-origin relay. |
+| `app/iecee-relay.ts` | Validation shared by every IECEE relay: only the official search shape is forwarded upstream. |
+| `app/iecee-config.ts` | IECEE presets (plain text searches, not ownership lookups). |
 | `app/api/fcc/search/route.ts` | Server-side FCC proxy used by the full-stack build when the upstream service permits it. |
+| `app/api/iecee/*/route.ts` | Server-side IECEE relay routes for the full-stack build (`public/_worker.js` serves the same routes on Cloudflare Pages). |
 
 The separation matters: parsing and source rules can be tested without rendering React, while UI work can consume one normalized record shape.
 
@@ -160,13 +170,16 @@ The FCC endpoint is public, but FCC/Akamai and browser CORS policies can block s
 ```text
 app/
   api/fcc/search/        FCC server-proxy route
+  api/iecee/             IECEE relay routes (search, certificate, trademarks)
   fda/                   FDA route entry points
   fcc/                   FCC route entry points
   hc/                    Health Canada MDALL route entry points
+  iecee/                 IECEE certificate route entry points
   *-page.tsx             Shared Explorer and Monitoring page components
   fda-shared.ts          FDA helpers
   fcc-core.ts            FCC parsing and normalization
   fcc-service.ts         FCC source orchestration
+  iecee-*.ts             IECEE core, relay rules, service and presets
 cloudflare-spa/          Static Pages entry points and Vite configuration
 guide/                   The Friendly Guide — plain-English walkthrough of the project
 public/                  Icons and social-preview assets
@@ -199,6 +212,7 @@ Cloudflare deployment requires an authenticated Wrangler session with access to 
 | [FCC Equipment Authorization System](https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=KWC) | FCC Explorer and Monitoring |
 | [FCC Open Data grantee registrations](https://opendata.fcc.gov/Engineering-Technology/EAS-Equipment-Authorization-Grantee-Registrations/3b3k-34jp) | Confirmed FCC grantee profiles |
 | [Health Canada MDALL API](https://health-products.canada.ca/api/documentation/mdall-documentation-en.html) | HC Explorer and Monitoring |
+| [IECEE CB Scheme certificate search](https://certificates.iecee.org/) (`ocs-iecee-api.iecee.org/api/search-es`, relayed same-origin) | IECEE Explorer and Monitoring |
 | [Canada Gazette Parts I, II and III](https://gazette.gc.ca/rp-pr/publications-eng.html) | Canada Gazette intelligence (design preview) |
 
 Read [Data sources and provenance](docs/DATA-SOURCES.md) before changing source mappings, FCC presets, normalized categories, or snapshot records.

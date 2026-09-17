@@ -17,7 +17,7 @@ There is intentionally no `main-site/` and `internal-site/` duplication. Environ
 
 ### Cloudflare Pages: Main and Internal
 
-`cloudflare-spa/vite.config.ts` produces static HTML and JavaScript entry points for all FDA, FCC and Health Canada routes. Both Pages projects deploy the output from `work/cloudflare-pages/`.
+`cloudflare-spa/vite.config.ts` produces static HTML and JavaScript entry points for all FDA, FCC, Health Canada and IECEE routes. Both Pages projects deploy the output from `work/cloudflare-pages/`.
 
 - Main project: `fda-device-index`
 - Internal project: `fda-device-internaluseonly`
@@ -25,6 +25,7 @@ There is intentionally no `main-site/` and `internal-site/` duplication. Environ
 - Confirmed FCC scopes resolve from the bundled official snapshot.
 - The app attempts the live FCC endpoint where the browser supports it.
 - Uncovered FCC scopes can be imported from the official FCC XML/JSON response.
+- IECEE certificate requests go through `public/_worker.js` (`/api/iecee/search`, `/api/iecee/certificate`, `/api/iecee/trademarks`) because the IECEE API only allows browser requests from certificates.iecee.org; the relay validates the body, strips upstream cookies and caches answers at the edge.
 
 ## Route composition
 
@@ -37,7 +38,9 @@ app/fcc-explorer-page.tsx     FCC Explorer implementation
 app/fcc-monitor-page.tsx      FCC Monitoring implementation
 app/mdall-explorer-page.tsx   Health Canada MDALL Explorer
 app/mdall-monitor-page.tsx    Health Canada MDALL Monitoring
-app/source-nav.tsx            FDA/FCC/HC and Explorer/Monitoring navigation
+app/iecee-explorer-page.tsx  IECEE certificate Explorer
+app/iecee-monitor-page.tsx   IECEE certificate Monitoring
+app/source-nav.tsx            FDA/FCC/HC/IECEE and Explorer/Monitoring navigation
 app/fda-shared.ts             FDA normalization and export helpers
 app/fcc-core.ts               FCC parsing, normalization, grouping, provenance
 app/fcc-service.ts            FCC snapshot/live/import orchestration
@@ -46,6 +49,10 @@ app/fcc-official-snapshot.ts  Provenance-labelled official FCC response snapshot
 app/mdall-core.ts             MDALL parsing, status labels, grouping
 app/mdall-service.ts          Official Health Canada MDALL API orchestration
 app/mdall-config.ts           Confirmed MDALL company watchlists
+app/iecee-core.ts             IECEE search body, response/facet parsing, normalization, URL state
+app/iecee-service.ts          IECEE relay client: searches, certificate records, export paging
+app/iecee-relay.ts            IECEE relay validation shared by worker, dev middleware and routes
+app/iecee-config.ts           IECEE presets (text searches)
 ```
 
 ## Data flow
@@ -57,6 +64,9 @@ flowchart TD
   F --> FN["FDA normalization"]
   S -->|HC| H["Health Canada MDALL API"]
   H --> HN["MDALL normalization"]
+  S -->|IECEE| IR["Same-origin relay (_worker.js)"]
+  IR --> IE["IECEE certificate search API"]
+  IE --> IN["IECEE normalization"]
   S -->|FCC| C{"Scope covered by official snapshot?"}
   C -->|Yes| SN["Snapshot records"]
   C -->|No| L["Live FCC request"]
@@ -67,6 +77,7 @@ flowchart TD
   IM --> N
   FN --> UI
   HN --> UI
+  IN --> UI
   N --> UI
 ```
 

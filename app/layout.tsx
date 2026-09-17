@@ -13,10 +13,10 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const socialImage = `${protocol}://${host}/og-regulatory.png`;
   return {
-    title: "Sonova Regulatory Data Hub | FDA, FCC and Health Canada",
-    description: "Explore and monitor authoritative FDA device data, FCC equipment authorizations, and Health Canada MDALL licences.",
-    openGraph: { title: "Sonova Regulatory Data Hub", description: "FDA, FCC and Health Canada MDALL records in one workspace.", images: [{ url: socialImage, width: 1200, height: 630 }] },
-    twitter: { card: "summary_large_image", title: "Sonova Regulatory Data Hub", description: "FDA, FCC and Health Canada MDALL records in one workspace.", images: [socialImage] },
+    title: "Sonova Regulatory Data Hub | FDA, FCC, Health Canada and IECEE",
+    description: "Explore and monitor authoritative FDA device data, FCC equipment authorizations, Health Canada MDALL licences, and IECEE CB Scheme certificates.",
+    openGraph: { title: "Sonova Regulatory Data Hub", description: "FDA, FCC, Health Canada MDALL and IECEE certificate records in one workspace.", images: [{ url: socialImage, width: 1200, height: 630 }] },
+    twitter: { card: "summary_large_image", title: "Sonova Regulatory Data Hub", description: "FDA, FCC, Health Canada MDALL and IECEE certificate records in one workspace.", images: [socialImage] },
   };
 }
 

@@ -53,9 +53,13 @@ The FCC has a public lookup that, given an ID or the start of one, returns every
 
 Health Canada publishes a clean, documented API for its licence listing. We use it to look up licences, the companies that hold them, and the devices covered by each licence. One wrinkle worth knowing: the API can't answer every question in one step. To find "all licences held by Sonova," the site first asks "what is Sonova's company ID number?" and then asks "what licences belong to company 113080?" — two trips to the service window, stitched together behind the scenes.
 
-## Making three vocabularies speak one language
+### 4. IECEE CB Scheme certificates (worldwide — electrical safety)
 
-Each agency describes things its own way. The FDA says "applicant," the FCC says "grantee," Health Canada says "licence holder" — all meaning roughly "the company." Dates arrive in different formats. Statuses use different words.
+The IECEE runs the CB Scheme: a test laboratory in one country tests a product against an IEC standard, and certification bodies elsewhere accept that certificate instead of testing again. Every certificate is listed on a public search site. That site is powered by a search service which, unlike openFDA, only agrees to talk to the IECEE site itself — a browser on our site would be turned away. So the site relays the question through its own address (Chapter 6 explains this trick): the page asks our server, our server asks IECEE, and the answer comes back with the facet counts (how many certificates per status, category, standard and certification body) that the IECEE site uses too.
+
+## Making four vocabularies speak one language
+
+Each agency describes things its own way. The FDA says "applicant," the FCC says "grantee," Health Canada says "licence holder," IECEE says "manufacturer" and "applicant" — all meaning roughly "the company." Dates arrive in different formats. Statuses use different words.
 
 So for each source, the site has a **normalization** step: code whose only job is to translate the source's raw answer into one consistent internal shape that the tables and screens understand. Crucially — remember Chapter 1's rule — normalizing never *replaces* the original. The government's exact wording stays stored on every record and visible in the interface, with our simplified label alongside it.
 
@@ -64,6 +68,7 @@ flowchart LR
   FDA["openFDA answer<br/>(FDA's vocabulary)"] --> N["Normalization<br/>(translate, keep the original)"]
   FCC["FCC answer<br/>(FCC's vocabulary)"] --> N
   HC["MDALL answer<br/>(Health Canada's vocabulary)"] --> N
+  IE["IECEE answer<br/>(CB Scheme vocabulary)"] --> N
   N --> T["One consistent format<br/>for tables and screens"]
 ```
 

@@ -11,24 +11,25 @@ Medical devices — hearing aids, pacemakers, insulin pumps — are regulated. B
 - **The FDA** (United States Food and Drug Administration) tracks which companies are registered to make devices, which devices they list, which devices got cleared for sale, which were recalled, and which had problems reported.
 - **The FCC** (United States Federal Communications Commission) tracks any device that uses radio waves — which includes modern hearing aids, because they use Bluetooth. Every such device needs an FCC authorization before it can be sold in the US.
 - **Health Canada** keeps a list of every medical device licensed for sale in Canada, called **MDALL** (the Medical Devices Active Licence Listing).
+- **IECEE** (the IEC's conformity-assessment system for electrical equipment) keeps a worldwide register of **CB Scheme certificates** — the safety test certificates that let a product such as a hearing-aid charger be accepted by certification bodies in other countries without retesting.
 
-All of this information is **public**. Anyone can look at it. But it lives on three different government websites, each with its own clunky search form, its own vocabulary, and no easy way to watch for *new* activity. If your job involves keeping an eye on these records — say, for Sonova, a company that makes hearing aids — checking three sites by hand is slow and easy to get wrong.
+All of this information is **public**. Anyone can look at it. But it lives on four different official websites, each with its own clunky search form, its own vocabulary, and no easy way to watch for *new* activity. If your job involves keeping an eye on these records — say, for Sonova, a company that makes hearing aids — checking four sites by hand is slow and easy to get wrong.
 
 ## The solution
 
-This project is the **Sonova Regulatory Data Hub**: one website that talks to all three government sources and presents their records in a single, consistent place.
+This project is the **Sonova Regulatory Data Hub**: one website that talks to all four official sources and presents their records in a single, consistent place.
 
 The site gives you two ways to look at each source:
 
 - **Explorer** — for searching. "Show me every device Sonova has registered with the FDA." You can filter results, open the details of any record, and download the results as a spreadsheet.
-- **Monitoring** — for watching. "What happened recently?" It shows new FDA clearances, new recalls, new adverse-event reports, new FCC authorizations, and newly issued or ended Canadian licences.
+- **Monitoring** — for watching. "What happened recently?" It shows new FDA clearances, new recalls, new adverse-event reports, new FCC authorizations, newly issued or ended Canadian licences, and newly issued, updated or cancelled IECEE certificates.
 
-Three sources × two views = six screens, and that's the whole app:
+Four sources × two views = eight screens, and that's the whole app:
 
-|  | FDA | FCC | Health Canada |
-| --- | --- | --- | --- |
-| **Explorer** | Search registrations & listed devices | Search FCC IDs & authorizations | Search Canadian licences |
-| **Monitoring** | Recent clearances, recalls, adverse events | Recent authorizations & changes | Recently issued/ended licences |
+|  | FDA | FCC | Health Canada | IECEE |
+| --- | --- | --- | --- | --- |
+| **Explorer** | Search registrations & listed devices | Search FCC IDs & authorizations | Search Canadian licences | Search CB Scheme certificates |
+| **Monitoring** | Recent clearances, recalls, adverse events | Recent authorizations & changes | Recently issued/ended licences | Recently issued, updated or cancelled certificates |
 
 ## One rule above all others
 

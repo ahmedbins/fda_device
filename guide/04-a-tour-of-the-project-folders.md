@@ -26,10 +26,12 @@ This is the heart of the project. Almost everything the website *does* is descri
 | `fcc-monitor-page.tsx` | FCC Monitoring |
 | `mdall-explorer-page.tsx` | Health Canada Explorer |
 | `mdall-monitor-page.tsx` | Health Canada Monitoring |
-| `source-nav.tsx` | The navigation bar shared by all six |
+| `iecee-explorer-page.tsx` | IECEE certificate Explorer |
+| `iecee-monitor-page.tsx` | IECEE certificate Monitoring |
+| `source-nav.tsx` | The navigation bar shared by all eight |
 | `globals.css` | The one stylesheet — colors, spacing, layout — for the whole site |
 
-**Data files** know how to talk to the sources and translate their answers (Chapter 3's normalization). For example, `fcc-core.ts` knows how to read the FCC's raw answers, `fcc-service.ts` decides which FCC source to try in which order, and `mdall-service.ts` handles the two-step Health Canada lookups.
+**Data files** know how to talk to the sources and translate their answers (Chapter 3's normalization). For example, `fcc-core.ts` knows how to read the FCC's raw answers, `fcc-service.ts` decides which FCC source to try in which order, `mdall-service.ts` handles the two-step Health Canada lookups, and `iecee-core.ts` turns the site's filters into the exact question the IECEE search service expects (with `iecee-relay.ts` checking every question before it leaves the site).
 
 Why keep screens and data separate? So each half can change — and be tested — without breaking the other. The person adjusting how a table looks doesn't need to touch the code that parses FCC records, and vice versa. It's the same reason a restaurant separates the dining room from the kitchen.
 
