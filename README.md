@@ -118,7 +118,8 @@ The page components do not need to understand every source-specific detail:
 | `app/fcc-core.ts` | FCC XML/JSON parsing, date normalization, conservative purpose mapping, confirmed ID-part derivation, deduplication, grouping, and monitoring windows. |
 | `app/fcc-service.ts` | Orchestrates the FCC snapshot, live request, server proxy, cache, grantee registry, and manual official-response import. |
 | `app/fcc-config.ts` | Explicitly confirmed FCC presets and watchlist scopes. |
-| `app/fcc-official-snapshot.ts` | Exact provenance-labelled FCC EAS records used for reliable covered-scope startup. |
+| `app/fcc-official-snapshot.ts` | Exact provenance-labelled FCC EAS records, the offline fallback behind the scheduled capture. |
+| `cron/fcc-snapshot/` | Scheduled Cloudflare Worker that captures the confirmed FCC scopes twice a day (the FCC blocks automated requests, so it goes through a reader relay) and serves them to the site. |
 | `app/mdall-core.ts` | Health Canada MDALL normalization, status labels, and grouping. |
 | `app/mdall-service.ts` | Official MDALL API search, company joins, and device lookup. |
 | `app/iecee-core.ts` | IECEE search-body builder, response parsing (results, facets, primary/secondary searches), certificate and detail normalization, URL state, certificate families. |
@@ -155,7 +156,7 @@ flowchart TD
   N --> V["Explorer or Monitoring view"]
 ```
 
-The FCC endpoint is public, but FCC/Akamai and browser CORS policies can block some automated request modes. The app treats that as a coverage limitation—not evidence that a record does not exist. Confirmed scopes load from the labelled official snapshot, and uncovered scopes can be imported from the official XML/JSON response. ([Friendly Guide, Chapter 6](guide/06-when-a-source-wont-answer.md) explains the reasoning behind this fallback ladder.)
+The FCC endpoint is public, but FCC/Akamai and browser CORS policies can block some automated request modes. The app treats that as a coverage limitation—not evidence that a record does not exist. Confirmed scopes load from a scheduled capture that a Cloudflare Worker refreshes twice a day (with the bundled official copy as fallback), and uncovered scopes can be imported from the official XML/JSON response. ([Friendly Guide, Chapter 6](guide/06-when-a-source-wont-answer.md) explains the reasoning behind this fallback ladder.)
 
 ### 5. Two production build paths share the same UI
 
@@ -181,6 +182,7 @@ app/
   fcc-service.ts         FCC source orchestration
   iecee-*.ts             IECEE core, relay rules, service and presets
 cloudflare-spa/          Static Pages entry points and Vite configuration
+cron/fcc-snapshot/       Scheduled FCC capture Worker (cron + KV)
 guide/                   The Friendly Guide — plain-English walkthrough of the project
 public/                  Icons and social-preview assets
 tests/                   Unit, rendered-route, API, and regression tests
@@ -198,6 +200,7 @@ docs/                    Deeper architecture, provenance, and release guides
 | `npm run build:pages` | Create the static Cloudflare Pages build. |
 | `npm run deploy:internal` | Build and deploy Internal Use Only. |
 | `npm run deploy:main` | Build and deploy Main. |
+| `npx wrangler deploy --config cron/fcc-snapshot/wrangler.toml` | Deploy the scheduled FCC capture Worker. |
 
 Cloudflare deployment requires an authenticated Wrangler session with access to the existing Pages projects.
 

@@ -34,7 +34,7 @@ Before a release, manually verify:
 - Health Canada / MDALL Monitoring shows first-issued and ended licences for the selected window.
 - IECEE Explorer loads the Sonova group preset through the `/api/iecee/search` relay, facet counts appear, and a certificate drawer loads model, ratings and standards.
 - IECEE Monitoring shows issued, updated and cancelled/suspended certificates for the selected window.
-- FCC Explorer defaults to verified records rather than a blank state.
+- FCC Explorer shows “FCC data as of” a capture time from the last day, and the drawer's evidence section says the record was captured automatically.
 - Complete and partial FCC-ID searches work for covered scopes.
 - Grantee cards, profiles and authorization dossiers open.
 - FCC source mode and capture/retrieval timestamps are visible.
@@ -67,6 +67,16 @@ The working tree should be clean, and the SHA should match the internally tested
 ### 3. Verify Main
 
 Smoke-test all eight regulatory routes and confirm that the deployed source/provenance labels match the validated Internal deployment.
+
+## The FCC capture Worker
+
+`cron/fcc-snapshot` is a separate Cloudflare Worker (`fcc-snapshot-refresh`) with a cron trigger and the `FCC_SNAPSHOT` KV namespace. It is deployed independently of the two Pages projects:
+
+```bash
+npx wrangler deploy --config cron/fcc-snapshot/wrangler.toml
+```
+
+After deploying, `curl -X POST https://fcc-snapshot-refresh.<account>.workers.dev/refresh` runs a capture immediately and `GET /latest` shows the run summary. The Pages worker reaches it through the URL in `public/_worker.js` (`FCC_CAPTURE_WORKER`) and `app/fcc-capture.ts`.
 
 ## Build details
 

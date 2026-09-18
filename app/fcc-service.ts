@@ -11,14 +11,68 @@ import {
   type FccSearchResult,
   type NormalizedFccRecord,
   type RawFccRecord,
-} from "./fcc-core";
-import { parseFccidExhibits, parseFccidMarkdown } from "./fcc-index";
-import type { FccExhibit } from "./fcc-core";
-import { FCC_OFFICIAL_SNAPSHOT } from "./fcc-official-snapshot";
-import { FCC_OFFICIAL_GRANTS } from "./fcc-official-grants";
+} from "./fcc-core.ts";
+import { parseFccidExhibits, parseFccidMarkdown } from "./fcc-index.ts";
+import type { FccExhibit } from "./fcc-core.ts";
+import { FCC_OFFICIAL_SNAPSHOT } from "./fcc-official-snapshot.ts";
+import { FCC_OFFICIAL_GRANTS } from "./fcc-official-grants.ts";
 
 const CACHE_MS = 5 * 60 * 1000;
-type ScopeResult = { records: NormalizedFccRecord[]; resolved: boolean; sourceMode?: "live" | "official_snapshot" | "public_index" };
+type ScopeResult = { records: NormalizedFccRecord[]; resolved: boolean; sourceMode?: "live" | "official_capture" | "official_snapshot" | "public_index"; dataAsOf?: string };
+
+/**
+ * The scheduled Worker (cron/fcc-snapshot) captures the confirmed scopes from the FCC twice a day and
+ * the Pages worker relays its latest capture here. It is the primary FCC source; the bundled copy in
+ * fcc-official-snapshot.ts only serves when the capture cannot be reached.
+ */
+export const FCC_CURRENT_PATH = "/api/fcc/current";
+export type FccCaptureSource = "official" | "official_relay" | "public_index";
+export type FccCurrentCapture = {
+  refreshedAt: string;
+  scopes: Record<string, { scope: string; capturedAt: string; source: FccCaptureSource; records: RawFccRecord[]; recordCount?: number }>;
+};
+let currentCapture: { expires: number; value: FccCurrentCapture | null } | null = null;
+let currentCaptureRequest: Promise<FccCurrentCapture | null> | null = null;
+
+function isCapture(value: unknown): value is FccCurrentCapture {
+  return !!value && typeof value === "object" && typeof (value as FccCurrentCapture).refreshedAt === "string" && !!(value as FccCurrentCapture).scopes && typeof (value as FccCurrentCapture).scopes === "object";
+}
+
+/** Latest scheduled capture, cached for five minutes; null when the relay or the Worker is unavailable. */
+export async function fetchFccCurrentCapture(signal?: AbortSignal): Promise<FccCurrentCapture | null> {
+  if (currentCapture && currentCapture.expires > Date.now()) return currentCapture.value;
+  if (currentCaptureRequest) return currentCaptureRequest;
+  currentCaptureRequest = (async () => {
+    try {
+      const response = await fetch(FCC_CURRENT_PATH, { signal, headers: { accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload: unknown = await response.json();
+      const value = isCapture(payload) ? payload : null;
+      currentCapture = { expires: Date.now() + CACHE_MS, value };
+      return value;
+    } catch {
+      currentCapture = { expires: Date.now() + 30_000, value: null };
+      return null;
+    } finally {
+      currentCaptureRequest = null;
+    }
+  })();
+  return currentCaptureRequest;
+}
+
+/** Records for a scope from the scheduled capture, or null when the capture does not cover it. */
+function captureScopeResult(capture: FccCurrentCapture | null, normalized: string): ScopeResult | null {
+  if (!capture) return null;
+  const entry = Object.values(capture.scopes).find((item) => item && typeof item.scope === "string" && normalized.startsWith(normalizeFccScope(item.scope)) && Array.isArray(item.records));
+  if (!entry) return null;
+  const retrievedAt = new Date().toISOString();
+  const official = entry.source !== "public_index";
+  const records = entry.records
+    .map((raw) => normalizeFccRecord(raw, retrievedAt, { confirmedCodes, sourceMode: official ? "official_capture" : "public_index", snapshotCapturedAt: entry.capturedAt }))
+    .filter((record): record is NormalizedFccRecord => record !== null && record.fccId.startsWith(normalized))
+    .map(applyOfficialGrantFields);
+  return { records, resolved: true, sourceMode: official ? "official_capture" : "public_index", dataAsOf: entry.capturedAt };
+}
 
 const cache = new Map<string, { expires: number; result: ScopeResult }>();
 const inflight = new Map<string, Promise<ScopeResult>>();
@@ -122,6 +176,11 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
   const request = (async () => {
     const timed = requestSignal(signal);
     try {
+      const captured = captureScopeResult(await fetchFccCurrentCapture(timed.signal), normalized);
+      if (captured) {
+        cache.set(normalized, { expires: Date.now() + CACHE_MS, result: captured });
+        return captured;
+      }
       let records: NormalizedFccRecord[] | undefined;
       let sourceMode: ScopeResult["sourceMode"] = "live";
       if (typeof window !== "undefined" && directBrowserSupport !== false) {
@@ -217,14 +276,19 @@ export async function searchFcc(scopes: string[], signal?: AbortSignal): Promise
       ? "mixed"
       : modes.has("live")
         ? "live"
-        : modes.has("public_index")
-          ? "public_index"
-          : "official_snapshot";
+        : modes.has("official_capture")
+          ? "official_capture"
+          : modes.has("public_index")
+            ? "public_index"
+            : "official_snapshot";
+  const captureDates = batches.map((batch) => batch.dataAsOf).filter((value): value is string => !!value).sort();
+  const dataAsOf = captureDates[0] || (modes.has("official_snapshot") ? FCC_OFFICIAL_SNAPSHOT.capturedAt : undefined);
   return {
     records,
     grantees,
     retrievedAt: new Date().toISOString(),
     sourceMode,
+    dataAsOf,
     snapshotCapturedAt: sourceMode === "official_snapshot" || sourceMode === "mixed" ? FCC_OFFICIAL_SNAPSHOT.capturedAt : undefined,
     resolvedScopes,
     unresolvedScopes,
@@ -241,6 +305,7 @@ export function importOfficialFccResponse(body: string, scopes: string[] = []): 
 }
 
 export function clearFccCache(scopes?: string[]) {
+  currentCapture = null;
   if (!scopes) cache.clear();
   else scopes.forEach((scope) => cache.delete(normalizeFccScope(scope)));
 }

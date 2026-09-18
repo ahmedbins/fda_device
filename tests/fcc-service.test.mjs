@@ -37,3 +37,66 @@ test("imports an official FCC XML response for an uncovered scope", () => {
   assert.equal(records[0].sourceMode, "official_import");
   assert.equal(records[0].applicationPurpose, "Original Equipment");
 });
+
+test("uses the scheduled FCC capture as the primary source and reports when the data is from", async () => {
+  const { clearFccCache, searchFcc } = await import("../app/fcc-service.ts");
+  clearFccCache();
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url === "/api/fcc/current") {
+      return new Response(JSON.stringify({
+        refreshedAt: "2026-09-18T06:00:12.000Z",
+        scopes: {
+          KWC: { scope: "KWC", capturedAt: "2026-09-18T06:00:10.000Z", source: "official_relay", recordCount: 2, records: [
+            { address: "444 Commerce St. N/A", applicationPurpose: "Original Equipment", city: "Aurora", country: "United States", FCCId: "KWC-NEW1", grantDate: "09/17/2026", grantee: "Sonova USA Inc.", state: "IL", zipCode: "60504" },
+            { address: "444 Commerce St. N/A", applicationPurpose: "Original Equipment", city: "Aurora", country: "United States", FCCId: "KWC-ERF", grantDate: "06/11/2026", grantee: "Sonova USA Inc.", state: "IL", zipCode: "60504" },
+          ] },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("opendata.fcc.gov")) return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  try {
+    const result = await searchFcc(["KWC"]);
+    assert.equal(result.sourceMode, "official_capture");
+    assert.equal(result.dataAsOf, "2026-09-18T06:00:10.000Z");
+    assert.deepEqual(result.records.map((record) => record.fccId), ["KWC-NEW1", "KWC-ERF"]);
+    assert.equal(result.records[0].sourceMode, "official_capture");
+    assert.equal(result.records[0].authorizationDate, "2026-09-17");
+    assert.equal(result.records[0].snapshotCapturedAt, "2026-09-18T06:00:10.000Z");
+    assert.ok(urls.filter((url) => url === "/api/fcc/current").length === 1, "the capture is fetched once and cached");
+
+    const narrowed = await searchFcc(["KWC-ERF"]);
+    assert.deepEqual(narrowed.records.map((record) => record.fccId), ["KWC-ERF"], "a full FCC ID narrows the capture to that ID");
+    assert.equal(urls.filter((url) => url === "/api/fcc/current").length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearFccCache();
+  }
+});
+
+test("falls back to the bundled FCC copy when the capture relay is unavailable", async () => {
+  const { clearFccCache, searchFcc } = await import("../app/fcc-service.ts");
+  clearFccCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url === "/api/fcc/current") return new Response("relay down", { status: 502 });
+    if (url.includes("opendata.fcc.gov")) return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  try {
+    const result = await searchFcc(["2A3UL"]);
+    assert.equal(result.sourceMode, "official_snapshot");
+    assert.equal(result.dataAsOf, FCC_OFFICIAL_SNAPSHOT.capturedAt);
+    assert.ok(result.records.length >= 30);
+    assert.equal(result.records[0].sourceMode, "official_snapshot");
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearFccCache();
+  }
+});

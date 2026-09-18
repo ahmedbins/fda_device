@@ -1,0 +1,15 @@
+# Scheduled refresher for the FCC equipment-authorization snapshot (see README.md).
+name = "fcc-snapshot-refresh"
+main = "src/index.ts"
+compatibility_date = "2025-12-01"
+workers_dev = true
+
+[triggers]
+crons = ["0 6,18 * * *"]
+
+[[kv_namespaces]]
+binding = "FCC_SNAPSHOT"
+id = "0a2285a04abf4e499d29e9d9a40806bb"
+
+[vars]
+FCC_SCOPES = "KWC,2A3UL"

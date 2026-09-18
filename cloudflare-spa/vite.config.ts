@@ -84,6 +84,9 @@ function gazetteProxy(): Plugin {
 
 // Local stand-in for the Pages worker's IECEE relay (see public/_worker.js): the IECEE certificate API only
 // allows browser requests from certificates.iecee.org, so the page posts to this same-origin route instead.
+// Latest scheduled FCC capture (cron/fcc-snapshot); see public/_worker.js.
+const FCC_CAPTURE_WORKER = "https://fcc-snapshot-refresh.ahmedbinsaeed1997.workers.dev";
+
 function ieceeProxy(): Plugin {
   type Req = { url?: string; method?: string; on: (event: string, handler: (chunk?: Buffer | string) => void) => void };
   type Res = { statusCode: number; setHeader: (k: string, v: string) => void; end: (body?: string | Buffer) => void };
@@ -134,6 +137,9 @@ function ieceeProxy(): Plugin {
       const target = ieceeCertificateUpstream(url.searchParams.get("id") || "");
       if (!target) return json(res, 400, { error: "id must be a numeric IECEE certificate id." });
       return relay(res, target, {}, 21_600);
+    }
+    if (url.pathname === "/api/fcc/current") {
+      return relay(res, `${FCC_CAPTURE_WORKER}/snapshot`, {}, 600);
     }
     if (url.pathname === "/api/iecee/trademarks") {
       const target = ieceeTrademarkUpstream(url.searchParams.get("q") || "");

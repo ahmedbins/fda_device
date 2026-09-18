@@ -74,7 +74,17 @@ Official documentation: [openFDA device APIs](https://open.fda.gov/apis/device/)
 
 The endpoint accepts a complete FCC ID or an initial prefix. It returns XML in a normal browser. FCC/Akamai policies and browser CORS rules can block automated server-side or embedded requests even while the same URL works when opened directly. An FCC account is not required for this endpoint, and geographic location is not the cause of that request-mode difference.
 
-### Official bundled snapshot
+### Scheduled capture (primary FCC source)
+
+The FCC endpoint answers HTTP 403 to automated clients, including Cloudflare Workers, so the site cannot query it at request time. Instead a scheduled Cloudflare Worker, `cron/fcc-snapshot` (`fcc-snapshot-refresh`), captures the confirmed scopes (`KWC`, `2A3UL`) twice a day (06:00 and 18:00 UTC):
+
+1. It tries the official endpoint directly (kept in case the FCC ever allows it).
+2. It fetches the official endpoint through the r.jina.ai reader in raw-source mode, which returns the FCC's own XML records re-serialised with lower-case tags. Records captured this way carry `source: "official_relay"` and show as "Official FCC EAS response, captured automatically twice a day".
+3. Only if both fail does it fall back to the fccid.io public index, stored and shown as `public_index`, never as official.
+
+Captures live in the `FCC_SNAPSHOT` KV namespace with the previous capture and a 30-run history of what changed. The Pages worker relays `GET /api/fcc/current` to the Worker's `/snapshot` route (edge-cached 10 minutes), and `app/fcc-service.ts` uses that capture as the primary source for the confirmed scopes: the pages show "FCC data as of <capture time>" and "Pulled <page load time>", exactly like the other sources. A failed run never overwrites the last good capture.
+
+### Official bundled copy (fallback)
 
 The repository includes `app/fcc-official-snapshot.ts`, generated from exact official FCC EAS responses and labelled with its capture time.
 
@@ -213,7 +223,7 @@ The certificate record adds model(s), ratings, national differences, manufacture
 
 ## Refreshing FCC data
 
-When the official snapshot is refreshed:
+The scheduled Worker refreshes the confirmed scopes automatically (see “Scheduled capture” above). The bundled copy in `app/fcc-official-snapshot.ts` is only the offline fallback; refresh it occasionally so a Worker outage never shows very old data. When the bundled copy is refreshed:
 
 1. Open the FCC EAS endpoint for each confirmed scope (`https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=KWC` and `?fccId=2A3UL`). The FCC's edge returns HTTP 403 to command-line clients and scripts, so use a real browser: load the KWC URL, then from that page's console fetch both scopes (same origin) and parse each `<fccidInfo>` element into an object keyed by its child tag names. The 2026-09-17 refresh was captured this way; the records were identical to the 2026-08-11 capture.
 2. Preserve the exact returned records and the UTC capture timestamp in `app/fcc-official-snapshot.ts` (`capturedAt`, `records`); keep the confirmed `scopes` block.

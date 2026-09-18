@@ -1,4 +1,7 @@
 const FCC_API = "https://apps.fcc.gov/OETLabServices/getFCCIDList";
+// Scheduled capture of the confirmed FCC scopes (cron/fcc-snapshot): the FCC blocks automated requests,
+// so a Worker captures the official records twice a day and this relay serves its latest capture.
+const FCC_CAPTURE_WORKER = "https://fcc-snapshot-refresh.ahmedbinsaeed1997.workers.dev";
 const JINA = "https://r.jina.ai/";
 const FCCID_IO = "https://fccid.io";
 
@@ -62,6 +65,37 @@ async function fetchFccidIndex(fccId, includeExhibits = false) {
     if (exhibitMarkdown && /pdf|ID Label|Test Report|Cover Letter/i.test(exhibitMarkdown)) pages.push(exhibitMarkdown);
   }
   return pages;
+}
+
+async function fccCurrent(ctx) {
+  const target = `${FCC_CAPTURE_WORKER}/snapshot`;
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheKey = new Request(target, { method: "GET" });
+  if (cache) {
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const hit = new Response(cached.body, cached);
+      hit.headers.set("x-fcc-capture-cache", "HIT");
+      return hit;
+    }
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const upstream = await fetch(target, { signal: controller.signal, headers: { accept: "application/json", "user-agent": "Sonova-Regulatory-Data/1.0" } });
+    const body = await upstream.text();
+    if (!upstream.ok) return Response.json({ error: `The FCC capture service answered HTTP ${upstream.status}.` }, { status: upstream.status === 404 ? 404 : 502 });
+    const response = new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=600", "x-fcc-capture-cache": "MISS" },
+    });
+    if (cache && ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
+  } catch (error) {
+    return Response.json({ error: `The FCC capture service could not be reached: ${error instanceof Error ? error.message : "unknown error"}` }, { status: 502 });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function fccSearch(request) {
@@ -311,6 +345,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/fcc/search") return fccSearch(request);
+    if (url.pathname === "/api/fcc/current") return fccCurrent(ctx);
     if (url.pathname === "/api/gazette/source") return gazetteSource(request, ctx);
     if (url.pathname === "/api/iecee/search") return ieceeSearch(request, ctx);
     if (url.pathname === "/api/iecee/certificate") return ieceeCertificate(request, ctx);

@@ -51,11 +51,13 @@ test("renders FCC Explorer and conservative FCC Monitoring language", async () =
   assert.match(explorer, /official FCC Equipment Authorization service/i);
   assert.match(explorer, /Confirmed watch scope/);
   assert.doesNotMatch(explorer, /Confirmed internal scope/);
+  assert.doesNotMatch(explorer, /official snapshot|bundled snapshot/i);
 
   const monitoring = await (await render("/fcc/monitoring")).text();
   assert.match(monitoring, /Recent FCC authorizations/);
-  assert.match(monitoring, /not snapshot change detection/i);
+  assert.match(monitoring, /not change detection between refreshes/i);
   assert.doesNotMatch(monitoring, /Modified authorization/);
+  assert.doesNotMatch(monitoring, /official snapshot|bundled snapshot/i);
 });
 
 test("renders Health Canada MDALL Explorer and Monitoring", async () => {

@@ -43,7 +43,8 @@ export type NormalizedFccRecord = {
   zipCode?: string;
   sourceUrl: string;
   retrievedAt: string;
-  sourceMode?: "live" | "official_snapshot" | "official_import" | "public_index";
+  sourceMode?: "live" | "official_capture" | "official_snapshot" | "official_import" | "public_index";
+  /** When the FCC data behind this record was captured (the scheduled capture, or the bundled copy). */
   snapshotCapturedAt?: string;
   raw: RawFccRecord;
 };
@@ -66,8 +67,10 @@ export type FccSearchResult = {
   records: NormalizedFccRecord[];
   grantees: FccGranteeRegistration[];
   retrievedAt: string;
-  sourceMode: "live" | "official_snapshot" | "mixed" | "limited" | "public_index";
+  sourceMode: "live" | "official_capture" | "official_snapshot" | "mixed" | "limited" | "public_index";
   snapshotCapturedAt?: string;
+  /** When the FCC records shown were captured from the FCC ("FCC data as of"). */
+  dataAsOf?: string;
   resolvedScopes: string[];
   unresolvedScopes: string[];
 };
@@ -92,10 +95,11 @@ export function cleanFccDisplayValue(value?: string) {
 export function fccSourcePresentation(sourceMode?: FccSearchResult["sourceMode"] | null, retrieved = false) {
   if (!retrieved) return { status: "FCC SOURCE READY", note: "Ready for FCC-ID search" };
   if (sourceMode === "live") return { status: "FCC API CONNECTED", note: "API response" };
+  if (sourceMode === "official_capture") return { status: "FCC EAS CONNECTED", note: "Official FCC EAS records" };
   if (sourceMode === "public_index") return { status: "FCCID.IO LIVE", note: "Public FCC ID index" };
-  if (sourceMode === "mixed") return { status: "FCC MIXED SOURCE", note: "Live index plus snapshot fallback" };
+  if (sourceMode === "mixed") return { status: "FCC MIXED SOURCE", note: "Official records plus public index" };
   if (sourceMode === "limited") return { status: "FCC COVERAGE LIMITED", note: "Limited official coverage" };
-  return { status: "FCC OFFICIAL SNAPSHOT", note: "Official EAS snapshot" };
+  return { status: "FCC EAS RECORDS", note: "Official FCC EAS records (bundled copy)" };
 }
 
 export function normalizeFccScope(value: string) {

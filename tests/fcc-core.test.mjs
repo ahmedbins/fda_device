@@ -139,9 +139,9 @@ test("omits FCC placeholder N/A values from displayed location fields", () => {
   assert.equal(fccLocation(record), "Hannover, Germany");
 });
 
-test("labels limited FCC coverage instead of an official snapshot", () => {
+test("labels limited FCC coverage instead of official records", () => {
   assert.equal(fccSourcePresentation("limited", true).status, "FCC COVERAGE LIMITED");
-  assert.equal(fccSourcePresentation("official_snapshot", true).status, "FCC OFFICIAL SNAPSHOT");
+  assert.equal(fccSourcePresentation("official_snapshot", true).status, "FCC EAS RECORDS");
   assert.equal(fccSourcePresentation("live", true).status, "FCC API CONNECTED");
   assert.equal(fccSourcePresentation(undefined, false).status, "FCC SOURCE READY");
 });
