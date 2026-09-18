@@ -267,6 +267,9 @@ function loadColumns<T extends string>(key: string, options: readonly { key: T }
   }
 }
 
+/** Proprietary names shown per company row before "+N more"; one company can list hundreds. */
+const MATRIX_NAMES_SHOWN = 6;
+
 export default function Home() {
   const [initial] = useState(initialStateFromUrl);
   const [viewMode, setViewMode] = useState<ViewMode>(initial.view);
@@ -293,6 +296,7 @@ export default function Home() {
   const [exportColumnIds, setExportColumnIds] = useState<string[]>([]);
   // Detail panes open as a side drawer; expanding gives the record the whole window to read in.
   const [drawerWide, setDrawerWide] = useState(false);
+  const [expandedNames, setExpandedNames] = useState<string[]>([]);
   // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [datasetUpdated, setDatasetUpdated] = useState("");
@@ -1216,6 +1220,9 @@ export default function Home() {
   };
   const headerProps = { resizing, onSort: sortByHeader, onResizeStart: startResize, onResizeReset: resetWidth };
 
+  // Below 1500px the toolbar has no room for this, so the pagination bar or the matrix note carries it.
+  const pulledNote = fetchedAt && <small className="fetch-meta">{isUdi ? "GUDID" : "openFDA"} · pulled {fetchedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>;
+
   const codeCountStrip = codeCounts && hasSearched && !error && (
     <div className="code-count-strip" aria-label="Matches per product code">
       <span className="strip-label"><Filter size={12} /> Per code{isUdi ? " · devices" : ""}</span>
@@ -1269,8 +1276,18 @@ export default function Home() {
       }
       case "listedDeviceCount":
         return <td key={column} className="count-cell"><b>{row.devices.length.toLocaleString()}</b><span>Unique names</span></td>;
-      case "registeredDevices":
-        return <td key={column}><div className="device-name-list">{row.devices.length ? row.devices.map((device) => <span key={device}>{device}</span>) : <em>No proprietary names listed</em>}</div></td>;
+      case "registeredDevices": {
+        const open = expandedNames.includes(row.key);
+        const names = open ? row.devices : row.devices.slice(0, MATRIX_NAMES_SHOWN);
+        return (
+          <td key={column}>
+            <div className={`device-name-list${open ? " open" : ""}`}>
+              {row.devices.length ? names.map((device) => <span key={device} title={device}>{device}</span>) : <em>No proprietary names listed</em>}
+              {row.devices.length > MATRIX_NAMES_SHOWN && <button type="button" className="names-more" onClick={() => setExpandedNames((current) => open ? current.filter((key) => key !== row.key) : [...current, row.key])} aria-expanded={open}>{open ? "Show fewer" : `+${(row.devices.length - MATRIX_NAMES_SHOWN).toLocaleString()} more`}</button>}
+            </div>
+          </td>
+        );
+      }
       case "registrations":
         return <td key={column} className="count-cell"><b>{row.registrations.toLocaleString()}</b></td>;
       case "productListings":
@@ -1528,11 +1545,16 @@ export default function Home() {
             </div>
           </div>
 
-          {appliedChips.length > 0 && (
-            <div className="applied-filters" aria-label="Applied filters">
-              <span className="strip-label"><Filter size={12} /> Applied</span>
-              {appliedChips.map((chip) => <span key={chip.key} className="applied-chip">{chip.label}<button type="button" onClick={() => removeChip(chip)} aria-label={`Remove filter ${chip.label}`} title="Remove this filter"><X size={11} /></button></span>)}
-              <button type="button" className="text-button" onClick={reset}>Clear all</button>
+          {(appliedChips.length > 0 || (!showEmpty && codeCountStrip)) && (
+            <div className="results-strips">
+              {appliedChips.length > 0 && (
+                <div className="applied-filters" aria-label="Applied filters">
+                  <span className="strip-label"><Filter size={12} /> Applied</span>
+                  {appliedChips.map((chip) => <span key={chip.key} className="applied-chip">{chip.label}<button type="button" onClick={() => removeChip(chip)} aria-label={`Remove filter ${chip.label}`} title="Remove this filter"><X size={11} /></button></span>)}
+                  <button type="button" className="text-button" onClick={reset}>Clear all</button>
+                </div>
+              )}
+              {!showEmpty && codeCountStrip}
             </div>
           )}
 
@@ -1564,7 +1586,6 @@ export default function Home() {
             </div>
           ) : showNoResults ? (
             <>
-              {codeCountStrip}
               <div className="empty-state no-results" role="status">
                 <PackageSearch size={34} />
                 <h3>{isMatrix && allTogether && records.length ? "No company holds every code." : isUdi && allTogether ? "No device carries every code." : isUdi ? "No devices match." : "No records match."}</h3>
@@ -1591,10 +1612,9 @@ export default function Home() {
             </>
           ) : (
             <>
-              {codeCountStrip}
               {isMatrix && (
                 <div className="matrix-note">
-                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device rows</b> · {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"} · from {records.length.toLocaleString()} matching listings</span></div>
+                  <div><Building2 size={16} /><span><b>{matrixRows.length.toLocaleString()} company-device rows</b> · {matrixCompanies.toLocaleString()} {matrixCompanies === 1 ? "company" : "companies"} · from {records.length.toLocaleString()} matching listings{pulledNote}</span></div>
                   <span>{total > MATRIX_FETCH_CAP && `Grouping the first ${MATRIX_FETCH_CAP.toLocaleString()} of ${total.toLocaleString()} matches — coverage beyond that isn't checked · `}{allTogether && `Only companies whose listings cover ${appliedCodesLabel} are shown · `}{matrixSortKey === "company" ? "Each company's codes are listed together" : "Listed devices counts unique proprietary names"}; the barcode button checks GUDID devices for a company.</span>
                 </div>
               )}
@@ -1621,9 +1641,9 @@ export default function Home() {
                       const tradeNames = listedDeviceNames(item);
                       return (
                         <tr key={`${item.registration?.registration_number || "record"}-${index}`} onClick={() => setSelected(item)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelected(item)}>
-                          {recordColumns.includes("establishment") && <td><div className="name-cell"><b>{firmName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: firmName(item) }); }} aria-label={`Only listings named ${firmName(item)}`} title="Only listings with this name"><ListFilter size={12} /></button></div><span>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
+                          {recordColumns.includes("establishment") && <td><div className="name-cell"><b>{firmName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: firmName(item) }); }} aria-label={`Only listings named ${firmName(item)}`} title="Only listings with this name"><ListFilter size={12} /></button></div><span title={item.establishment_type?.join(" · ")}>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
                           {recordColumns.includes("ownerOperator") && <td><div className="name-cell"><b>{companyName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: companyName(item) }); }} aria-label={`Only listings for ${companyName(item)}`} title="Only listings for this owner / operator"><ListFilter size={12} /></button></div><span>Operator {item.registration?.owner_operator?.owner_operator_number || "—"}</span></td>}
-                          {recordColumns.includes("primaryDevice") && <td><b>{primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device"}</b><span>{primary?.openfda?.medical_specialty_description || "Specialty unavailable"}</span></td>}
+                          {recordColumns.includes("primaryDevice") && <td className="device-cell"><b title={primary?.openfda?.device_name || undefined}>{primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device"}</b><span>{primary?.openfda?.medical_specialty_description || "Specialty unavailable"}</span></td>}
                           {recordColumns.includes("productCodes") && <td>
                             <div className="pill-row">
                               {codes.slice(0, 3).map((code) => <button key={code} type="button" className="code-pill clickable" title={`${codeLabel(code)} — click to filter by this code`} onClick={(e) => { e.stopPropagation(); addCodeFilter(code); }}>{code}</button>)}
@@ -1633,7 +1653,7 @@ export default function Home() {
                           </td>}
                           {recordColumns.includes("listedProducts") && <td className="count-cell"><b>{shown.length.toLocaleString()}</b><span>{productFilterActive(appliedFilters) ? `${matched.length} of ${listingCount} match` : "Product entries"}</span></td>}
                           {recordColumns.includes("tradeNames") && <td><div className="device-name-list compact">{tradeNames.length ? tradeNames.slice(0, 5).map((name) => <span key={name}>{name}</span>) : <em>None listed</em>}{tradeNames.length > 5 && <em>+{tradeNames.length - 5} more</em>}</div></td>}
-                          {recordColumns.includes("location") && <td><b>{[item.registration?.city, item.registration?.state_code].filter(Boolean).join(", ") || (item.registration?.iso_country_code ? "" : "Location unavailable")}</b>{item.registration?.iso_country_code && <span><button type="button" className={`code-pill neutral clickable${appliedFilters.country === item.registration.iso_country_code ? " hit" : ""}`} onClick={(e) => { e.stopPropagation(); toggleCountryFilter(item.registration?.iso_country_code || ""); }} title={`${regionName(item.registration.iso_country_code)} — click to filter by this country`}>{item.registration.iso_country_code}</button></span>}</td>}
+                          {recordColumns.includes("location") && <td className="location-cell"><b>{[item.registration?.city, item.registration?.state_code].filter(Boolean).join(", ") || (item.registration?.iso_country_code ? "" : "Location unavailable")}</b>{item.registration?.iso_country_code && <span><button type="button" className={`code-pill neutral clickable${appliedFilters.country === item.registration.iso_country_code ? " hit" : ""}`} onClick={(e) => { e.stopPropagation(); toggleCountryFilter(item.registration?.iso_country_code || ""); }} title={`${regionName(item.registration.iso_country_code)} — click to filter by this country`}>{item.registration.iso_country_code}</button></span>}</td>}
                           {recordColumns.includes("listed") && <td><b className="mono-value">{latestListed(shown) || "—"}</b></td>}
                           {recordColumns.includes("deviceClass") && <td>{primary?.openfda?.device_class ? <button type="button" className={`class-badge clickable class-${primary.openfda.device_class}`} onClick={(e) => { e.stopPropagation(); toggleClassFilter(primary.openfda?.device_class || ""); }} title="Click to filter by this device class">Class {primary.openfda.device_class}</button> : <span className="class-badge class-u">—</span>}</td>}
                           {recordColumns.includes("premarket") && <td><PremarketLinks item={item} stop /></td>}
@@ -1678,7 +1698,7 @@ export default function Home() {
                 </table>}
               </div>
               {!isMatrix && <div className="pagination">
-                <span>{rangeLabel}</span>
+                <span>{rangeLabel}{pulledNote}</span>
                 <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>
                 <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + pageCount >= total || loading}>Next <ArrowRight size={15} /></button></div>
               </div>}
