@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Filter, History, X } from "lucide-react";
-import { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, parseColumnWidths, rememberEntry, parseRecentEntries, type RecentEntry, type SortDir } from "./explorer-tools-core";
+import { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, columnShare, parseColumnWidths, rememberEntry, parseRecentEntries, type RecentEntry, type SortDir } from "./explorer-tools-core";
 
-export { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, RECENT_MAX, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort, type RecentEntry, type SortDir } from "./explorer-tools-core";
+export { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, RECENT_MAX, columnShare, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort, type RecentEntry, type SortDir } from "./explorer-tools-core";
 
 /**
  * Table and filter-pane tools shared by every Explorer: sortable, resizable table headers with
@@ -78,12 +78,13 @@ export type ColumnWidthTools = {
  * Column widths for one table, remembered in localStorage under `storageKey`. The first drag captures
  * every visible column's current width so switching to a fixed layout does not shift anything.
  */
-export function useColumnWidths(storageKey: string, activeKeys: readonly string[], defaultWidth = 160): ColumnWidthTools {
+export function useColumnWidths(storageKey: string, activeKeys: readonly string[]): ColumnWidthTools {
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [resizing, setResizing] = useState("");
-  const resizeRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
+  const resizeRef = useRef<{ key: string; startX: number; startWidth: number; max: number; pane: number; sharing: number } | null>(null);
   const dragEndedAt = useRef(0);
   const loadedKey = useRef("");
+  const widthsRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const stored = parseColumnWidths(localStorage.getItem(storageKey));
@@ -94,6 +95,8 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
   }, [storageKey]);
 
   useEffect(() => {
+    // The drag handler reads the current widths from here; the compiler forbids writing refs in render.
+    widthsRef.current = widths;
     if (loadedKey.current !== storageKey) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify(widths));
@@ -114,8 +117,8 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
         setResizing("");
         return;
       }
-      const width = Math.max(MIN_COLUMN_WIDTH, Math.round(active.startWidth + event.clientX - active.startX));
-      setWidths((current) => ({ ...current, [active.key]: width }));
+      const width = Math.min(active.max, Math.max(MIN_COLUMN_WIDTH, Math.round(active.startWidth + event.clientX - active.startX)));
+      setWidths((current) => ({ ...current, [active.key]: columnShare(width, active.pane, active.sharing) }));
     };
     const end = () => {
       resizeRef.current = null;
@@ -141,14 +144,15 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
     event.stopPropagation();
     const th = event.currentTarget.parentElement;
     const table = th?.closest("table");
-    if (!th || !table) return;
-    const measured: Record<string, number> = {};
-    table.querySelectorAll("thead th").forEach((cell, index) => {
-      const columnKey = activeKeys[index];
-      if (columnKey) measured[columnKey] = Math.round(cell.getBoundingClientRect().width);
-    });
-    setWidths((current) => (Object.keys(current).length ? current : measured));
-    resizeRef.current = { key, startX: event.clientX, startWidth: th.getBoundingClientRect().width };
+    const pane = table?.parentElement;
+    if (!th || !table || !pane) return;
+    // Leave every column that is not pinned room to breathe, so dragging redistributes rather than
+    // squeezing the others to nothing.
+    const pinnedElsewhere = activeKeys.filter((columnKey) => columnKey !== key && widthsRef.current[columnKey] !== undefined);
+    const sharing = activeKeys.length - pinnedElsewhere.length - 1;
+    const spoken = pinnedElsewhere.reduce((sum, columnKey) => sum + (widthsRef.current[columnKey] ?? 0), 0);
+    const max = Math.max(MIN_COLUMN_WIDTH, pane.clientWidth - spoken - sharing * MIN_COLUMN_WIDTH);
+    resizeRef.current = { key, startX: event.clientX, startWidth: th.getBoundingClientRect().width, max, pane: pane.clientWidth, sharing };
     setResizing(key);
   }, [activeKeys]);
 
@@ -161,9 +165,10 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
   const justDragged = useCallback(() => !!resizeRef.current || Date.now() - dragEndedAt.current < DRAG_CLICK_GUARD_MS, []);
 
   const fixedLayout = Object.keys(widths).length > 0;
-  const widthOf = (key: string) => widths[key] ?? (key === "open" ? 48 : defaultWidth);
-  const tableStyle: CSSProperties | undefined = fixedLayout ? { tableLayout: "fixed", width: `max(${activeKeys.reduce((sum, key) => sum + widthOf(key), 0)}px, 100%)`, minWidth: 0 } : undefined;
-  const colGroup = fixedLayout ? <colgroup>{activeKeys.map((key) => <col key={key} style={{ width: `${widthOf(key)}px` }} />)}</colgroup> : null;
+  const tableStyle: CSSProperties | undefined = fixedLayout ? { tableLayout: "fixed", width: "100%", minWidth: 0 } : undefined;
+  const colGroup = fixedLayout
+    ? <colgroup>{activeKeys.map((key) => <col key={key} style={widths[key] === undefined ? undefined : { width: `${widths[key]}%` }} />)}</colgroup>
+    : null;
 
   return { widths, fixedLayout, tableStyle, colGroup, resizing, startResize, resetWidth, resetWidths, justDragged };
 }

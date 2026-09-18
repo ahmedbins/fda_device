@@ -419,15 +419,17 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .drawer-top { height: 66px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; color: var(--paper); background: var(--ink); }
 .drawer-top-actions { display: flex; align-items: center; gap: 8px; }
 
-/* Expanded, the record stops being a panel and reads like a page: full window, and the content
-   held to a comfortable measure between wide margins instead of running the whole width. */
+/* Expanded, the record stops being a panel and becomes a page. Full-width bands of content are
+   what made it read like a settings screen, so everything below the bar is one centred column at a
+   readable measure; the margins either side are the design, not leftover space. */
 .drawer.drawer-wide { width: 100%; }
-.drawer-wide .drawer-top { padding-inline: clamp(24px, 7vw, 120px); }
-.drawer-wide .drawer-hero,
-.drawer-wide .detail-section { padding-inline: clamp(24px, 7vw, 120px); }
-.drawer-wide .detail-stats { padding-inline: clamp(12px, 6vw, 108px); }
-.drawer-wide .drawer-hero h2 { font-size: 44px; }
-.drawer-wide .detail-section > * { max-width: 1040px; }
+.drawer-wide > *:not(.drawer-top) { width: min(100%, var(--record-measure, 1080px)); margin-inline: auto; }
+.drawer-wide .drawer-top { padding-inline: max(28px, calc((100% - var(--record-measure, 1080px)) / 2)); }
+.drawer-wide .drawer-hero { padding: 48px 0 36px; }
+.drawer-wide .drawer-hero h2 { margin-top: 14px; font-size: 40px; }
+.drawer-wide .detail-stats { border-top: 1px solid var(--line); }
+.drawer-wide .detail-section { padding: 32px 0; }
+.drawer-wide .detail-section:last-child { border-bottom: 0; padding-bottom: 72px; }
 .drawer-top > span { color: #b9ddec; font: 600 10px var(--font-roboto), sans-serif; letter-spacing: .14em; }
 .drawer-top .icon-button { color: var(--paper); border-color: rgba(255,255,255,.2); }
 .drawer-top .icon-button:hover { background: rgba(255,255,255,.08); }

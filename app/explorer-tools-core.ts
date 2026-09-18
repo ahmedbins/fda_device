@@ -5,6 +5,16 @@ export type SortDir = "asc" | "desc";
 /** Ignore header clicks while a column is being dragged and for a moment after (the release click lands on the header). */
 export const DRAG_CLICK_GUARD_MS = 500;
 export const MIN_COLUMN_WIDTH = 64;
+/** A dragged column is stored as a share of the table pane, so it means the same at any window size. */
+export const MIN_COLUMN_SHARE = 4;
+export const MAX_COLUMN_SHARE = 92;
+
+/** Turns a dragged pixel width into the share of the pane it should keep, leaving the rest room. */
+export function columnShare(width: number, paneWidth: number, sharing: number) {
+  if (!(paneWidth > 0)) return MIN_COLUMN_SHARE;
+  const ceiling = Math.max(MIN_COLUMN_SHARE, Math.min(MAX_COLUMN_SHARE, 100 - sharing * MIN_COLUMN_SHARE));
+  return Math.round(Math.min(ceiling, Math.max(MIN_COLUMN_SHARE, (width / paneWidth) * 100)) * 10) / 10;
+}
 export const RECENT_MAX = 6;
 
 export type RecentEntry = { params: string; label: string; at: string };
@@ -13,7 +23,9 @@ export function parseColumnWidths(raw: string | null): Record<string, number> {
   try {
     const parsed = JSON.parse(raw || "null") as Record<string, unknown> | null;
     if (!parsed || typeof parsed !== "object") return {};
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] >= MIN_COLUMN_WIDTH));
+    // Widths used to be stored in pixels, which stopped fitting as soon as the window changed size.
+    // Shares replaced them; anything outside the share range is a stale pixel value and is dropped.
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] >= MIN_COLUMN_SHARE && entry[1] <= MAX_COLUMN_SHARE));
   } catch {
     return {};
   }

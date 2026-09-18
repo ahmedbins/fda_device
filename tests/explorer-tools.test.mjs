@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort } from "../app/explorer-tools-core.ts";
+import { columnShare, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort } from "../app/explorer-tools-core.ts";
 
 test("header clicks cycle sort direction and start numeric columns descending", () => {
   assert.deepEqual(toggleSort({ key: "issued", dir: "desc" }, "issued"), { key: "issued", dir: "asc" });
@@ -18,7 +18,14 @@ test("compares strings naturally, numbers numerically, and keeps blanks last in 
 });
 
 test("only keeps usable stored column widths", () => {
-  assert.deepEqual(parseColumnWidths('{"fccId":246,"grantee":"wide","tiny":10,"open":48}'), { fccId: 246 });
+  // Widths are stored as a share of the pane; the old pixel values are dropped so a table dragged
+  // wide on one monitor does not stay too wide on every other one.
+  assert.deepEqual(parseColumnWidths('{"fccId":32,"grantee":"wide","tiny":0.5,"legacyPixels":246}'), { fccId: 32 });
+
+  // A drag is clamped so the columns it is taking room from keep a readable share each.
+  assert.equal(columnShare(500, 1000, 3), 50);
+  assert.equal(columnShare(2000, 1000, 3), 88);
+  assert.equal(columnShare(10, 1000, 3), 4);
   assert.deepEqual(parseColumnWidths("not json"), {});
   assert.deepEqual(parseColumnWidths(null), {});
 });

@@ -103,7 +103,7 @@ import {
 } from "./fda-udi";
 import { UdiCompanyPanel, UdiDeviceDetail } from "./fda-udi-panel";
 import SourceNav from "./source-nav";
-import { HeaderCell, useScrollShadow, type HeaderSpec } from "./explorer-tools";
+import { HeaderCell, columnShare, parseColumnWidths, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
@@ -191,16 +191,29 @@ function regionName(code: string) {
 const DEFAULT_LIMIT = 25;
 
 /** Writes the whole view to the address bar: filters, sort, page size, page and any open detail pane. */
-function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, open: { record?: string; device?: string } = {}) {
-  if (typeof window === "undefined") return;
+function searchParamsFor(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number) {
   const params = filtersToParams(filters, view);
   if (view !== "matrix" && sort !== "relevance") params.set("sort", sort);
   if (view !== "matrix" && limit !== DEFAULT_LIMIT) params.set("rows", String(limit));
   if (view !== "matrix" && skip > 0) params.set("page", String(Math.floor(skip / Math.max(1, limit)) + 1));
-  if (open.record) params.set("record", open.record);
-  if (open.device) params.set("device", open.device);
+  return params;
+}
+
+/** Everything that identifies a set of results, so a popstate can tell a new search from a reopened pane. */
+function searchSignature(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number) {
+  return searchParamsFor(filters, view, sort, limit, skip).toString();
+}
+
+function writeUrl(params: URLSearchParams, push: boolean) {
+  if (typeof window === "undefined") return;
   const query = params.toString();
-  window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+  const url = query ? `?${query}` : window.location.pathname;
+  if (push && query !== window.location.search.replace(/^\?/, "")) window.history.pushState(null, "", url);
+  else window.history.replaceState(null, "", url);
+}
+
+function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, push = false) {
+  writeUrl(searchParamsFor(filters, view, sort, limit, skip), push);
 }
 
 function initialStateFromUrl() {
@@ -304,7 +317,8 @@ export default function Home() {
   const [colWidths, setColWidths] = useState<Record<string, Record<string, number>>>({});
   const [colWidthsReady, setColWidthsReady] = useState(false);
   const [resizing, setResizing] = useState("");
-  const resizeRef = useRef<{ view: string; key: string; startX: number; startWidth: number } | null>(null);
+  const resizeRef = useRef<{ view: string; key: string; startX: number; startWidth: number; max: number; pane: number; sharing: number } | null>(null);
+  const colWidthsRef = useRef<Record<string, Record<string, number>>>({});
   const dragEndedAt = useRef(0);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [filterPanelPrefsReady, setFilterPanelPrefsReady] = useState(false);
@@ -314,18 +328,25 @@ export default function Home() {
 
   const hasSearched = fetchedAt !== null;
   const pendingOpen = useRef({ record: initial.record, device: initial.device });
+  const [popTick, setPopTick] = useState(0);
 
-  /** Opening or closing a detail pane rewrites the address bar, so any pane can be linked or reloaded. */
+  /**
+   * Opening a pane is a place you can come back from, so it pushes; closing one walks back to the
+   * entry it pushed rather than leaving a dead step in the history.
+   */
   useEffect(() => {
     if (!hasSearched) return;
     const params = new URLSearchParams(window.location.search);
     const record = selected?.registration?.registration_number ? String(selected.registration.registration_number) : "";
     const device = selectedDevice?.primaryDi || "";
+    const had = params.has("record") || params.has("device");
     if (record) params.set("record", record); else params.delete("record");
     if (device) params.set("device", device); else params.delete("device");
-    const query = params.toString();
-    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+    const wants = !!(record || device);
+    if (wants === had && params.toString() === window.location.search.replace(/^\?/, "")) return;
+    writeUrl(params, wants && !had);
   }, [selected, selectedDevice, hasSearched]);
+
 
   /** A link that named a record or device opens it once its page of results arrives. */
   useEffect(() => {
@@ -462,7 +483,7 @@ export default function Home() {
           if (requestedView === "udi") setUdiUpdated(meta.last_updated);
           else setDatasetUpdated(meta.last_updated);
         }
-        syncUrl(nextFilters, requestedView, nextSort, nextLimit, requestedView === "matrix" ? 0 : nextSkip);
+        syncUrl(nextFilters, requestedView, nextSort, nextLimit, requestedView === "matrix" ? 0 : nextSkip, true);
         if (nextSkip === 0) setRecent((current) => rememberSearch(current, nextFilters, requestedView));
         if (countUrl) {
           fetchOpenFda<{ term?: string; count?: number }>(countUrl)
@@ -541,12 +562,9 @@ export default function Home() {
       localStorage.setItem("fda-record-columns-listed", "1");
       const widths: Record<string, Record<string, number>> = {};
       COLUMN_WIDTH_VIEWS.forEach((view) => {
-        try {
-          const parsed = JSON.parse(localStorage.getItem(`fda-col-widths-${view}`) || "null") as Record<string, unknown> | null;
-          if (parsed && typeof parsed === "object") widths[view] = Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0));
-        } catch {
-          // Ignore malformed widths.
-        }
+        // Shared parser: it also drops the pre-2026-09-18 pixel widths, which pinned the table to
+        // whatever window it was dragged in and stopped fitting anywhere else.
+        widths[view] = parseColumnWidths(localStorage.getItem(`fda-col-widths-${view}`));
       });
       queueMicrotask(() => {
         if (validRecords) setRecordColumns(validRecords);
@@ -573,6 +591,7 @@ export default function Home() {
   }, [columnPrefsReady, recordColumns, matrixColumns, udiColumns]);
 
   useEffect(() => {
+    colWidthsRef.current = colWidths;
     if (!colWidthsReady) return;
     COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(`fda-col-widths-${view}`, JSON.stringify(colWidths[view] || {})));
   }, [colWidthsReady, colWidths]);
@@ -589,8 +608,9 @@ export default function Home() {
         setResizing("");
         return;
       }
-      const width = Math.max(64, Math.round(active.startWidth + event.clientX - active.startX));
-      setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: width } }));
+      const width = Math.min(active.max, Math.max(64, Math.round(active.startWidth + event.clientX - active.startX)));
+      const share = columnShare(width, active.pane, active.sharing);
+      setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: share } }));
     };
     const end = () => {
       resizeRef.current = null;
@@ -864,6 +884,42 @@ export default function Home() {
     syncUrl(EMPTY_FILTERS, viewMode, "relevance", limit, 0);
   };
 
+  /**
+   * Back and Forward move through searches, pages, views and open panes. Only re-run the search when
+   * the results themselves changed — stepping in and out of a record should not refetch the page.
+   */
+  useEffect(() => {
+    const onPop = () => {
+      const next = initialStateFromUrl();
+      const current = searchSignature(appliedFilters, viewMode, recordSort, limit, skip);
+      pendingOpen.current = { record: next.record, device: next.device };
+      if (!next.record) setSelected(null);
+      if (!next.device) setSelectedDevice(null);
+      setUdiCompany(null);
+      if (searchSignature(next.filters, next.view, next.sort, next.limit, next.skip) === current) {
+        setPopTick((tick) => tick + 1);
+        return;
+      }
+      setFilters(next.filters);
+      setViewMode(next.view);
+      setRecordSort(next.sort);
+      setLimit(next.limit);
+      if (next.autorun) runSearch(next.skip, next.view, next.filters, next.limit, next.sort, true);
+      else reset();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  });
+
+  /** Reopens the pane a Back or Forward step landed on, from results already on screen. */
+  useEffect(() => {
+    if (!popTick) return;
+    const wanted = pendingOpen.current;
+    pendingOpen.current = { record: "", device: "" };
+    if (wanted.record) setSelected(records.find((item) => String(item.registration?.registration_number || "") === wanted.record) || null);
+    if (wanted.device) setSelectedDevice(udiDevices.find((item) => item.primaryDi === wanted.device) || null);
+  }, [records, udiDevices, popTick]);
+
   const fetchAllMatching = async () => {
     const cap = Math.min(total, EXPORT_CAP);
     setExportProgress(`Downloading 0 of ${cap.toLocaleString()} records…`);
@@ -1018,7 +1074,7 @@ export default function Home() {
     if (hasSearched) {
       runSearch(0, nextView, appliedFilters);
     } else {
-      syncUrl(appliedFilters, nextView, recordSort, limit, 0);
+      syncUrl(appliedFilters, nextView, recordSort, limit, 0, true);
     }
   };
 
@@ -1092,9 +1148,10 @@ export default function Home() {
   const activeKeys: string[] = isUdi ? visibleUdiKeys : isMatrix ? visibleMatrixColumns : visibleRecordKeys;
   const widths = colWidths[viewMode] || {};
   const fixedLayout = Object.keys(widths).length > 0;
-  const widthOf = (key: string) => widths[key] ?? (key === "open" ? 48 : 160);
-  const tableStyle = fixedLayout ? { tableLayout: "fixed" as const, width: `max(${activeKeys.reduce((sum, key) => sum + widthOf(key), 0)}px, 100%)`, minWidth: 0 } : undefined;
-  const colgroup = fixedLayout ? <colgroup>{activeKeys.map((key) => <col key={key} style={{ width: `${widthOf(key)}px` }} />)}</colgroup> : null;
+  const tableStyle = fixedLayout ? { tableLayout: "fixed" as const, width: "100%", minWidth: 0 } : undefined;
+  const colgroup = fixedLayout
+    ? <colgroup>{activeKeys.map((key) => <col key={key} style={widths[key] === undefined ? undefined : { width: `${widths[key]}%` }} />)}</colgroup>
+    : null;
 
   const startResize = (event: ReactPointerEvent<HTMLElement>, key: string) => {
     event.preventDefault();
@@ -1104,15 +1161,16 @@ export default function Home() {
     const table = th?.closest("table");
     if (!th || !table) return;
     const view = viewMode;
-    const keys = activeKeys;
-    // Capture every column's current width so switching to a fixed layout does not shift anything.
-    const measured: Record<string, number> = {};
-    table.querySelectorAll("thead th").forEach((cell, index) => {
-      const columnKey = keys[index];
-      if (columnKey) measured[columnKey] = Math.round(cell.getBoundingClientRect().width);
-    });
-    setColWidths((current) => (Object.keys(current[view] || {}).length ? current : { ...current, [view]: measured }));
-    resizeRef.current = { view, key, startX: event.clientX, startWidth: th.getBoundingClientRect().width };
+    const pane = table.parentElement;
+    if (!pane) return;
+    // Only the dragged column is pinned. Widening it takes room from its neighbours instead of
+    // growing the table, and every column that is not pinned keeps at least a readable minimum.
+    const pinnedWidths = colWidthsRef.current[view] || {};
+    const pinned = activeKeys.filter((columnKey) => columnKey !== key && pinnedWidths[columnKey] !== undefined);
+    const sharing = activeKeys.length - pinned.length - 1;
+    const spoken = pinned.reduce((sum, columnKey) => sum + (pinnedWidths[columnKey] ?? 0), 0);
+    const max = Math.max(64, pane.clientWidth - spoken - sharing * 64);
+    resizeRef.current = { view, key, startX: event.clientX, startWidth: th.getBoundingClientRect().width, max, pane: pane.clientWidth, sharing };
     setResizing(key);
   };
   const resetWidth = (key: string) => setColWidths((current) => {
@@ -1138,10 +1196,11 @@ export default function Home() {
     if (key === "identifiers") return { key, label: option.label, numeric: true, sortable: false, dir: null, hint: "this count comes from the record itself; openFDA cannot order by it." };
     return { key, label: option.label, sortable: false, dir: null, hint: UDI_UNSORTABLE };
   };
+  const justDragged = useCallback(() => !!resizeRef.current || Date.now() - dragEndedAt.current < 500, []);
   const sortByHeader = (spec: HeaderSpec) => {
     if (!spec.sortable) return;
     // The click that ends a column drag lands on the header; never let it change the sort.
-    if (resizeRef.current || Date.now() - dragEndedAt.current < 500) return;
+    if (justDragged()) return;
     if (isMatrix) {
       const key = spec.key as MatrixSortKey;
       if (matrixSortKey === key) setMatrixDir(matrixDir === "asc" ? "desc" : "asc");
