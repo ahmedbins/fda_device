@@ -30,9 +30,7 @@ test("server-renders all source and view routes", async () => {
 
 test("keeps FDA Explorer and Monitoring content intact", async () => {
   const explorer = await (await render("/fda/explorer")).text();
-  // The hero came out when the explorer became a fixed shell; the source nav carries the identity now.
-  assert.match(explorer, /openFDA live/);
-  assert.match(explorer, /Search records/);
+  assert.match(explorer, /Device registrations/);
   assert.match(explorer, /Product codes/);
   assert.match(explorer, /listings match any of them/);
   assert.match(explorer, /Company \+ devices/);
@@ -46,7 +44,7 @@ test("keeps FDA Explorer and Monitoring content intact", async () => {
 
 test("renders FCC Explorer and conservative FCC Monitoring language", async () => {
   const explorer = await (await render("/fcc/explorer")).text();
-  assert.match(explorer, /FCC EQUIPMENT DATA/);
+  assert.match(explorer, /Equipment authorizations/);
   assert.match(explorer, /FCC-ID search/);
   assert.match(explorer, /Authorization records/);
   assert.match(explorer, /official FCC Equipment Authorization service/i);
@@ -63,7 +61,7 @@ test("renders FCC Explorer and conservative FCC Monitoring language", async () =
 
 test("renders Health Canada MDALL Explorer and Monitoring", async () => {
   const explorer = await (await render("/hc/explorer")).text();
-  assert.match(explorer, /HEALTH CANADA \/ MDALL/);
+  assert.match(explorer, /Canadian device licences/);
   assert.match(explorer, /MDALL search/);
   assert.match(explorer, /official MDALL/i);
   assert.match(explorer, /Class II, III and IV/i);
@@ -81,7 +79,7 @@ test("rejects invalid FCC API scope without contacting the upstream source", asy
 
 test("renders IECEE Explorer and Monitoring with honest source language", async () => {
   const explorer = await (await render("/iecee/explorer")).text();
-  assert.match(explorer, /IECEE CB SCHEME/);
+  assert.match(explorer, /CB certificates/);
   assert.match(explorer, /Certificate search/);
   assert.match(explorer, /Product category/);
   assert.match(explorer, /Certification body \(NCB\)/);

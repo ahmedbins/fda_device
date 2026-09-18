@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { PackageSearch } from "lucide-react";
 import { useDevHost } from "./fda-shared";
 
@@ -32,6 +33,9 @@ type SourceNavProps = {
   view: RegulatoryView;
   status: string;
   statusState?: "ready" | "connected" | "error";
+  /** What this page is, shown in the gap between the brand and the source tabs. */
+  title?: ReactNode;
+  tagline?: string;
 };
 
 function destination(source: RegulatorySource, view: RegulatoryView) {
@@ -39,7 +43,7 @@ function destination(source: RegulatorySource, view: RegulatoryView) {
   return sessionStorage.getItem(`regulatory:last:${source}:${view}`) || ROUTES[source][view];
 }
 
-export default function SourceNav({ source, view, status, statusState = "ready" }: SourceNavProps) {
+export default function SourceNav({ source, view, status, statusState = "ready", title, tagline }: SourceNavProps) {
   const devHost = useDevHost();
 
   const rememberCurrent = () => {
@@ -59,6 +63,13 @@ export default function SourceNav({ source, view, status, statusState = "ready" 
         <span><b>SONOVA</b> / REGULATORY DATA HUB</span>
         {devHost && <span className="dev-badge">DEV</span>}
       </button>
+
+      {title && (
+        <div className="topbar-identity">
+          <h1>{title}</h1>
+          {tagline && <p>{tagline}</p>}
+        </div>
+      )}
 
       <div className="topbar-right regulatory-nav">
         {devHost && <a className="nav-preview-link" href="/next" title="Preview of the redesigned workbench (internal only)">New design ↗</a>}

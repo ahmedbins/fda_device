@@ -13,6 +13,8 @@ import {
   CircleAlert,
   Columns3,
   Database,
+  Maximize2,
+  Minimize2,
   Ear,
   ExternalLink,
   Filter,
@@ -276,6 +278,8 @@ export default function Home() {
   const [exportFilename, setExportFilename] = useState("");
   const [exportFilenameCustom, setExportFilenameCustom] = useState(false);
   const [exportColumnIds, setExportColumnIds] = useState<string[]>([]);
+  // Detail panes open as a side drawer; expanding gives the record the whole window to read in.
+  const [drawerWide, setDrawerWide] = useState(false);
   // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [datasetUpdated, setDatasetUpdated] = useState("");
@@ -1283,7 +1287,10 @@ export default function Home() {
         view="explorer"
         status={`openFDA live${datasetTotal ? ` · ${datasetTotal.toLocaleString()} records` : ""}${datasetUpdated ? ` · as of ${datasetUpdated}` : ""}`}
         statusState="connected"
+        title={<>Device registrations. <em>Made searchable.</em></>}
+        tagline="Search FDA registrations, listings and GUDID device identifiers."
       />
+
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="Device data explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
@@ -1623,8 +1630,8 @@ export default function Home() {
 
       {selected && (
         <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setSelected(null)}>
-          <aside className="drawer" aria-label="Registration details">
-            <div className="drawer-top"><span>RECORD DETAIL</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
+          <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="Registration details">
+            <div className="drawer-top"><span>RECORD DETAIL</span><div className="drawer-top-actions"><button className="icon-button" onClick={() => setDrawerWide((wide) => !wide)} aria-pressed={drawerWide} aria-label={drawerWide ? "Shrink to a side panel" : "Expand to the full window"} title={drawerWide ? "Shrink to a side panel" : "Expand to the full window"}>{drawerWide ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div></div>
             <div className="drawer-hero"><span className="record-id">REG {selected.registration?.registration_number || "—"}</span><h2>{firmName(selected)}</h2><p><MapPin size={15} /> {locationSummary(selected)}{companyName(selected) !== firmName(selected) ? ` · ${companyName(selected)}` : ""}</p></div>
             <div className="detail-stats">
               <div><span>FEI number</span><b>{selected.registration?.fei_number || "—"}</b></div>
@@ -1683,8 +1690,8 @@ export default function Home() {
 
       {selectedDevice && (
         <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setSelectedDevice(null)}>
-          <aside className="drawer" aria-label="GUDID device details">
-            <div className="drawer-top"><span>GUDID DEVICE · UDI</span><button className="icon-button" onClick={() => setSelectedDevice(null)} aria-label="Close details"><X size={19} /></button></div>
+          <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="GUDID device details">
+            <div className="drawer-top"><span>GUDID DEVICE · UDI</span><div className="drawer-top-actions"><button className="icon-button" onClick={() => setDrawerWide((wide) => !wide)} aria-pressed={drawerWide} aria-label={drawerWide ? "Shrink to a side panel" : "Expand to the full window"} title={drawerWide ? "Shrink to a side panel" : "Expand to the full window"}>{drawerWide ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button><button className="icon-button" onClick={() => setSelectedDevice(null)} aria-label="Close details"><X size={19} /></button></div></div>
             <div className="drawer-hero">
               <span className="record-id">{selectedDevice.company || "Unknown labeler"}</span>
               <h2>{selectedDevice.brand || "Unnamed device"}</h2>
@@ -1697,8 +1704,8 @@ export default function Home() {
 
       {udiCompany && (
         <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setUdiCompany(null)}>
-          <aside className="drawer" aria-label="GUDID devices for company">
-            <div className="drawer-top"><span>GUDID DEVICES · UDI</span><button className="icon-button" onClick={() => setUdiCompany(null)} aria-label="Close"><X size={19} /></button></div>
+          <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="GUDID devices for company">
+            <div className="drawer-top"><span>GUDID DEVICES · UDI</span><div className="drawer-top-actions"><button className="icon-button" onClick={() => setDrawerWide((wide) => !wide)} aria-pressed={drawerWide} aria-label={drawerWide ? "Shrink to a side panel" : "Expand to the full window"} title={drawerWide ? "Shrink to a side panel" : "Expand to the full window"}>{drawerWide ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button><button className="icon-button" onClick={() => setUdiCompany(null)} aria-label="Close"><X size={19} /></button></div></div>
             <div className="drawer-hero">
               <span className="record-id">{udiCompany.codes.join(" + ") || "All codes"}{udiCompany.codes.length > 1 ? (udiCompany.mode === "all" ? " · every code per device" : " · any code") : ""}</span>
               <h2>{udiCompany.company}</h2>

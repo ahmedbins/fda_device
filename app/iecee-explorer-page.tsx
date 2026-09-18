@@ -502,28 +502,13 @@ export default function IeceeExplorerPage() {
 
   return (
     <main className="explorer-shell">
-      <SourceNav source="iecee" view="explorer" status={sourcePresentation.status} statusState={error ? "error" : retrievedAt ? "connected" : "ready"} />
+      <SourceNav
+        source="iecee"
+        view="explorer" status={sourcePresentation.status} statusState={error ? "error" : retrievedAt ? "connected" : "ready"}
+        title={<>CB certificates. <em>Made searchable.</em></>}
+        tagline="Search the IECEE CB Scheme certificate index by manufacturer, trademark, product, standard, body and status."
+      />
 
-      <section className="hero hero-compact" id="top">
-        <div className="eyebrow"><span>01</span> IECEE CB SCHEME</div>
-        <div className="hero-grid">
-          <div>
-            <h1>CB certificates. <em>Made searchable.</em></h1>
-            <div className="hero-inline">
-              <p>Search the IECEE CB Scheme certificate index by manufacturer, trademark, product, standard, certification body and status.</p>
-              <a className="primary" href={IECEE_PUBLIC_SEARCH_URL} target="_blank" rel="noreferrer">Open IECEE certificate search <ExternalLink size={14} /></a>
-            </div>
-          </div>
-          <div className="dataset-note">
-            <Award size={20} />
-            <div>
-              <b>IECEE certificates</b>
-              <span>{retrievedAt ? sourcePresentation.note : "Ready for certificate search"}</span>
-              <span>{retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${IECEE_SOURCE_LABEL}`}</span>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="IECEE certificate explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
@@ -626,6 +611,7 @@ export default function IeceeExplorerPage() {
           <div className="results-toolbar">
             <div className="results-title"><div><h2>Certificates</h2>{retrievedAt && <small className="fetch-meta">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</small>}</div></div>
             <div className="toolbar-actions">
+              <a className="secondary" href={IECEE_PUBLIC_SEARCH_URL} target="_blank" rel="noreferrer" title="Open the official IECEE certificate search">IECEE Search <ExternalLink size={13} /></a>
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <label className="matrix-sort">Sort <select value={applied.sort} onChange={(event) => changeSort(event.target.value as IeceeSort)}>{IECEE_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
               <details ref={columnPicker} className="column-picker">

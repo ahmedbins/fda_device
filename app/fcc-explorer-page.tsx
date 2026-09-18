@@ -492,28 +492,15 @@ export default function FccExplorerPage() {
 
   return (
     <main className="explorer-shell">
-      <SourceNav source="fcc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"} />
+      <SourceNav
+        source="fcc"
+        view="explorer"
+        status={sourcePresentation.status}
+        statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"}
+        title={<>Equipment authorizations. <em>Made searchable.</em></>}
+        tagline="Search approved FCC IDs and authorization records."
+      />
 
-      <section className="hero hero-compact" id="top">
-        <div className="eyebrow"><span>01</span> FCC EQUIPMENT DATA</div>
-        <div className="hero-grid">
-          <div>
-            <h1>Equipment authorizations. <em>Made searchable.</em></h1>
-            <div className="hero-inline">
-              <p>Search approved FCC IDs and authorization records.</p>
-              <a className="primary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open FCC Search <ExternalLink size={14} /></a>
-            </div>
-          </div>
-          <div className="dataset-note">
-            <RadioTower size={20} />
-            <div>
-              <b>FCC equipment authorization</b>
-              <span>{retrievedAt ? sourcePresentation.note : "Ready for FCC-ID search"}</span>
-              <span>{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleString([], dateTimeFormat)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="FCC equipment authorization explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
@@ -581,6 +568,7 @@ export default function FccExplorerPage() {
           <div className="results-toolbar">
             <div className="results-title"><div><h2>{resultView === "records" ? "Authorization records" : "Grantee profiles"}</h2>{retrievedAt && <small className="fetch-meta">{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleDateString()} · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</div></div>
             <div className="toolbar-actions">
+              <a className="secondary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer" title="Open the official FCC Equipment Authorization search">FCC Search <ExternalLink size={13} /></a>
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <div className="view-toggle"><button className={resultView === "records" ? "active" : ""} onClick={() => { setResultView("records"); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, pageSize, "records", presetId); }}>Records</button><button className={resultView === "grantees" ? "active" : ""} onClick={() => { setResultView("grantees"); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, pageSize, "grantees", presetId); }}>Grantees</button></div>
               {resultView === "records" && <label className="matrix-sort">Sort <select value={sort} onChange={(event) => { const next = event.target.value as SortKey; setSort(next); setPage(0); syncUrl(query, scopes, from, to, purpose, next, pageSize, resultView, presetId); }}>{SORT_PRESETS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}{!SORT_PRESETS.some((option) => option.value === sort) && <option value={sort}>{`${COLUMN_OPTIONS.find((option) => option.key === sortState.key)?.label || sortState.key} ${sortState.dir === "asc" ? "↑" : "↓"}`}</option>}</select></label>}

@@ -15,7 +15,7 @@
   /* Content shell: full-bleed backgrounds, but text and tables stop growing past this width and centre on wide monitors. */
   --shell: 1920px;
   --edge: max(0px, calc((100% - var(--shell)) / 2));
-  --gutter: clamp(20px, 4vw, 64px);
+  --gutter: clamp(14px, 1.6vw, 24px);
 }
 
 * { box-sizing: border-box; }
@@ -27,7 +27,7 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .46; }
 
 .site-contact-footer {
-  padding: 14px calc(var(--edge) + var(--gutter));
+  padding: 9px calc(var(--edge) + var(--gutter));
   color: #52636a;
   background: var(--white);
   border-top: 1px solid var(--line);
@@ -184,26 +184,10 @@ button:disabled { cursor: not-allowed; opacity: .46; }
   /* The SPA mounts into #root, so the height chain has to pass through it. */
   body:has(.explorer-shell) > #root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .explorer-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .explorer-shell .workspace { flex: 1; min-height: 0; margin-inline: calc(var(--edge) + var(--gutter)); margin-bottom: var(--gutter); border: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .explorer-shell .workspace { flex: 1; min-height: 0; margin: 10px calc(var(--edge) + var(--gutter)); border: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .explorer-shell .filter-panel-inner { padding: 26px 22px 30px; }
   .explorer-shell .results-panel th:first-child, .explorer-shell .results-panel td:first-child { padding-left: 20px; }
   .explorer-shell .results-panel th:last-child, .explorer-shell .results-panel td:last-child { padding-right: 20px; }
-  /* FCC, Health Canada and IECEE still introduce themselves and link out to the official search.
-     In a fixed shell that has to cost one line, not a banner: title, blurb, action and provenance
-     all sit on the same row. */
-  .explorer-shell .hero-compact { padding: 9px calc(var(--edge) + var(--gutter)); }
-  .explorer-shell .hero-compact .eyebrow { display: none; }
-  .explorer-shell .hero-compact .hero-grid { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; }
-  .explorer-shell .hero-compact .hero-grid > div:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
-  .explorer-shell .hero-compact h1 { font-size: 19px; line-height: 1.2; }
-  .explorer-shell .hero-compact .hero-inline { margin: 0; gap: 8px 14px; }
-  .explorer-shell .hero-compact p { font-size: 12.5px; }
-  .explorer-shell .hero-compact .primary { min-height: 30px; padding: 0 12px; font-size: 11px; }
-  .explorer-shell .hero-compact .dataset-note { min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; gap: 8px; }
-  .explorer-shell .hero-compact .dataset-note svg { width: 15px; height: 15px; }
-  .explorer-shell .hero-compact .dataset-note > div { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
-  .explorer-shell .hero-compact .dataset-note b { font-size: 11px; }
-  .explorer-shell .hero-compact .dataset-note span { font-size: 10px; }
   .explorer-shell .results-toolbar { min-height: 0; padding: 10px 20px; }
   /* Count and freshness read as one line, so the toolbar is a row of controls, not a header block. */
   .explorer-shell .results-title > div { flex-direction: row; align-items: baseline; gap: 10px; }
@@ -433,6 +417,17 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .drawer { width: min(650px, 100%); height: 100%; overflow-y: auto; background: var(--paper); box-shadow: -14px 0 50px rgba(0,0,0,.18); animation: slide-in .24s ease-out; }
 @keyframes slide-in { from { transform: translateX(30px); opacity: .5; } }
 .drawer-top { height: 66px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; color: var(--paper); background: var(--ink); }
+.drawer-top-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Expanded, the record stops being a panel and reads like a page: full window, and the content
+   held to a comfortable measure between wide margins instead of running the whole width. */
+.drawer.drawer-wide { width: 100%; }
+.drawer-wide .drawer-top { padding-inline: clamp(24px, 7vw, 120px); }
+.drawer-wide .drawer-hero,
+.drawer-wide .detail-section { padding-inline: clamp(24px, 7vw, 120px); }
+.drawer-wide .detail-stats { padding-inline: clamp(12px, 6vw, 108px); }
+.drawer-wide .drawer-hero h2 { font-size: 44px; }
+.drawer-wide .detail-section > * { max-width: 1040px; }
 .drawer-top > span { color: #b9ddec; font: 600 10px var(--font-roboto), sans-serif; letter-spacing: .14em; }
 .drawer-top .icon-button { color: var(--paper); border-color: rgba(255,255,255,.2); }
 .drawer-top .icon-button:hover { background: rgba(255,255,255,.08); }
@@ -510,6 +505,12 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .nav-preview-link:hover { background: #f2e8cc; }
 .dev-badge { margin-left: 4px; padding: 4px 7px; border-radius: 3px; background: #f2e8cc; color: #775828; font: 700 9px var(--font-roboto), sans-serif; letter-spacing: .08em; }
 .topbar-right { display: flex; align-items: center; gap: 22px; }
+.topbar-identity { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-left: 18px; padding-left: 18px; border-left: 1px solid var(--line); }
+.topbar-identity h1 { margin: 0; color: var(--ink); font: 500 16px/1.2 var(--font-roboto), sans-serif; letter-spacing: -.02em; white-space: nowrap; }
+.topbar-identity h1 em { font-family: var(--font-rufina), Georgia, serif; font-weight: 400; font-style: italic; color: var(--coral); }
+.topbar-identity p { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+@media (max-width: 1500px) { .topbar-identity p { display: none; } }
+@media (max-width: 1100px) { .topbar-identity { display: none; } }
 .top-nav { display: flex; gap: 4px; padding: 3px; background: var(--paper-2); border-radius: 15px; }
 .top-nav a { padding: 6px 12px; border-radius: 12px; color: var(--muted); text-decoration: none; text-transform: uppercase; font: 600 10.5px var(--font-roboto), sans-serif; letter-spacing: .08em; }
 .top-nav a:hover { color: var(--ink); }

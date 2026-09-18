@@ -494,28 +494,13 @@ export default function MdallExplorerPage() {
 
   return (
     <main className="explorer-shell">
-      <SourceNav source="hc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? "connected" : "ready"} />
+      <SourceNav
+        source="hc"
+        view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? "connected" : "ready"}
+        title={<>Canadian device licences. <em>Made searchable.</em></>}
+        tagline="Class II, III and IV licences from Health Canada’s Medical Devices Active Licence Listing."
+      />
 
-      <section className="hero hero-compact" id="top">
-        <div className="eyebrow"><span>01</span> HEALTH CANADA / MDALL</div>
-        <div className="hero-grid">
-          <div>
-            <h1>Canadian device licences. <em>Made searchable.</em></h1>
-            <div className="hero-inline">
-              <p>Search Class II, III and IV medical device licences from Health Canada’s Medical Devices Active Licence Listing.</p>
-              <a className="primary" href={officialSearch} target="_blank" rel="noreferrer">Open MDALL Search <ExternalLink size={14} /></a>
-            </div>
-          </div>
-          <div className="dataset-note">
-            <Landmark size={20} />
-            <div>
-              <b>Health Canada MDALL</b>
-              <span>{retrievedAt ? sourcePresentation.note : "Ready for licence search"}</span>
-              <span>{searchMeta?.lastRefreshAt ? `MDALL last refreshed ${displayDate(searchMeta.lastRefreshAt)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${MDALL_SOURCE_LABEL}`}</span>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="Health Canada MDALL explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
@@ -580,6 +565,7 @@ export default function MdallExplorerPage() {
           <div className="results-toolbar">
             <div className="results-title"><div><h2>{resultView === "licences" ? "MDALL licences" : "Companies"}</h2>{retrievedAt && <small className="fetch-meta">{searchMeta?.lastRefreshAt ? `MDALL refresh ${displayDate(searchMeta.lastRefreshAt)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</div></div>
             <div className="toolbar-actions">
+              <a className="secondary" href={officialSearch} target="_blank" rel="noreferrer" title="Open the official Health Canada MDALL search">MDALL Search <ExternalLink size={13} /></a>
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <div className="view-toggle"><button className={resultView === "licences" ? "active" : ""} onClick={() => { setResultView("licences"); setPage(0); }}>Licences</button><button className={resultView === "companies" ? "active" : ""} onClick={() => { setResultView("companies"); setPage(0); }}>Companies</button></div>
               {resultView === "licences" && <label className="matrix-sort">Sort <select value={sort} onChange={(event) => { setSort(event.target.value as SortKey); setPage(0); }}>{SORT_PRESETS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}{!SORT_PRESETS.some((option) => option.value === sort) && <option value={sort}>{`${COLUMN_OPTIONS.find((option) => option.key === sortState.key)?.label || sortState.key} ${sortState.dir === "asc" ? "↑" : "↓"}`}</option>}</select></label>}
