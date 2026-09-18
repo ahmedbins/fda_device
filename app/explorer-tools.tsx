@@ -232,3 +232,27 @@ export function RecentSearches({ entries, onApply, onForget, onClear, compact = 
     </div>
   );
 }
+
+/**
+ * Ref for a horizontally scrollable table pane: marks it `scrolled-x` while the pinned first
+ * column has content hidden behind it, so the column's edge shadow only shows when it means
+ * something. Re-measures on scroll and on resize, and re-runs whenever `deps` change the table.
+ */
+export function useScrollShadow(deps: readonly unknown[] = []) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const pane = ref.current;
+    if (!pane) return;
+    const sync = () => pane.classList.toggle("scrolled-x", pane.scrollLeft > 1);
+    sync();
+    pane.addEventListener("scroll", sync, { passive: true });
+    const observer = new ResizeObserver(sync);
+    observer.observe(pane);
+    return () => {
+      pane.removeEventListener("scroll", sync);
+      observer.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return ref;
+}

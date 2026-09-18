@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
+import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
 import {
   FCC_EAS_API,
@@ -250,6 +250,7 @@ export default function FccExplorerPage() {
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const request = useRef<AbortController | null>(null);
   const widthTools = useColumnWidths("fcc-col-widths-records", columns);
+  const tableScroll = useScrollShadow([columns]);
   const recents = useRecentSearches("fcc-recent-searches");
   const rememberRecent = recents.remember;
 
@@ -490,7 +491,7 @@ export default function FccExplorerPage() {
   const selectedRegistry = selectedGranteeGroup?.granteeCode ? grantees.find((grantee) => grantee.granteeCode === selectedGranteeGroup.granteeCode) : undefined;
 
   return (
-    <main>
+    <main className="explorer-shell">
       <SourceNav source="fcc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"} />
 
       <section className="hero hero-compact" id="top">
@@ -518,7 +519,7 @@ export default function FccExplorerPage() {
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
           <div className="filter-panel-inner">
           <div className="panel-heading">
-            <div><span>02</span><h2>Filters</h2></div>
+            <div><h2>Filters</h2></div>
             <div className="panel-heading-actions">
               <button className="icon-button collapse-filter-panel" onClick={() => setFiltersCollapsed((value) => !value)} aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"}>{filtersCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
               <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
@@ -578,7 +579,7 @@ export default function FccExplorerPage() {
 
         <section className="results-panel">
           <div className="results-toolbar">
-            <div className="results-title"><span>03</span><div><h2>{resultView === "records" ? "Authorization records" : "Grantee profiles"}</h2>{retrievedAt && <small className="fetch-meta">{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleDateString()} · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</div></div>
+            <div className="results-title"><div><h2>{resultView === "records" ? "Authorization records" : "Grantee profiles"}</h2>{retrievedAt && <small className="fetch-meta">{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleDateString()} · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</div></div>
             <div className="toolbar-actions">
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <div className="view-toggle"><button className={resultView === "records" ? "active" : ""} onClick={() => { setResultView("records"); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, pageSize, "records", presetId); }}>Records</button><button className={resultView === "grantees" ? "active" : ""} onClick={() => { setResultView("grantees"); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, pageSize, "grantees", presetId); }}>Grantees</button></div>
@@ -603,7 +604,7 @@ export default function FccExplorerPage() {
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p></div>
           : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>{limitedCoverage ? "This FCC scope is not kept current by this site." : "No approved FCC IDs matched."}</h3><p>{limitedCoverage ? "The live FCC source is unavailable from this app, so an empty result here does not mean the FCC ID is unapproved. Open the official response and import it below." : "Check the FCC ID, use a shorter prefix, or remove the date filters."}</p><div className="empty-actions">{!limitedCoverage && <button className="secondary" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}<button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
           : resultView === "records" && filteredRecords.length > 0 && <>
-            <div className="table-wrap"><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
+            <div className="table-wrap" ref={tableScroll}><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
             <div className="pagination"><span>{filteredRecords.length.toLocaleString()} matching authorization record{filteredRecords.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}</span><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>
           </>}
           {resultView === "grantees" && groupedRecords.length > 0 && <div className="fcc-grantee-grid">{groupedRecords.map((group) => <button key={group.key} className="fcc-grantee-card" onClick={() => setSelectedGrantee(group.key)}><span className="grantee-code">{group.granteeCode || "FCC"}</span><h3>{group.granteeName || "Unidentified grantee"}</h3><p>{group.fccIds} FCC IDs · {group.records.length} authorization records</p><dl><div><dt>Most recent</dt><dd>{displayDate(group.latestAuthorization)}</dd></div><div><dt>Location</dt><dd>{fccLocation(group.records[0])}</dd></div></dl><span className="open-profile">Open grantee profile →</span></button>)}</div>}

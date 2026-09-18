@@ -101,7 +101,7 @@ import {
 } from "./fda-udi";
 import { UdiCompanyPanel, UdiDeviceDetail } from "./fda-udi-panel";
 import SourceNav from "./source-nav";
-import { HeaderCell, type HeaderSpec } from "./explorer-tools";
+import { HeaderCell, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
@@ -186,18 +186,35 @@ function regionName(code: string) {
   }
 }
 
-function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort) {
+const DEFAULT_LIMIT = 25;
+
+/** Writes the whole view to the address bar: filters, sort, page size, page and any open detail pane. */
+function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, open: { record?: string; device?: string } = {}) {
   if (typeof window === "undefined") return;
   const params = filtersToParams(filters, view);
   if (view !== "matrix" && sort !== "relevance") params.set("sort", sort);
+  if (view !== "matrix" && limit !== DEFAULT_LIMIT) params.set("rows", String(limit));
+  if (view !== "matrix" && skip > 0) params.set("page", String(Math.floor(skip / Math.max(1, limit)) + 1));
+  if (open.record) params.set("record", open.record);
+  if (open.device) params.set("device", open.device);
   const query = params.toString();
   window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
 }
 
 function initialStateFromUrl() {
-  if (typeof window === "undefined") return { filters: EMPTY_FILTERS, view: "records" as ViewMode, autorun: false, sort: "relevance" as RecordSort };
+  if (typeof window === "undefined") return { filters: EMPTY_FILTERS, view: "records" as ViewMode, autorun: false, sort: "relevance" as RecordSort, limit: DEFAULT_LIMIT, skip: 0, record: "", device: "" };
   const params = new URLSearchParams(window.location.search);
-  return { ...filtersFromParams(params), sort: asRecordSort(params.get("sort")) };
+  const rows = Number(params.get("rows"));
+  const limit = [25, 50, 100].includes(rows) ? rows : DEFAULT_LIMIT;
+  const page = Math.max(1, Math.floor(Number(params.get("page")) || 1));
+  return {
+    ...filtersFromParams(params),
+    sort: asRecordSort(params.get("sort")),
+    limit,
+    skip: (page - 1) * limit,
+    record: (params.get("record") || "").trim(),
+    device: (params.get("device") || "").trim(),
+  };
 }
 
 function premarketIds(item: RecordItem) {
@@ -244,8 +261,8 @@ export default function Home() {
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [udiDevices, setUdiDevices] = useState<UdiDevice[]>([]);
   const [total, setTotal] = useState(0);
-  const [limit, setLimit] = useState(25);
-  const [skip, setSkip] = useState(0);
+  const [limit, setLimit] = useState(initial.limit);
+  const [skip, setSkip] = useState(initial.skip);
   const [recordSort, setRecordSort] = useState<RecordSort>(initial.sort);
   const [loading, setLoading] = useState(false);
   const [loadingNote, setLoadingNote] = useState("");
@@ -265,7 +282,6 @@ export default function Home() {
   const [udiUpdated, setUdiUpdated] = useState("");
   const [datasetTotal, setDatasetTotal] = useState(0);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
-  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [codeCounts, setCodeCounts] = useState<{ code: string; count: number }[] | null>(null);
   const [presetCounts, setPresetCounts] = useState<Map<string, number> | null>(null);
   const [codeInfo, setCodeInfo] = useState<Map<string, CodeInfo | null>>(() => new Map());
@@ -293,16 +309,52 @@ export default function Home() {
   const searchSeq = useRef(0);
 
   const hasSearched = fetchedAt !== null;
+  const pendingOpen = useRef({ record: initial.record, device: initial.device });
+
+  /** Opening or closing a detail pane rewrites the address bar, so any pane can be linked or reloaded. */
+  useEffect(() => {
+    if (!hasSearched) return;
+    const params = new URLSearchParams(window.location.search);
+    const record = selected?.registration?.registration_number ? String(selected.registration.registration_number) : "";
+    const device = selectedDevice?.primaryDi || "";
+    if (record) params.set("record", record); else params.delete("record");
+    if (device) params.set("device", device); else params.delete("device");
+    const query = params.toString();
+    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+  }, [selected, selectedDevice, hasSearched]);
+
+  /** A link that named a record or device opens it once its page of results arrives. */
+  useEffect(() => {
+    const wanted = pendingOpen.current;
+    if (!wanted.record && !wanted.device) return;
+    if (!records.length && !udiDevices.length) return;
+    const record = wanted.record ? records.find((item) => String(item.registration?.registration_number || "") === wanted.record) : undefined;
+    const device = wanted.device ? udiDevices.find((item) => item.primaryDi === wanted.device) : undefined;
+    pendingOpen.current = { record: "", device: "" };
+    if (record) setSelected(record);
+    else if (device) setSelectedDevice(device);
+  }, [records, udiDevices]);
+
+  /** Escape closes whichever detail pane is open, and the page behind a pane does not scroll. */
+  useEffect(() => {
+    const open = !!(selected || selectedDevice || udiCompany);
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (udiCompany) setUdiCompany(null);
+      else if (selectedDevice) setSelectedDevice(null);
+      else setSelected(null);
+    };
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [selected, selectedDevice, udiCompany]);
   const countryOptions = apiCountries;
   const topCountries = countryOptions.slice(0, 4);
-  const activeFilters = [
-    filters.keyword.trim(),
-    filters.productCodes.length,
-    filters.country.trim(),
-    filters.state.trim(),
-    filters.deviceClass,
-    filters.establishment,
-  ].filter(Boolean).length;
   const narrowFilterCount = [
     filters.country.trim(),
     filters.state.trim(),
@@ -402,12 +454,11 @@ export default function Home() {
         setSkip(requestedView === "matrix" ? 0 : nextSkip);
         setAppliedFilters(nextFilters);
         setFetchedAt(new Date());
-        setCheckedAt(new Date());
         if (meta?.last_updated) {
           if (requestedView === "udi") setUdiUpdated(meta.last_updated);
           else setDatasetUpdated(meta.last_updated);
         }
-        syncUrl(nextFilters, requestedView, nextSort);
+        syncUrl(nextFilters, requestedView, nextSort, nextLimit, requestedView === "matrix" ? 0 : nextSkip);
         if (nextSkip === 0) setRecent((current) => rememberSearch(current, nextFilters, requestedView));
         if (countUrl) {
           fetchOpenFda<{ term?: string; count?: number }>(countUrl)
@@ -443,7 +494,6 @@ export default function Home() {
       .then((data: { meta?: { last_updated?: string; results?: { total?: number } } }) => {
         if (data.meta?.last_updated) setDatasetUpdated(data.meta.last_updated);
         if (data.meta?.results?.total) setDatasetTotal(data.meta.results.total);
-        setCheckedAt(new Date());
       })
       .catch(() => {});
     const countryParams = new URLSearchParams({ count: "registration.iso_country_code", limit: "250" });
@@ -464,7 +514,7 @@ export default function Home() {
     fetchOpenFda<{ term?: string; count?: number }>(`${API}?${presetParams.toString()}`)
       .then((data) => setPresetCounts(new Map(data.results.map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]))))
       .catch(() => {});
-    if (initial.autorun) queueMicrotask(() => runSearch(0, initial.view, initial.filters, 25, initial.sort));
+    if (initial.autorun) queueMicrotask(() => runSearch(initial.skip, initial.view, initial.filters, initial.limit, initial.sort));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -712,7 +762,7 @@ export default function Home() {
     }
     const applied = { ...appliedFilters, codeMatch: mode };
     setAppliedFilters(applied);
-    syncUrl(applied, viewMode, recordSort);
+    syncUrl(applied, viewMode, recordSort, limit, skip);
   };
 
   const changeLimit = (nextLimit: number) => {
@@ -807,7 +857,7 @@ export default function Home() {
     setUdiCompany(null);
     setFetchedAt(null);
     setRecordSort("relevance");
-    syncUrl(EMPTY_FILTERS, viewMode, "relevance");
+    syncUrl(EMPTY_FILTERS, viewMode, "relevance", limit, 0);
   };
 
   const fetchAllMatching = async () => {
@@ -964,12 +1014,13 @@ export default function Home() {
     if (hasSearched) {
       runSearch(0, nextView, appliedFilters);
     } else {
-      syncUrl(appliedFilters, nextView, recordSort);
+      syncUrl(appliedFilters, nextView, recordSort, limit, 0);
     }
   };
 
   const activeColumnOptions: readonly { key: string; label: string; hint: string }[] = isUdi ? UDI_COLUMN_OPTIONS : isMatrix ? MATRIX_COLUMN_OPTIONS : RECORD_COLUMN_OPTIONS;
   const activeColumns: readonly string[] = isUdi ? udiColumns : isMatrix ? matrixColumns : recordColumns;
+  const tableScroll = useScrollShadow([viewMode, activeColumns]);
   const toggleActiveColumn = (key: string) => {
     if (isUdi) toggleColumn<UdiColumn>(setUdiColumns, key as UdiColumn);
     else if (isMatrix) toggleColumn<MatrixColumn>(setMatrixColumns, key as MatrixColumn);
@@ -1226,32 +1277,19 @@ export default function Home() {
   };
 
   return (
-    <main>
-      <SourceNav source="fda" view="explorer" status={`openFDA live${datasetUpdated ? ` · FDA data as of ${datasetUpdated}` : ""}`} statusState="connected" />
-
-      <section className="hero" id="top">
-        <div className="eyebrow"><span>01</span> FDA DEVICE DATA</div>
-        <div className="hero-grid">
-          <div>
-            <h1>Device registrations.<br /><em>Made searchable.</em></h1>
-            <p>Search FDA registrations, listings and GUDID device identifiers.</p>
-          </div>
-          <div className="dataset-note" title={freshnessHint}>
-            <Database size={20} />
-            <div>
-              <b>{datasetTotal ? `${datasetTotal.toLocaleString()} records` : "openFDA device registry"}</b>
-              <span>{datasetUpdated ? `FDA data as of ${datasetUpdated}` : "Registrations & listings"}</span>
-              <span>{checkedAt ? `Pulled ${checkedAt.toLocaleString([], dateTimeFormat)}` : "Contacting live API…"}</span>
-            </div>
-          </div>
-        </div>
-      </section>
+    <main className="explorer-shell">
+      <SourceNav
+        source="fda"
+        view="explorer"
+        status={`openFDA live${datasetTotal ? ` · ${datasetTotal.toLocaleString()} records` : ""}${datasetUpdated ? ` · as of ${datasetUpdated}` : ""}`}
+        statusState="connected"
+      />
 
       <section className={`workspace ${filtersCollapsed ? "filters-collapsed" : ""}`} aria-label="Device data explorer">
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
           <div className="filter-panel-inner">
           <div className="panel-heading">
-            <div><span>02</span><h2>Filters</h2></div>
+            <div><h2>Filters</h2></div>
             <div className="panel-heading-actions">
               <button className="icon-button collapse-filter-panel" onClick={() => setFiltersCollapsed((current) => !current)} aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"} aria-expanded={!filtersCollapsed} title={filtersCollapsed ? "Expand filters" : "Collapse filters"}>{filtersCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
               <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
@@ -1372,11 +1410,10 @@ export default function Home() {
             <div className="results-title">
               <button className="icon-button filter-toggle" onClick={() => { setFiltersCollapsed(false); setFiltersOpen(true); }} aria-label="Open filters"><SlidersHorizontal size={18} /></button>
               <div>
-                <span>03 / RESULTS{isUdi ? " · GUDID" : ""}</span>
                 <h2>{!nothingToShow ? (isMatrix ? `${matrixCompanies.toLocaleString()} ${matrixCompanies === 1 ? "company" : "companies"}` : rangeLabel) : showNoResults ? (isMatrix ? "0 companies" : isUdi ? "0 devices" : "0 records") : (isUdi ? "Search devices" : "Search records")}</h2>
                 {fetchedAt && (
-                  <small className="fetch-meta" title={freshnessHint}>
-                    {`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${activeDatasetDate ? ` · FDA data as of ${activeDatasetDate}` : ""}`}
+                  <small className="fetch-meta" title={`Pulled ${fetchedAt.toLocaleString([], dateTimeFormat)}${activeDatasetDate ? ` · FDA data as of ${activeDatasetDate}` : ""}. ${freshnessHint}`}>
+                    {isUdi ? "GUDID" : "openFDA"} · pulled {fetchedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                   </small>
                 )}
               </div>
@@ -1411,8 +1448,6 @@ export default function Home() {
               {isMatrix && <label className="matrix-sort">Sort <select value={matrixPreset} onChange={(e) => applyMatrixPreset(e.target.value)} aria-label="Sort company and device rows"><option value="company">Company A–Z</option><option value="code">Product code</option><option value="devices">Most devices</option><option value="registrations">Most registrations</option>{matrixPreset === "custom" && <option value="custom">{`${MATRIX_COLUMN_OPTIONS.find((option) => option.key === matrixSortKey)?.label || "Column"} ${matrixDir === "asc" ? "↑" : "↓"}`}</option>}</select></label>}
               {viewMode === "records" && <label className="matrix-sort">Sort <select value={recordSort} onChange={(e) => changeRecordSort(asRecordSort(e.target.value))} aria-label="Sort records">{RECORD_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {isUdi && <label className="matrix-sort">Sort <select value={UDI_SORT_OPTIONS.some((option) => option.value === recordSort) ? recordSort : "relevance"} onChange={(e) => changeRecordSort(asRecordSort(e.target.value))} aria-label="Sort devices">{UDI_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
-              {activeFilters > 0 && <span className="filter-count"><Filter size={13} /> {activeFilters} active</span>}
-              {!isMatrix && <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>}
               <button
                 className="secondary export-button"
                 onClick={openExport}
@@ -1502,7 +1537,7 @@ export default function Home() {
                   <span>One row per device identifier record published by its labeler; “None listed” means the labeler declared no 510(k), PMA or De Novo number. Open a row for identifiers, GMDN terms and the labeler&apos;s registration listings.</span>
                 </div>
               )}
-              <div className="table-wrap" aria-live="polite">
+              <div className="table-wrap" aria-live="polite" ref={tableScroll}>
                 {viewMode === "records" ? <table className={`records-table${fixedLayout ? " table-fixed" : ""}`} style={tableStyle}>
                   {colgroup}
                   <thead><tr>
@@ -1577,6 +1612,7 @@ export default function Home() {
               </div>
               {!isMatrix && <div className="pagination">
                 <span>{rangeLabel}</span>
+                <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>
                 <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + pageCount >= total || loading}>Next <ArrowRight size={15} /></button></div>
               </div>}
             </>

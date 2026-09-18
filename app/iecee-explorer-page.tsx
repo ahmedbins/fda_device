@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, recentSearchParams, useColumnWidths, useRecentSearches, type HeaderSpec } from "./explorer-tools";
+import { AppliedFilters, HeaderCell, RecentSearches, recentSearchParams, useColumnWidths, useRecentSearches, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { DEFAULT_IECEE_PRESET, IECEE_PRESETS, getIeceePreset, presetForQuery } from "./iecee-config";
 import {
   EMPTY_IECEE_FILTERS,
@@ -230,6 +230,7 @@ export default function IeceeExplorerPage() {
   const request = useRef<AbortController | null>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const widthTools = useColumnWidths("iecee-col-widths", columns);
+  const tableScroll = useScrollShadow([columns]);
   const recents = useRecentSearches("iecee-recent-searches");
   const rememberRecent = recents.remember;
 
@@ -500,7 +501,7 @@ export default function IeceeExplorerPage() {
   const family = (detail?.family || []).filter((certificate) => selected && certificate.id !== selected.id);
 
   return (
-    <main>
+    <main className="explorer-shell">
       <SourceNav source="iecee" view="explorer" status={sourcePresentation.status} statusState={error ? "error" : retrievedAt ? "connected" : "ready"} />
 
       <section className="hero hero-compact" id="top">
@@ -528,7 +529,7 @@ export default function IeceeExplorerPage() {
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
           <div className="filter-panel-inner">
           <div className="panel-heading">
-            <div><span>02</span><h2>Filters</h2></div>
+            <div><h2>Filters</h2></div>
             <div className="panel-heading-actions">
               <button className="icon-button collapse-filter-panel" onClick={() => setFiltersCollapsed((value) => !value)} aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"}>{filtersCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
               <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
@@ -623,7 +624,7 @@ export default function IeceeExplorerPage() {
 
         <section className="results-panel">
           <div className="results-toolbar">
-            <div className="results-title"><span>03</span><div><h2>Certificates</h2>{retrievedAt && <small className="fetch-meta">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</small>}</div></div>
+            <div className="results-title"><div><h2>Certificates</h2>{retrievedAt && <small className="fetch-meta">Pulled {retrievedAt.toLocaleString([], dateTimeFormat)}</small>}</div></div>
             <div className="toolbar-actions">
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <label className="matrix-sort">Sort <select value={applied.sort} onChange={(event) => changeSort(event.target.value as IeceeSort)}>{IECEE_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
@@ -648,7 +649,7 @@ export default function IeceeExplorerPage() {
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">CB</div><Award size={34} /><h3>Start with a certificate search.</h3><p>Search a manufacturer, trademark, model, product description or certificate number in the official IECEE CB Scheme certificate index, then narrow by status, product category, standard, certification body and issue date.</p></div>
           : searched && !loading && !error && result && !visibleCertificates.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No IECEE certificates matched.</h3><p>Try fewer words, a manufacturer name instead of a model, or remove a status, category or standard filter.</p><div className="empty-actions"><button className="secondary" onClick={() => applyFilters({ statuses: [], types: [], categories: [], standards: [], ncbs: [], issuedFrom: "", issuedTo: "" })}>Clear narrow filters</button></div></div>
           : visibleCertificates.length > 0 && <>
-            <div className="table-wrap"><table className={`fcc-table iecee-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleCertificates.map((certificate) => <tr key={certificate.id} tabIndex={0} onClick={() => setSelected(certificate)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(certificate); } }}>{columns.map((column) => <td key={column}>{renderCell(certificate, column)}</td>)}</tr>)}</tbody></table></div>
+            <div className="table-wrap" ref={tableScroll}><table className={`fcc-table iecee-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleCertificates.map((certificate) => <tr key={certificate.id} tabIndex={0} onClick={() => setSelected(certificate)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(certificate); } }}>{columns.map((column) => <td key={column}>{renderCell(certificate, column)}</td>)}</tr>)}</tbody></table></div>
             <div className="pagination"><span>{total.toLocaleString()} matching certificate{total === 1 ? "" : "s"}{result && result.unfilteredTotal !== total ? ` of ${result.unfilteredTotal.toLocaleString()} for this text` : ""} · page {applied.page + 1} of {pageCount.toLocaleString()}</span><div><button className="icon-button" onClick={() => changePage(applied.page - 1)} disabled={applied.page === 0 || loading} aria-label="Previous page">←</button><button className="icon-button" onClick={() => changePage(applied.page + 1)} disabled={applied.page + 1 >= pageCount || loading} aria-label="Next page">→</button></div></div>
           </>}
         </section>

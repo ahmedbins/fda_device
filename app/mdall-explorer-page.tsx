@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
+import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_MDALL_PRESET, MDALL_PRESETS, getMdallPreset } from "./mdall-config";
 import {
   MDALL_DOCS_URL,
@@ -256,6 +256,7 @@ export default function MdallExplorerPage() {
   const request = useRef<AbortController | null>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const widthTools = useColumnWidths("hc-col-widths-licences", columns);
+  const tableScroll = useScrollShadow([columns]);
   const recents = useRecentSearches("hc-recent-searches");
   const rememberRecent = recents.remember;
 
@@ -492,7 +493,7 @@ export default function MdallExplorerPage() {
   };
 
   return (
-    <main>
+    <main className="explorer-shell">
       <SourceNav source="hc" view="explorer" status={sourcePresentation.status} statusState={retrievedAt ? "connected" : "ready"} />
 
       <section className="hero hero-compact" id="top">
@@ -520,7 +521,7 @@ export default function MdallExplorerPage() {
         <aside className={`filter-panel ${filtersOpen ? "open" : ""}`}>
           <div className="filter-panel-inner">
           <div className="panel-heading">
-            <div><span>02</span><h2>Filters</h2></div>
+            <div><h2>Filters</h2></div>
             <div className="panel-heading-actions">
               <button className="icon-button collapse-filter-panel" onClick={() => setFiltersCollapsed((value) => !value)} aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"}>{filtersCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
               <button className="icon-button mobile-only" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={18} /></button>
@@ -577,7 +578,7 @@ export default function MdallExplorerPage() {
 
         <section className="results-panel">
           <div className="results-toolbar">
-            <div className="results-title"><span>03</span><div><h2>{resultView === "licences" ? "MDALL licences" : "Companies"}</h2>{retrievedAt && <small className="fetch-meta">{searchMeta?.lastRefreshAt ? `MDALL refresh ${displayDate(searchMeta.lastRefreshAt)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</div></div>
+            <div className="results-title"><div><h2>{resultView === "licences" ? "MDALL licences" : "Companies"}</h2>{retrievedAt && <small className="fetch-meta">{searchMeta?.lastRefreshAt ? `MDALL refresh ${displayDate(searchMeta.lastRefreshAt)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</div></div>
             <div className="toolbar-actions">
               {activeFilters > 0 && <span className="filter-count"><Filter size={12} /> {activeFilters} active</span>}
               <div className="view-toggle"><button className={resultView === "licences" ? "active" : ""} onClick={() => { setResultView("licences"); setPage(0); }}>Licences</button><button className={resultView === "companies" ? "active" : ""} onClick={() => { setResultView("companies"); setPage(0); }}>Companies</button></div>
@@ -602,7 +603,7 @@ export default function MdallExplorerPage() {
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">HC</div><Landmark size={34} /><h3>Start with a Canadian licence search.</h3><p>Search a company, licence name, licence number, device trade name, or device identifier in the official Health Canada MDALL API.</p></div>
           : searched && !loading && !error && !filteredLicences.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No MDALL licences matched.</h3><p>Try a company name, a shorter licence name, or switch between active and archived licences. Class I devices are not listed in MDALL.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); setRiskClass(""); }}>Clear narrow filters</button></div></div>
           : resultView === "licences" && filteredLicences.length > 0 && <>
-            <div className="table-wrap"><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleLicences.map((licence) => <tr key={`${licence.licenceNumber}-${licence.licenceStatus}-${licence.endDate || "open"}`} tabIndex={0} onClick={() => setSelected(licence)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(licence); } }}>{columns.map((column) => <td key={column}>{renderCell(licence, column)}</td>)}</tr>)}</tbody></table></div>
+            <div className="table-wrap" ref={tableScroll}><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleLicences.map((licence) => <tr key={`${licence.licenceNumber}-${licence.licenceStatus}-${licence.endDate || "open"}`} tabIndex={0} onClick={() => setSelected(licence)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(licence); } }}>{columns.map((column) => <td key={column}>{renderCell(licence, column)}</td>)}</tr>)}</tbody></table></div>
             <div className="pagination"><span>{filteredLicences.length.toLocaleString()} matching MDALL licence{filteredLicences.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}</span><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>
           </>}
           {resultView === "companies" && groupedCompanies.length > 0 && <div className="fcc-grantee-grid">{groupedCompanies.map((group) => <button key={group.key} className="fcc-grantee-card" onClick={() => setSelectedCompany(group.key)}><span className="grantee-code">{group.companyId || "HC"}</span><h3>{group.companyName}</h3><p>{group.licenceCount} MDALL licence{group.licenceCount === 1 ? "" : "s"}</p><dl><div><dt>Most recent</dt><dd>{displayDate(group.latestIssued)}</dd></div><div><dt>Location</dt><dd>{mdallLocation(group.company)}</dd></div></dl><span className="open-profile">Open company profile →</span></button>)}</div>}

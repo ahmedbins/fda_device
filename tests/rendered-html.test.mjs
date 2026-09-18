@@ -30,8 +30,9 @@ test("server-renders all source and view routes", async () => {
 
 test("keeps FDA Explorer and Monitoring content intact", async () => {
   const explorer = await (await render("/fda/explorer")).text();
-  assert.match(explorer, /FDA DEVICE DATA/);
-  assert.match(explorer, /Device registrations/);
+  // The hero came out when the explorer became a fixed shell; the source nav carries the identity now.
+  assert.match(explorer, /openFDA live/);
+  assert.match(explorer, /Search records/);
   assert.match(explorer, /Product codes/);
   assert.match(explorer, /listings match any of them/);
   assert.match(explorer, /Company \+ devices/);

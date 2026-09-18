@@ -71,6 +71,7 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .dataset-note span { color: var(--muted); font: 11px/1.3 var(--font-roboto), sans-serif; text-transform: uppercase; }
 
 .workspace { min-height: 660px; margin-inline: var(--edge); display: grid; grid-template-columns: 360px minmax(0, 1fr); border-bottom: 1px solid var(--line); transition: grid-template-columns .2s ease; }
+
 .filter-panel { background: var(--paper-2); border-right: 1px solid var(--line); }
 .filter-panel-inner { padding: 30px 28px 36px var(--gutter); }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
@@ -171,12 +172,55 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 
 @media (min-width: 721px) {
   .workspace.filters-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
-  .filter-panel-inner { position: sticky; top: 0; max-height: 100vh; overflow: hidden auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .filter-panel-inner { position: sticky; top: 0; max-height: 100vh; overflow: hidden auto; scrollbar-gutter: stable; }
   .filters-collapsed .filter-panel-inner { padding: 22px 10px; }
   .filters-collapsed .filter-panel-inner > :not(.panel-heading) { display: none; }
   .filters-collapsed .panel-heading { justify-content: center; margin: 0; }
   .filters-collapsed .panel-heading > div:first-child { display: none; }
   .filters-collapsed .filter-toggle { display: inline-grid; }
+
+  /* One screen, one scroll per pane: the shell owns the viewport and the page behind it is fixed. */
+  body:has(.explorer-shell) { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  /* The SPA mounts into #root, so the height chain has to pass through it. */
+  body:has(.explorer-shell) > #root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .explorer-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .explorer-shell .workspace { flex: 1; min-height: 0; margin-inline: calc(var(--edge) + var(--gutter)); margin-bottom: var(--gutter); border: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .explorer-shell .filter-panel-inner { padding: 26px 22px 30px; }
+  .explorer-shell .results-panel th:first-child, .explorer-shell .results-panel td:first-child { padding-left: 20px; }
+  .explorer-shell .results-panel th:last-child, .explorer-shell .results-panel td:last-child { padding-right: 20px; }
+  /* FCC, Health Canada and IECEE still introduce themselves and link out to the official search.
+     In a fixed shell that has to cost one line, not a banner: title, blurb, action and provenance
+     all sit on the same row. */
+  .explorer-shell .hero-compact { padding: 9px calc(var(--edge) + var(--gutter)); }
+  .explorer-shell .hero-compact .eyebrow { display: none; }
+  .explorer-shell .hero-compact .hero-grid { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; }
+  .explorer-shell .hero-compact .hero-grid > div:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
+  .explorer-shell .hero-compact h1 { font-size: 19px; line-height: 1.2; }
+  .explorer-shell .hero-compact .hero-inline { margin: 0; gap: 8px 14px; }
+  .explorer-shell .hero-compact p { font-size: 12.5px; }
+  .explorer-shell .hero-compact .primary { min-height: 30px; padding: 0 12px; font-size: 11px; }
+  .explorer-shell .hero-compact .dataset-note { min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; gap: 8px; }
+  .explorer-shell .hero-compact .dataset-note svg { width: 15px; height: 15px; }
+  .explorer-shell .hero-compact .dataset-note > div { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+  .explorer-shell .hero-compact .dataset-note b { font-size: 11px; }
+  .explorer-shell .hero-compact .dataset-note span { font-size: 10px; }
+  .explorer-shell .results-toolbar { min-height: 0; padding: 10px 20px; }
+  /* Count and freshness read as one line, so the toolbar is a row of controls, not a header block. */
+  .explorer-shell .results-title > div { flex-direction: row; align-items: baseline; gap: 10px; }
+  .explorer-shell .results-title h2 { font-size: 19px; }
+  .explorer-shell .results-title .fetch-meta { white-space: nowrap; }
+  .explorer-shell .applied-filters, .explorer-shell .code-count-strip { padding: 7px 20px; }
+  .explorer-shell .pagination { min-height: 0; padding: 10px 20px; gap: 16px; }
+  .explorer-shell .pagination .page-size { display: flex; margin-right: auto; height: 32px; }
+  .explorer-shell .matrix-note { min-height: 0; padding: 8px 20px; }
+  .explorer-shell .filter-panel { min-height: 0; }
+  .explorer-shell .filter-panel-inner { position: static; height: 100%; max-height: none; }
+  .explorer-shell .results-panel { min-height: 0; display: flex; flex-direction: column; }
+  .explorer-shell .results-panel > .table-wrap { flex: 1; min-height: 0; max-height: none; }
+  .explorer-shell .empty-state { flex: 1; min-height: 0; overflow: auto; }
+  /* Leave room for the pagination bar and footer below, so at the foot of the page the pane still
+     starts at the top of the viewport and the sticky header is never clipped. */
+  .results-panel .table-wrap { max-height: calc(100vh - 124px); }
 }
 
 .empty-state { min-height: 570px; padding: 72px 28px; display: flex; flex-direction: column; align-items: center; text-align: center; position: relative; overflow: hidden; }
@@ -206,7 +250,25 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.table-wrap { overflow: auto; }
+.table-wrap {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  /* Edge fades: the white patches scroll with the content, the shadows stay pinned, so a shadow
+     shows only while there is more table past that edge. */
+  background:
+    linear-gradient(to right, var(--white) 30%, rgba(255,255,255,0)) 0 0,
+    linear-gradient(to left, var(--white) 30%, rgba(255,255,255,0)) 100% 0,
+    linear-gradient(to right, rgba(22,54,105,.14), rgba(22,54,105,0)) 0 0,
+    linear-gradient(to left, rgba(22,54,105,.14), rgba(22,54,105,0)) 100% 0;
+  background-repeat: no-repeat;
+  background-size: 34px 100%, 34px 100%, 13px 100%, 13px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }
+.table-wrap::-webkit-scrollbar-track { background: #eef2f4; }
+.table-wrap::-webkit-scrollbar-thumb { background: #b4c2c9; border: 3px solid #eef2f4; border-radius: 6px; }
+.table-wrap::-webkit-scrollbar-thumb:hover { background: #8fa4ad; }
+.table-wrap::-webkit-scrollbar-corner { background: #eef2f4; }
 .matrix-note { min-height: 54px; padding: 11px clamp(18px, 3vw, 38px); display: flex; align-items: center; justify-content: space-between; gap: 18px; color: var(--muted); background: #edf6fa; border-bottom: 1px solid #cfe1e9; font-size: 12px; }
 .matrix-note > div { display: flex; align-items: center; gap: 9px; }
 .matrix-note svg { color: var(--coral); flex: 0 0 auto; }
@@ -340,6 +402,15 @@ tr:hover .row-filter, .row-filter:focus-visible { opacity: 1; }
 th.sortable { cursor: pointer; }
 th.sortable:hover .th-inner, th.sorted .th-inner { color: var(--ink); }
 th { overflow: hidden; }
+.results-panel .table-wrap thead th { position: sticky; top: 0; z-index: 3; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--line); }
+/* Pin the identity column so scrolling right never leaves a row you cannot name. Sticky cells do
+   not inherit the row background, so every row state has to repaint the pinned cell itself. */
+.results-panel .table-wrap th:first-child, .results-panel .table-wrap td:first-child { position: sticky; left: 0; z-index: 2; background: var(--white); }
+.results-panel .table-wrap thead th:first-child { z-index: 4; background: #f2f5f5; }
+.results-panel .table-wrap tbody tr:hover td:first-child, .results-panel .table-wrap tbody tr:focus td:first-child { background: #f1f6f8; }
+.results-panel .table-wrap .matrix-table tbody tr:hover td:first-child { background: #f6fafc; }
+.results-panel .table-wrap th:first-child::after, .results-panel .table-wrap td:first-child::after { content: ""; position: absolute; top: 0; bottom: -1px; right: -13px; width: 13px; pointer-events: none; background: linear-gradient(to right, rgba(22,54,105,.11), rgba(22,54,105,0)); opacity: 0; transition: opacity .15s ease; }
+.results-panel .table-wrap.scrolled-x th:first-child::after, .results-panel .table-wrap.scrolled-x td:first-child::after { opacity: 1; }
 .th-inner { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .th-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .th-inner > svg { flex: 0 0 auto; }
@@ -658,11 +729,14 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   .monitor-section { margin: 18px 20px; }
 }
 
+@media (max-width: 1280px) {
+  .workspace { grid-template-columns: 300px minmax(0, 1fr); }
+  .filter-panel-inner { padding-left: 24px; }
+}
+
 @media (max-width: 980px) {
   .hero-grid { grid-template-columns: 1fr; }
   .dataset-note { max-width: 420px; }
-  .workspace { grid-template-columns: 300px minmax(0, 1fr); }
-  .filter-panel-inner { padding-left: 24px; }
   .filter-count, .page-size { display: none; }
   .results-toolbar { align-items: flex-start; }
   .toolbar-actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -687,7 +761,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   .hero p { font-size: 14px; }
   .dataset-note { min-width: 0; }
   .workspace { display: block; }
-  .filter-panel { position: fixed; inset: 0; z-index: 30; overflow: hidden auto; overscroll-behavior: contain; padding: 0; transform: translateX(-100%); transition: transform .2s ease; box-shadow: 14px 0 50px rgba(0,0,0,.2); }
+  .filter-panel { position: fixed; inset: 0; z-index: 30; overflow: hidden auto; padding: 0; transform: translateX(-100%); transition: transform .2s ease; box-shadow: 14px 0 50px rgba(0,0,0,.2); }
   .filter-panel-inner { position: static; max-height: none; padding: 28px 22px 40px; }
   .filter-panel.open { transform: translateX(0); }
   .mobile-only, .filter-toggle { display: inline-grid; }
@@ -714,6 +788,8 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   .hero { padding: 16px 0; background: none; border: 0; }
   .hero h1 { font-size: 28px; }
   table { min-width: 0; }
+  .table-wrap { max-height: none; overflow: visible; background: none; }
+  .results-panel .table-wrap thead th, .results-panel .table-wrap th:first-child, .results-panel .table-wrap td:first-child { position: static; }
   td, th { padding: 6px 8px; height: auto; }
   .results-panel { background: none; }
 }
