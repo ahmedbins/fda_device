@@ -103,7 +103,7 @@ import {
 } from "./fda-udi";
 import { UdiCompanyPanel, UdiDeviceDetail } from "./fda-udi-panel";
 import SourceNav from "./source-nav";
-import { HeaderCell, columnShare, parseColumnWidths, useScrollShadow, type HeaderSpec } from "./explorer-tools";
+import { HeaderCell, columnShare, columnSharesKey, fitShares, parseColumnWidths, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
@@ -564,7 +564,8 @@ export default function Home() {
       COLUMN_WIDTH_VIEWS.forEach((view) => {
         // Shared parser: it also drops the pre-2026-09-18 pixel widths, which pinned the table to
         // whatever window it was dragged in and stopped fitting anywhere else.
-        widths[view] = parseColumnWidths(localStorage.getItem(`fda-col-widths-${view}`));
+        widths[view] = parseColumnWidths(localStorage.getItem(columnSharesKey(`fda-${view}`)));
+          localStorage.removeItem(`fda-col-widths-${view}`);
       });
       queueMicrotask(() => {
         if (validRecords) setRecordColumns(validRecords);
@@ -593,7 +594,7 @@ export default function Home() {
   useEffect(() => {
     colWidthsRef.current = colWidths;
     if (!colWidthsReady) return;
-    COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(`fda-col-widths-${view}`, JSON.stringify(colWidths[view] || {})));
+    COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(columnSharesKey(`fda-${view}`), JSON.stringify(colWidths[view] || {})));
   }, [colWidthsReady, colWidths]);
 
   /** While a header is being dragged, follow the pointer anywhere on the page and stop on any release, cancel or window blur. */
@@ -610,7 +611,7 @@ export default function Home() {
       }
       const width = Math.min(active.max, Math.max(64, Math.round(active.startWidth + event.clientX - active.startX)));
       const share = columnShare(width, active.pane, active.sharing);
-      setColWidths((current) => ({ ...current, [active.view]: { ...(current[active.view] || {}), [active.key]: share } }));
+      setColWidths((current) => ({ ...current, [active.view]: fitShares({ ...(current[active.view] || {}), [active.key]: share }) }));
     };
     const end = () => {
       resizeRef.current = null;

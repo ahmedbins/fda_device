@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
+import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_MDALL_PRESET, MDALL_PRESETS, getMdallPreset } from "./mdall-config";
 import {
   MDALL_DOCS_URL,
@@ -255,7 +255,7 @@ export default function MdallExplorerPage() {
   const [idCopied, setIdCopied] = useState(false);
   const request = useRef<AbortController | null>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
-  const widthTools = useColumnWidths("hc-col-widths-licences", columns);
+  const widthTools = useColumnWidths(columnSharesKey("hc-licences"), columns);
   const tableScroll = useScrollShadow([columns]);
   const recents = useRecentSearches("hc-recent-searches");
   const rememberRecent = recents.remember;

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Filter, History, X } from "lucide-react";
-import { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, columnShare, parseColumnWidths, rememberEntry, parseRecentEntries, type RecentEntry, type SortDir } from "./explorer-tools-core";
+import { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, columnShare, fitShares, parseColumnWidths, rememberEntry, parseRecentEntries, type RecentEntry, type SortDir } from "./explorer-tools-core";
 
-export { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, RECENT_MAX, columnShare, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort, type RecentEntry, type SortDir } from "./explorer-tools-core";
+export { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, RECENT_MAX, columnShare, columnSharesKey, compareValues, fitShares, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort, type RecentEntry, type SortDir } from "./explorer-tools-core";
 
 /**
  * Table and filter-pane tools shared by every Explorer: sortable, resizable table headers with
@@ -87,6 +87,8 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
   const widthsRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
+    // Drop the pre-2026-09-18 pixel map for this table; its numbers are not shares.
+    localStorage.removeItem(storageKey.replace("-col-shares", "-col-widths"));
     const stored = parseColumnWidths(localStorage.getItem(storageKey));
     queueMicrotask(() => {
       loadedKey.current = storageKey;
@@ -118,7 +120,7 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
         return;
       }
       const width = Math.min(active.max, Math.max(MIN_COLUMN_WIDTH, Math.round(active.startWidth + event.clientX - active.startX)));
-      setWidths((current) => ({ ...current, [active.key]: columnShare(width, active.pane, active.sharing) }));
+      setWidths((current) => fitShares({ ...current, [active.key]: columnShare(width, active.pane, active.sharing) }));
     };
     const end = () => {
       resizeRef.current = null;

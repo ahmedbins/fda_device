@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { columnShare, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort } from "../app/explorer-tools-core.ts";
+import { columnShare, columnSharesKey, fitShares, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort } from "../app/explorer-tools-core.ts";
 
 test("header clicks cycle sort direction and start numeric columns descending", () => {
   assert.deepEqual(toggleSort({ key: "issued", dir: "desc" }, "issued"), { key: "issued", dir: "asc" });
@@ -26,6 +26,14 @@ test("only keeps usable stored column widths", () => {
   assert.equal(columnShare(500, 1000, 3), 50);
   assert.equal(columnShare(2000, 1000, 3), 88);
   assert.equal(columnShare(10, 1000, 3), 4);
+
+  // Shares live under their own key: a stored 48 meant 48 pixels under the old one and 48% under
+  // this one, which turned a 48px arrow column into half the table.
+  assert.equal(columnSharesKey("fda-records"), "fda-records-col-shares");
+
+  // However many columns get pinned, the ones nobody dragged keep room to share.
+  assert.deepEqual(fitShares({ a: 40, b: 30 }), { a: 40, b: 30 });
+  assert.deepEqual(fitShares({ a: 60, b: 60 }), { a: 44, b: 44 });
   assert.deepEqual(parseColumnWidths("not json"), {});
   assert.deepEqual(parseColumnWidths(null), {});
 });

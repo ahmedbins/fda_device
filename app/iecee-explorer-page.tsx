@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, recentSearchParams, useColumnWidths, useRecentSearches, useScrollShadow, type HeaderSpec } from "./explorer-tools";
+import { AppliedFilters, HeaderCell, RecentSearches, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { DEFAULT_IECEE_PRESET, IECEE_PRESETS, getIeceePreset, presetForQuery } from "./iecee-config";
 import {
   EMPTY_IECEE_FILTERS,
@@ -229,7 +229,7 @@ export default function IeceeExplorerPage() {
   });
   const request = useRef<AbortController | null>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
-  const widthTools = useColumnWidths("iecee-col-widths", columns);
+  const widthTools = useColumnWidths(columnSharesKey("iecee"), columns);
   const tableScroll = useScrollShadow([columns]);
   const recents = useRecentSearches("iecee-recent-searches");
   const rememberRecent = recents.remember;

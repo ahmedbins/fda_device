@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
+import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
 import {
   FCC_EAS_API,
@@ -249,7 +249,7 @@ export default function FccExplorerPage() {
   const scopeInput = useRef<HTMLInputElement>(null);
   const columnPicker = useRef<HTMLDetailsElement>(null);
   const request = useRef<AbortController | null>(null);
-  const widthTools = useColumnWidths("fcc-col-widths-records", columns);
+  const widthTools = useColumnWidths(columnSharesKey("fcc-records"), columns);
   const tableScroll = useScrollShadow([columns]);
   const recents = useRecentSearches("fcc-recent-searches");
   const rememberRecent = recents.remember;

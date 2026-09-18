@@ -8,6 +8,26 @@ export const MIN_COLUMN_WIDTH = 64;
 /** A dragged column is stored as a share of the table pane, so it means the same at any window size. */
 export const MIN_COLUMN_SHARE = 4;
 export const MAX_COLUMN_SHARE = 92;
+/** Shares never take the whole table: what is left is what the columns nobody dragged get to share. */
+export const MAX_TOTAL_SHARE = 88;
+
+/**
+ * Shares are stored under their own key because they are not interchangeable with the pixel widths
+ * that used to live in `*-col-widths-*`: a stored `48` meant 48 pixels then and 48% now, which
+ * turned a 48px arrow column into half the table. The old keys are abandoned, not reinterpreted.
+ */
+export function columnSharesKey(name: string) {
+  return `${name}-col-shares`;
+}
+
+/** Keeps the pinned columns from crowding out the rest, however many of them get dragged. */
+export function fitShares(shares: Record<string, number>): Record<string, number> {
+  const keys = Object.keys(shares);
+  const total = keys.reduce((sum, key) => sum + shares[key], 0);
+  if (total <= MAX_TOTAL_SHARE) return shares;
+  const scale = MAX_TOTAL_SHARE / total;
+  return Object.fromEntries(keys.map((key) => [key, Math.max(MIN_COLUMN_SHARE, Math.round(shares[key] * scale * 10) / 10)]));
+}
 
 /** Turns a dragged pixel width into the share of the pane it should keep, leaving the rest room. */
 export function columnShare(width: number, paneWidth: number, sharing: number) {
@@ -23,9 +43,8 @@ export function parseColumnWidths(raw: string | null): Record<string, number> {
   try {
     const parsed = JSON.parse(raw || "null") as Record<string, unknown> | null;
     if (!parsed || typeof parsed !== "object") return {};
-    // Widths used to be stored in pixels, which stopped fitting as soon as the window changed size.
-    // Shares replaced them; anything outside the share range is a stale pixel value and is dropped.
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] >= MIN_COLUMN_SHARE && entry[1] <= MAX_COLUMN_SHARE));
+    const shares = Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] >= MIN_COLUMN_SHARE && entry[1] <= MAX_COLUMN_SHARE));
+    return fitShares(shares);
   } catch {
     return {};
   }
