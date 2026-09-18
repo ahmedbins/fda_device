@@ -422,7 +422,9 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 /* Expanded, the record stops being a panel and becomes a page. Full-width bands of content are
    what made it read like a settings screen, so everything below the bar is one centred column at a
    readable measure; the margins either side are the design, not leftover space. */
-.drawer.drawer-wide { width: 100%; }
+/* Expanding is not a slide in from the edge; inheriting that animation's offset left the page
+   sitting 30px off-centre and hanging over the right edge. */
+.drawer.drawer-wide { width: 100%; animation: none; transform: none; }
 .drawer-wide > *:not(.drawer-top) { width: min(100%, var(--record-measure, 1080px)); margin-inline: auto; }
 .drawer-wide .drawer-top { padding-inline: max(28px, calc((100% - var(--record-measure, 1080px)) / 2)); }
 .drawer-wide .drawer-hero { padding: 48px 0 36px; }
