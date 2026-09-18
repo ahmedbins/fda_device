@@ -200,7 +200,8 @@ export default function IeceeExplorerPage() {
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
   const [selected, setSelected] = useState<IeceeCertificate | null>(null);
   const [detailState, setDetailState] = useState<DetailState | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [showAllNcbs, setShowAllNcbs] = useState(false);
@@ -642,7 +643,7 @@ export default function IeceeExplorerPage() {
 
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>IECEE search needs attention</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
           {result?.capped && <div className="coverage-banner"><Database size={17} /><div><b>Only the first {IECEE_RESULT_WINDOW.toLocaleString()} of {total.toLocaleString()} matches are reachable</b><span>The IECEE index stops paging at 10,000 results. Add a category, standard, status or date range to reach the rest.</span></div></div>}
-          {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting the IECEE certificate index…</div>}
+          {loading && <div className="loading-layer"><div className="loading-note"><LoaderCircle className="spin" size={24} /> Contacting the IECEE certificate index…</div></div>}
 
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">CB</div><Award size={34} /><h3>Start with a certificate search.</h3><p>Search a manufacturer, trademark, model, product description or certificate number in the official IECEE CB Scheme certificate index, then narrow by status, product category, standard, certification body and issue date.</p></div>
           : searched && !loading && !error && result && !visibleCertificates.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No IECEE certificates matched.</h3><p>Try fewer words, a manufacturer name instead of a model, or remove a status, category or standard filter.</p><div className="empty-actions"><button className="secondary" onClick={() => applyFilters({ statuses: [], types: [], categories: [], standards: [], ncbs: [], issuedFrom: "", issuedTo: "" })}>Clear narrow filters</button></div></div>

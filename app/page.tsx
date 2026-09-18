@@ -259,7 +259,8 @@ export default function Home() {
   const [exportFilename, setExportFilename] = useState("");
   const [exportFilenameCustom, setExportFilenameCustom] = useState(false);
   const [exportColumnIds, setExportColumnIds] = useState<string[]>([]);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [datasetUpdated, setDatasetUpdated] = useState("");
   const [udiUpdated, setUdiUpdated] = useState("");
   const [datasetTotal, setDatasetTotal] = useState(0);
@@ -1580,7 +1581,7 @@ export default function Home() {
               </div>}
             </>
           )}
-          {(loading || exportProgress) && <div className="loading-layer"><LoaderCircle className="spin" size={28} /><span>{exportProgress || loadingNote || (isUdi ? "Searching FDA GUDID…" : "Searching openFDA…")}</span></div>}
+          {(loading || exportProgress) && <div className="loading-layer"><div className="loading-note"><LoaderCircle className="spin" size={28} /><span>{exportProgress || loadingNote || (isUdi ? "Searching FDA GUDID…" : "Searching openFDA…")}</span></div></div>}
         </section>
       </section>
 

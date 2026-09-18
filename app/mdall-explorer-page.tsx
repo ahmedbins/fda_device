@@ -239,7 +239,8 @@ export default function MdallExplorerPage() {
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
   const [selected, setSelected] = useState<MdallLicence | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [columns, setColumns] = useState<ColumnKey[]>(() => {
     if (typeof window === "undefined") return DEFAULT_COLUMNS;
@@ -596,7 +597,7 @@ export default function MdallExplorerPage() {
           <AppliedFilters chips={appliedChips} onRemove={removeChip} onClear={reset} />
           {error && <div className="error-banner"><CircleAlert size={18} /><div><b>MDALL search needs attention</b><span>{error}</span></div><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
           {!!searchMeta?.notes.length && <div className="coverage-banner"><Database size={17} /><div><b>MDALL result note</b><span>{searchMeta.notes.join(" ")}</span></div></div>}
-          {loading && <div className="loading-layer"><LoaderCircle className="spin" size={24} /> Contacting Health Canada MDALL…</div>}
+          {loading && <div className="loading-layer"><div className="loading-note"><LoaderCircle className="spin" size={24} /> Contacting Health Canada MDALL…</div></div>}
 
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">HC</div><Landmark size={34} /><h3>Start with a Canadian licence search.</h3><p>Search a company, licence name, licence number, device trade name, or device identifier in the official Health Canada MDALL API.</p></div>
           : searched && !loading && !error && !filteredLicences.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No MDALL licences matched.</h3><p>Try a company name, a shorter licence name, or switch between active and archived licences. Class I devices are not listed in MDALL.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); setRiskClass(""); }}>Clear narrow filters</button></div></div>
