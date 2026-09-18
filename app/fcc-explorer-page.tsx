@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
+import { AppliedFilters, DrawerTop, HeaderCell, useEscapeToClose, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
 import {
   FCC_EAS_API,
@@ -221,7 +221,9 @@ export default function FccExplorerPage() {
   const [searched, setSearched] = useState(false);
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
   const [selected, setSelected] = useState<NormalizedFccRecord | null>(null);
+  const [drawerWide, setDrawerWide] = useState(false);
   const [selectedGrantee, setSelectedGrantee] = useState<string | null>(null);
+  useEscapeToClose(!!(selected || selectedGrantee), () => { if (selectedGrantee) setSelectedGrantee(null); else setSelected(null); });
   // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
@@ -597,8 +599,8 @@ export default function FccExplorerPage() {
       </section>
 
       {selected && <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
-        <aside className="drawer" aria-label="FCC Authorization Dossier">
-          <div className="drawer-top"><span>FCC AUTHORIZATION DOSSIER</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
+        <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="FCC Authorization Dossier">
+          <DrawerTop label="FCC AUTHORIZATION DOSSIER" wide={drawerWide} onToggleWide={() => setDrawerWide((wide) => !wide)} onClose={() => setSelected(null)} />
           <div className="drawer-hero">
             <span className="record-id">FCC ID</span>
             <h2 className="fcc-drawer-id">{selected.fccId}</h2>
@@ -620,8 +622,8 @@ export default function FccExplorerPage() {
       </div>}
 
       {selectedGranteeGroup && <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelectedGrantee(null)}>
-        <aside className="drawer" aria-label="FCC Grantee Profile">
-          <div className="drawer-top"><span>FCC GRANTEE PROFILE</span><button className="icon-button" onClick={() => setSelectedGrantee(null)} aria-label="Close grantee profile"><X size={19} /></button></div>
+        <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="FCC Grantee Profile">
+          <DrawerTop label="FCC GRANTEE PROFILE" wide={drawerWide} onToggleWide={() => setDrawerWide((wide) => !wide)} onClose={() => setSelectedGrantee(null)} closeLabel="Close grantee profile" />
           <div className="drawer-hero"><span className="record-id">FCC GRANTEE</span><h2>{selectedGranteeGroup.granteeName || selectedGranteeGroup.key}</h2><p><MapPin size={15} /> {selectedRegistry ? [selectedRegistry.city, selectedRegistry.state, selectedRegistry.country].filter(Boolean).join(", ") : fccLocation(selectedGranteeGroup.records[0])}</p></div>
           <div className="detail-stats"><div><span>FCC IDs</span><b>{selectedGranteeGroup.fccIds}</b></div><div><span>Authorizations</span><b>{selectedGranteeGroup.records.length}</b></div><div><span>Most recent</span><b>{displayDate(selectedGranteeGroup.latestAuthorization)}</b></div></div>
           <section className="detail-section"><h3><Users size={16} /> Overview</h3><dl className="fcc-detail-list"><div><dt>FCC-reported grantee</dt><dd>{selectedGranteeGroup.granteeName || "—"}</dd></div><div><dt>Confirmed grantee code</dt><dd>{selectedGranteeGroup.granteeCode || "—"}</dd></div><div><dt>Address</dt><dd>{selectedRegistry?.mailingAddress || selectedGranteeGroup.records[0]?.address || "—"}</dd></div>{selectedRegistry?.contactName && <div><dt>FCC registry contact</dt><dd>{selectedRegistry.contactName}</dd></div>}</dl></section>

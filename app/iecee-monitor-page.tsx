@@ -204,7 +204,7 @@ export default function IeceeMonitorPage() {
       <SourceNav source="iecee" view="monitoring" status={sourcePresentation.status} statusState={status === "error" ? "error" : retrievedAt ? "connected" : "ready"} />
 
       <section className="hero hero-compact monitor-hero" id="top">
-        <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
+        <div className="eyebrow">REGULATORY MONITORING</div>
         <div className="hero-grid">
           <div>
             <h1>What changed. <em>In the CB Scheme.</em></h1>

@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type HeaderSpec } from "./explorer-tools";
+import { AppliedFilters, DrawerTop, HeaderCell, useEscapeToClose, RecentSearches, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { DEFAULT_IECEE_PRESET, IECEE_PRESETS, getIeceePreset, presetForQuery } from "./iecee-config";
 import {
   EMPTY_IECEE_FILTERS,
@@ -199,7 +199,9 @@ export default function IeceeExplorerPage() {
   const [searched, setSearched] = useState(false);
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
   const [selected, setSelected] = useState<IeceeCertificate | null>(null);
+  const [drawerWide, setDrawerWide] = useState(false);
   const [detailState, setDetailState] = useState<DetailState | null>(null);
+  useEscapeToClose(!!selected, () => setSelected(null));
   // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
@@ -639,8 +641,8 @@ export default function IeceeExplorerPage() {
       </section>
 
       {selected && <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
-        <aside className="drawer" aria-label="IECEE certificate">
-          <div className="drawer-top"><span>IECEE CB SCHEME CERTIFICATE</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
+        <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="IECEE certificate">
+          <DrawerTop label="IECEE CB SCHEME CERTIFICATE" wide={drawerWide} onToggleWide={() => setDrawerWide((wide) => !wide)} onClose={() => setSelected(null)} />
           <div className="drawer-hero">
             <span className="record-id">{selected.typeLabel.toUpperCase()}</span>
             <h2 className="fcc-drawer-id">{selected.refNumber}</h2>

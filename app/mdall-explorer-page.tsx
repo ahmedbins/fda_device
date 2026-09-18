@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import SourceNav from "./source-nav";
-import { AppliedFilters, HeaderCell, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
+import { AppliedFilters, DrawerTop, HeaderCell, useEscapeToClose, RecentSearches, compareValues, navigateWithParams, toggleSort, recentSearchParams, columnSharesKey, useColumnWidths, useRecentSearches, useScrollShadow, type AppliedChip, type HeaderSpec, type SortDir } from "./explorer-tools";
 import { DEFAULT_MDALL_PRESET, MDALL_PRESETS, getMdallPreset } from "./mdall-config";
 import {
   MDALL_DOCS_URL,
@@ -238,7 +238,9 @@ export default function MdallExplorerPage() {
   const [searched, setSearched] = useState(false);
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
   const [selected, setSelected] = useState<MdallLicence | null>(null);
+  const [drawerWide, setDrawerWide] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  useEscapeToClose(!!(selected || selectedCompany), () => { if (selectedCompany) setSelectedCompany(null); else setSelected(null); });
   // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
@@ -594,8 +596,8 @@ export default function MdallExplorerPage() {
       </section>
 
       {selected && <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
-        <aside className="drawer" aria-label="Health Canada MDALL licence">
-          <div className="drawer-top"><span>HEALTH CANADA MDALL LICENCE</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close details"><X size={19} /></button></div>
+        <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="Health Canada MDALL licence">
+          <DrawerTop label="HEALTH CANADA MDALL LICENCE" wide={drawerWide} onToggleWide={() => setDrawerWide((wide) => !wide)} onClose={() => setSelected(null)} />
           <div className="drawer-hero">
             <span className="record-id">MDALL LICENCE</span>
             <h2 className="fcc-drawer-id">{selected.licenceNumber}</h2>
@@ -617,8 +619,8 @@ export default function MdallExplorerPage() {
       </div>}
 
       {selectedCompanyGroup && <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelectedCompany(null)}>
-        <aside className="drawer" aria-label="Health Canada MDALL company">
-          <div className="drawer-top"><span>HEALTH CANADA MDALL COMPANY</span><button className="icon-button" onClick={() => setSelectedCompany(null)} aria-label="Close company profile"><X size={19} /></button></div>
+        <aside className={`drawer${drawerWide ? " drawer-wide" : ""}`} aria-label="Health Canada MDALL company">
+          <DrawerTop label="HEALTH CANADA MDALL COMPANY" wide={drawerWide} onToggleWide={() => setDrawerWide((wide) => !wide)} onClose={() => setSelectedCompany(null)} closeLabel="Close company profile" />
           <div className="drawer-hero"><span className="record-id">MDALL COMPANY</span><h2>{selectedCompanyGroup.companyName}</h2><p><MapPin size={15} /> {mdallLocation(selectedCompanyGroup.company)}</p></div>
           <div className="detail-stats"><div><span>Licences</span><b>{selectedCompanyGroup.licenceCount}</b></div><div><span>Most recent</span><b>{displayDate(selectedCompanyGroup.latestIssued)}</b></div><div><span>Company ID</span><b>{selectedCompanyGroup.companyId || "—"}</b></div></div>
           <section className="detail-section"><h3><Building2 size={16} /> Overview</h3><dl className="fcc-detail-list"><div><dt>Company</dt><dd>{selectedCompanyGroup.companyName}</dd></div><div><dt>Company ID</dt><dd>{selectedCompanyGroup.companyId || "—"}</dd></div><div><dt>Address</dt><dd>{selectedCompanyGroup.company?.address || "—"}</dd></div></dl></section>

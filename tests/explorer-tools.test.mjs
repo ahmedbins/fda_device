@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { columnShare, columnSharesKey, fitShares, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort } from "../app/explorer-tools-core.ts";
+import { columnNaturalKey, columnShare, columnSharesKey, fitShares, measureNaturalWidths, parseNaturalWidths, spreadShares, compareValues, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort } from "../app/explorer-tools-core.ts";
 
 test("header clicks cycle sort direction and start numeric columns descending", () => {
   assert.deepEqual(toggleSort({ key: "issued", dir: "desc" }, "issued"), { key: "issued", dir: "asc" });
@@ -52,4 +52,24 @@ test("remembers searches by their filter parameters only", () => {
   assert.deepEqual(parseRecentEntries(JSON.stringify(deduped)), deduped);
   assert.deepEqual(parseRecentEntries('[{"params":1},{"params":"q=a","label":"a"}]'), [{ params: "q=a", label: "a", at: "" }]);
   assert.deepEqual(parseRecentEntries("nope"), []);
+});
+
+test("columns nobody dragged share the remainder in their content-sized proportions", () => {
+  const keys = ["name", "device", "date", "open"];
+  // Nothing measured yet: only the dragged share is emitted and the browser splits the rest equally.
+  assert.deepEqual(spreadShares(keys, { name: 30 }, {}), { name: 30 });
+  // Measured: 70% is split 300 : 100 : 50 between the three free columns.
+  assert.deepEqual(spreadShares(keys, { name: 30 }, { name: 400, device: 300, date: 100, open: 50 }), { name: 30, device: 46.7, date: 15.6, open: 7.8 });
+  // A column added after the measurement takes the average weight of the measured free columns.
+  assert.deepEqual(spreadShares(["name", "device", "extra"], { name: 40 }, { device: 200 }), { name: 40, device: 30, extra: 30 });
+  // Hidden columns are ignored, and every free column keeps the minimum share.
+  assert.deepEqual(spreadShares(["a", "b"], { a: 88, gone: 10 }, { b: 1 }), { a: 88, b: 12 });
+  assert.equal(spreadShares(["a", "b", "c"], { a: 88 }, { b: 1000, c: 1 }).c, 4);
+});
+
+test("content-sized widths are measured per column and parsed defensively", () => {
+  assert.equal(columnNaturalKey("fda-records-col-shares"), "fda-records-col-shares-col-natural");
+  assert.deepEqual(measureNaturalWidths(["a", "b", "c"], [120.4, 0, 80.6]), { a: 120, c: 81 });
+  assert.deepEqual(parseNaturalWidths('{"a":120,"b":-1,"c":"x"}'), { a: 120 });
+  assert.deepEqual(parseNaturalWidths("not json"), {});
 });

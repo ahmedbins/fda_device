@@ -160,7 +160,7 @@ export default function MdallMonitorPage() {
       <SourceNav source="hc" view="monitoring" status={sourcePresentation.status} statusState={retrievedAt ? "connected" : "ready"} />
 
       <section className="hero hero-compact monitor-hero" id="top">
-        <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
+        <div className="eyebrow">REGULATORY MONITORING</div>
         <div className="hero-grid">
           <div>
             <h1>What changed. <em>In Canada.</em></h1>

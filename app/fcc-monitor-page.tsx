@@ -175,7 +175,7 @@ export default function FccMonitorPage() {
       <SourceNav source="fcc" view="monitoring" status={sourcePresentation.status} statusState={retrievedAt ? (searchMeta?.sourceMode === "limited" ? "error" : "connected") : "ready"} />
 
       <section className="hero hero-compact monitor-hero" id="top">
-        <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
+        <div className="eyebrow">REGULATORY MONITORING</div>
         <div className="hero-grid"><div><h1>What changed. <em>At a glance.</em></h1><div className="hero-inline"><p>Recent FCC equipment authorization activity for your monitored FCC IDs and grantees.</p><a className="primary" href={FCC_SEARCH_URL} target="_blank" rel="noreferrer">Open FCC Search <ExternalLink size={14} /></a></div></div><div className="dataset-note"><RadioTower size={20} /><div><b>FCC equipment authorization</b><span>{retrievedAt ? sourcePresentation.note : "Recent authorization activity"}</span><span>{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleString([], dateTimeFormat)}` : retrievedAt ? `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Source: ${FCC_SOURCE_LABEL}`}</span></div></div></div>
       </section>
 

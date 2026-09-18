@@ -35,6 +35,50 @@ export function columnShare(width: number, paneWidth: number, sharing: number) {
   const ceiling = Math.max(MIN_COLUMN_SHARE, Math.min(MAX_COLUMN_SHARE, 100 - sharing * MIN_COLUMN_SHARE));
   return Math.round(Math.min(ceiling, Math.max(MIN_COLUMN_SHARE, (width / paneWidth) * 100)) * 10) / 10;
 }
+
+/** Where a table's content-sized column widths are remembered, measured the moment before its first drag. */
+export function columnNaturalKey(name: string) {
+  return `${name}-col-natural`;
+}
+
+export function parseNaturalWidths(raw: string | null): Record<string, number> {
+  try {
+    const parsed = JSON.parse(raw || "null") as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] > 0));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * A fixed-layout table splits whatever the dragged columns leave equally, which gives a date column
+ * and a company-name column the same width. When the content-sized widths are known, the columns
+ * nobody dragged share the remainder in those proportions instead. Without them the result is the
+ * dragged shares alone and the browser's equal split stands.
+ */
+export function spreadShares(activeKeys: readonly string[], pinned: Record<string, number>, natural: Record<string, number>): Record<string, number> {
+  const shares: Record<string, number> = {};
+  const free: string[] = [];
+  let spoken = 0;
+  activeKeys.forEach((key) => {
+    if (pinned[key] === undefined) free.push(key);
+    else { shares[key] = pinned[key]; spoken += pinned[key]; }
+  });
+  const known = free.filter((key) => natural[key] !== undefined);
+  if (!free.length || !known.length) return shares;
+  const fallback = known.reduce((sum, key) => sum + natural[key], 0) / known.length;
+  const weights = free.map((key) => natural[key] ?? fallback);
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const remainder = Math.max(free.length * MIN_COLUMN_SHARE, 100 - spoken);
+  free.forEach((key, index) => { shares[key] = Math.max(MIN_COLUMN_SHARE, Math.round((remainder * weights[index] / weightTotal) * 10) / 10); });
+  return shares;
+}
+
+/** Reads each header cell's rendered width, in column order, while the table is still content-sized. */
+export function measureNaturalWidths(activeKeys: readonly string[], cellWidths: readonly number[]): Record<string, number> {
+  return Object.fromEntries(activeKeys.flatMap((key, index) => (cellWidths[index] > 0 ? [[key, Math.round(cellWidths[index])] as [string, number]] : [])));
+}
 export const RECENT_MAX = 6;
 
 export type RecentEntry = { params: string; label: string; at: string };

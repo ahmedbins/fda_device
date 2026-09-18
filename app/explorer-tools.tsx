@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Filter, History, X } from "lucide-react";
-import { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, columnShare, fitShares, parseColumnWidths, rememberEntry, parseRecentEntries, type RecentEntry, type SortDir } from "./explorer-tools-core";
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, History, Maximize2, Minimize2, X } from "lucide-react";
+import { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, columnNaturalKey, columnShare, fitShares, measureNaturalWidths, parseColumnWidths, parseNaturalWidths, spreadShares, rememberEntry, parseRecentEntries, type RecentEntry, type SortDir } from "./explorer-tools-core";
 
-export { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, RECENT_MAX, columnShare, columnSharesKey, compareValues, fitShares, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort, type RecentEntry, type SortDir } from "./explorer-tools-core";
+export { DRAG_CLICK_GUARD_MS, MIN_COLUMN_WIDTH, RECENT_MAX, columnNaturalKey, measureNaturalWidths, parseNaturalWidths, spreadShares, columnShare, columnSharesKey, compareValues, fitShares, parseColumnWidths, parseRecentEntries, recentSearchParams, rememberEntry, toggleSort, type RecentEntry, type SortDir } from "./explorer-tools-core";
 
 /**
  * Table and filter-pane tools shared by every Explorer: sortable, resizable table headers with
@@ -80,6 +80,7 @@ export type ColumnWidthTools = {
  */
 export function useColumnWidths(storageKey: string, activeKeys: readonly string[]): ColumnWidthTools {
   const [widths, setWidths] = useState<Record<string, number>>({});
+  const [natural, setNatural] = useState<Record<string, number>>({});
   const [resizing, setResizing] = useState("");
   const resizeRef = useRef<{ key: string; startX: number; startWidth: number; max: number; pane: number; sharing: number } | null>(null);
   const dragEndedAt = useRef(0);
@@ -90,9 +91,11 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
     // Drop the pre-2026-09-18 pixel map for this table; its numbers are not shares.
     localStorage.removeItem(storageKey.replace("-col-shares", "-col-widths"));
     const stored = parseColumnWidths(localStorage.getItem(storageKey));
+    const storedNatural = parseNaturalWidths(localStorage.getItem(columnNaturalKey(storageKey)));
     queueMicrotask(() => {
       loadedKey.current = storageKey;
       setWidths(stored);
+      setNatural(storedNatural);
     });
   }, [storageKey]);
 
@@ -148,6 +151,17 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
     const table = th?.closest("table");
     const pane = table?.parentElement;
     if (!th || !table || !pane) return;
+    // Still content-sized: remember these widths, so the columns nobody drags keep their proportions
+    // once the table goes fixed instead of all becoming the same width.
+    if (!table.classList.contains("table-fixed")) {
+      const measured = measureNaturalWidths(activeKeys, [...table.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width));
+      setNatural(measured);
+      try {
+        localStorage.setItem(columnNaturalKey(storageKey), JSON.stringify(measured));
+      } catch {
+        // Widths are a convenience only.
+      }
+    }
     // Leave every column that is not pinned room to breathe, so dragging redistributes rather than
     // squeezing the others to nothing.
     const pinnedElsewhere = activeKeys.filter((columnKey) => columnKey !== key && widthsRef.current[columnKey] !== undefined);
@@ -156,7 +170,7 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
     const max = Math.max(MIN_COLUMN_WIDTH, pane.clientWidth - spoken - sharing * MIN_COLUMN_WIDTH);
     resizeRef.current = { key, startX: event.clientX, startWidth: th.getBoundingClientRect().width, max, pane: pane.clientWidth, sharing };
     setResizing(key);
-  }, [activeKeys]);
+  }, [activeKeys, storageKey]);
 
   const resetWidth = useCallback((key: string) => setWidths((current) => {
     const next = { ...current };
@@ -168,8 +182,9 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
 
   const fixedLayout = Object.keys(widths).length > 0;
   const tableStyle: CSSProperties | undefined = fixedLayout ? { tableLayout: "fixed", width: "100%", minWidth: 0 } : undefined;
+  const shares = fixedLayout ? spreadShares(activeKeys, widths, natural) : {};
   const colGroup = fixedLayout
-    ? <colgroup>{activeKeys.map((key) => <col key={key} style={widths[key] === undefined ? undefined : { width: `${widths[key]}%` }} />)}</colgroup>
+    ? <colgroup>{activeKeys.map((key) => <col key={key} style={shares[key] === undefined ? undefined : { width: `${shares[key]}%` }} />)}</colgroup>
     : null;
 
   return { widths, fixedLayout, tableStyle, colGroup, resizing, startResize, resetWidth, resetWidths, justDragged };
@@ -262,4 +277,30 @@ export function useScrollShadow(deps: readonly unknown[] = []) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return ref;
+}
+
+/** Escape closes the open detail pane, as it does on the FDA Explorer. */
+export function useEscapeToClose(open: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+}
+
+/** The bar across the top of a detail pane: what it is, expand to the full window, close. */
+export function DrawerTop({ label, wide, onToggleWide, onClose, closeLabel = "Close details" }: { label: string; wide: boolean; onToggleWide: () => void; onClose: () => void; closeLabel?: string }) {
+  const expandLabel = wide ? "Shrink to a side panel" : "Expand to the full window";
+  return (
+    <div className="drawer-top">
+      <span>{label}</span>
+      <div className="drawer-top-actions">
+        <button className="icon-button" onClick={onToggleWide} aria-pressed={wide} aria-label={expandLabel} title={expandLabel}>{wide ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+        <button className="icon-button" onClick={onClose} aria-label={closeLabel}><X size={19} /></button>
+      </div>
+    </div>
+  );
 }

@@ -233,12 +233,12 @@ export default function MonitorPage() {
     <main>
       <SourceNav source="fda" view="monitoring" status="openFDA live" statusState="connected" />
 
-      <section className="hero monitor-hero" id="top">
-        <div className="eyebrow"><span>01</span> REGULATORY MONITORING</div>
+      <section className="hero hero-compact monitor-hero" id="top">
+        <div className="eyebrow">REGULATORY MONITORING</div>
         <div className="hero-grid">
           <div>
-            <h1>What changed.<br /><em>At a glance.</em></h1>
-            <p>New listings, 510(k) clearances, recalls and adverse events for your product codes.</p>
+            <h1>What changed. <em>At a glance.</em></h1>
+            <div className="hero-inline"><p>New listings, 510(k) clearances, recalls and adverse events for your product codes.</p></div>
           </div>
         </div>
       </section>

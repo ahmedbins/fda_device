@@ -103,7 +103,7 @@ import {
 } from "./fda-udi";
 import { UdiCompanyPanel, UdiDeviceDetail } from "./fda-udi-panel";
 import SourceNav from "./source-nav";
-import { HeaderCell, columnShare, columnSharesKey, fitShares, parseColumnWidths, useScrollShadow, type HeaderSpec } from "./explorer-tools";
+import { HeaderCell, columnNaturalKey, columnShare, columnSharesKey, fitShares, measureNaturalWidths, parseColumnWidths, parseNaturalWidths, spreadShares, useScrollShadow, type HeaderSpec } from "./explorer-tools";
 import { downloadExcel, type ExcelValue } from "./excel-export";
 import { ExportDialog, sanitizeExportFilename } from "./export-dialog";
 
@@ -320,6 +320,7 @@ export default function Home() {
   const [matrixDir, setMatrixDir] = useState<SortDir>("asc");
   const [colWidths, setColWidths] = useState<Record<string, Record<string, number>>>({});
   const [colWidthsReady, setColWidthsReady] = useState(false);
+  const [colNatural, setColNatural] = useState<Record<string, Record<string, number>>>({});
   const [resizing, setResizing] = useState("");
   const resizeRef = useRef<{ view: string; key: string; startX: number; startWidth: number; max: number; pane: number; sharing: number } | null>(null);
   const colWidthsRef = useRef<Record<string, Record<string, number>>>({});
@@ -565,7 +566,9 @@ export default function Home() {
       }
       localStorage.setItem("fda-record-columns-listed", "1");
       const widths: Record<string, Record<string, number>> = {};
+      const naturalWidths: Record<string, Record<string, number>> = {};
       COLUMN_WIDTH_VIEWS.forEach((view) => {
+        naturalWidths[view] = parseNaturalWidths(localStorage.getItem(columnNaturalKey(columnSharesKey(`fda-${view}`))));
         // Shared parser: it also drops the pre-2026-09-18 pixel widths, which pinned the table to
         // whatever window it was dragged in and stopped fitting anywhere else.
         widths[view] = parseColumnWidths(localStorage.getItem(columnSharesKey(`fda-${view}`)));
@@ -576,6 +579,7 @@ export default function Home() {
         if (validMatrix) setMatrixColumns(validMatrix);
         if (validUdi) setUdiColumns(validUdi);
         setColWidths(widths);
+        setColNatural(naturalWidths);
         setColWidthsReady(true);
         setColumnPrefsReady(true);
       });
@@ -1154,8 +1158,9 @@ export default function Home() {
   const widths = colWidths[viewMode] || {};
   const fixedLayout = Object.keys(widths).length > 0;
   const tableStyle = fixedLayout ? { tableLayout: "fixed" as const, width: "100%", minWidth: 0 } : undefined;
+  const shares = fixedLayout ? spreadShares(activeKeys, widths, colNatural[viewMode] || {}) : {};
   const colgroup = fixedLayout
-    ? <colgroup>{activeKeys.map((key) => <col key={key} style={widths[key] === undefined ? undefined : { width: `${widths[key]}%` }} />)}</colgroup>
+    ? <colgroup>{activeKeys.map((key) => <col key={key} style={shares[key] === undefined ? undefined : { width: `${shares[key]}%` }} />)}</colgroup>
     : null;
 
   const startResize = (event: ReactPointerEvent<HTMLElement>, key: string) => {
@@ -1168,6 +1173,17 @@ export default function Home() {
     const view = viewMode;
     const pane = table.parentElement;
     if (!pane) return;
+    // Still content-sized: remember these widths, so the columns nobody drags keep their proportions
+    // once the table goes fixed instead of all becoming the same width.
+    if (!table.classList.contains("table-fixed")) {
+      const measured = measureNaturalWidths(activeKeys, [...table.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width));
+      setColNatural((current) => ({ ...current, [view]: measured }));
+      try {
+        localStorage.setItem(columnNaturalKey(columnSharesKey(`fda-${view}`)), JSON.stringify(measured));
+      } catch {
+        // Widths are a convenience only.
+      }
+    }
     // Only the dragged column is pinned. Widening it takes room from its neighbours instead of
     // growing the table, and every column that is not pinned keeps at least a readable minimum.
     const pinnedWidths = colWidthsRef.current[view] || {};
@@ -1308,9 +1324,9 @@ export default function Home() {
   const udiCell = (device: UdiDevice, column: UdiColumn) => {
     switch (column) {
       case "company":
-        return <td key={column}><b>{device.company || "—"}</b><span>{device.duns ? `DUNS ${device.duns}` : "DUNS not listed"}</span></td>;
+        return <td key={column} className="labeler-cell"><b>{device.company || "—"}</b><span>{device.duns ? `DUNS ${device.duns}` : "DUNS not listed"}</span></td>;
       case "brand":
-        return <td key={column}><b>{device.brand || "Unnamed device"}</b><span>{device.description || "No description"}</span></td>;
+        return <td key={column} className="brand-cell"><b>{device.brand || "Unnamed device"}</b><span title={device.description || undefined}>{device.description || "No description"}</span></td>;
       case "model":
         return <td key={column}><b className="mono-value">{device.model || "—"}</b><span>{device.catalog ? `Cat. ${device.catalog}` : "No catalog number"}</span></td>;
       case "primaryDi":
@@ -1620,8 +1636,8 @@ export default function Home() {
               )}
               {isUdi && (
                 <div className="matrix-note">
-                  <div><Barcode size={16} /><span><b>{total.toLocaleString()} GUDID device {total === 1 ? "record" : "records"}</b>{allTogether ? ` carrying ${appliedCodesLabel} together` : appliedFilters.productCodes.length ? ` under ${appliedFilters.productCodes.join(" / ")}` : ""}{udiUpdated ? ` · GUDID data as of ${udiUpdated}` : ""}</span></div>
-                  <span>One row per device identifier record published by its labeler; “None listed” means the labeler declared no 510(k), PMA or De Novo number. Open a row for identifiers, GMDN terms and the labeler&apos;s registration listings.</span>
+                  <div><Barcode size={16} /><span><b>{total.toLocaleString()} GUDID device {total === 1 ? "record" : "records"}</b>{allTogether ? ` carrying ${appliedCodesLabel} together` : ""}{udiUpdated ? ` · GUDID data as of ${udiUpdated}` : ""}</span></div>
+                  <span>One row per device identifier record. “None listed” means the labeler declared no 510(k), PMA or De Novo number. Open a row for identifiers, GMDN terms and registration listings.</span>
                 </div>
               )}
               <div className="table-wrap" aria-live="polite" ref={tableScroll}>
