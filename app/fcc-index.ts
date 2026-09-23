@@ -80,7 +80,7 @@ export function parseFccidListMarkdown(markdown: string, retrievedAt: string, co
     });
   }
   return uniqueFccRecords(rows
-    .map((raw) => {
+    .map((raw): NormalizedFccRecord | null => {
       const record = normalizeFccRecord(raw, retrievedAt, { confirmedCodes, sourceMode: "public_index" });
       if (!record) return null;
       return {
@@ -117,7 +117,7 @@ export function parseFccidDetailMarkdown(markdown: string, retrievedAt: string, 
       FCCId: fccId,
       grantee: stripMarkdown(block.match(/Name of Grantee:\s*\**([^*\n]+)/i)?.[1] || ""),
       grantDate,
-      applicationPurpose: block.match(/Change in Identification/i) ? "Change in Identification" : "Original Equipment",
+      applicationPurpose: /Class II Permissive Change/i.test(block) ? "Class II Permissive Change" : /Change in Identification/i.test(block) ? "Change in Identification" : "Original Equipment",
       equipmentDescription: notes[0],
       equipmentClasses: [...new Set(classes)],
       rfBands: bands,
@@ -130,7 +130,7 @@ export function parseFccidDetailMarkdown(markdown: string, retrievedAt: string, 
   }).filter((row): row is RawFccRecord => row !== null);
 
   return uniqueFccRecords(rows
-    .map((raw) => {
+    .map((raw): NormalizedFccRecord | null => {
       const record = normalizeFccRecord(raw, retrievedAt, { confirmedCodes, sourceMode: "public_index" });
       if (!record) return null;
       return {

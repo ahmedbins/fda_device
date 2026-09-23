@@ -27,6 +27,8 @@ export type IeceeSearchOptions = {
   size?: number;
   sort?: IeceeSort;
   signal?: AbortSignal;
+  /** Skip the relay's edge cache (the Refresh button). */
+  fresh?: boolean;
 };
 
 export type IeceeTrademarkOption = { key: string; label: string; count: number };
@@ -43,6 +45,17 @@ function requestSignal(signal?: AbortSignal, timeoutMs = 25_000) {
       signal?.removeEventListener("abort", onAbort);
     },
   };
+}
+
+/** Lets one caller stop waiting without cancelling a request other callers share. */
+function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("The request was cancelled.", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new DOMException("The request was cancelled.", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 async function relayError(response: Response, fallback: string) {
@@ -69,21 +82,23 @@ export async function searchIecee(options: IeceeSearchOptions): Promise<IeceeSea
   const body = buildIeceeRequest(options.filters, page, options.sort ?? "issued-desc");
   const key = JSON.stringify(body);
   const cached = searchCache.get(key);
-  if (cached && cached.expires > Date.now()) return cached.result;
+  if (cached && cached.expires > Date.now() && !options.fresh) return cached.result;
   const pending = searchInflight.get(key);
-  if (pending) return pending;
+  if (pending && !options.fresh) return untilAborted(pending, options.signal);
 
+  // Identical searches share one request, so it must not belong to any one caller's signal.
   const request = (async () => {
-    const timed = requestSignal(options.signal);
+    const timed = requestSignal();
     try {
-      const response = await fetch(IECEE_SEARCH_PATH, {
+      const response = await fetch(options.fresh ? `${IECEE_SEARCH_PATH}?fresh=1` : IECEE_SEARCH_PATH, {
         method: "POST",
         signal: timed.signal,
         headers: { "content-type": "application/json", accept: "application/json" },
         body: key,
       });
       if (!response.ok) throw await relayError(response, "The IECEE certificate search could not be reached.");
-      const result = parseIeceeResponse(await response.json(), page, new Date().toISOString());
+      const fetchedAt = response.headers.get("x-iecee-fetched-at");
+      const result = parseIeceeResponse(await response.json(), page, fetchedAt && !Number.isNaN(Date.parse(fetchedAt)) ? fetchedAt : new Date().toISOString());
       searchCache.set(key, { expires: Date.now() + CACHE_MS, result });
       return result;
     } finally {
@@ -92,7 +107,7 @@ export async function searchIecee(options: IeceeSearchOptions): Promise<IeceeSea
     }
   })();
   searchInflight.set(key, request);
-  return request;
+  return untilAborted(request, options.signal);
 }
 
 /** Loads the full public record of one certificate (model, ratings, standards, parties, national differences). */

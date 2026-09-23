@@ -90,3 +90,10 @@ test("parses jina exhibit-selector markdown into the same document list", () => 
   assert.equal(exhibits[0].url, "https://fccid.io/KWC-ERF/Label/12-PDL-29575-Labelling-pdf-9379994");
   assert.equal(exhibits[1].exhibitType, "Cover Letter(s)");
 });
+
+test("labels Class II permissive changes on fccid.io grant pages", () => {
+  const records = parseFccidDetailMarkdown(detailMarkdown.replace("**Notes:**", "Class II Permissive Change\n**Notes:**"), "2026-08-17T00:00:00.000Z", ["KWC"]);
+  assert.equal(records[0].applicationPurpose, "Class II Permissive Change");
+  assert.equal(records[0].purposeCategory, "Class II permissive change");
+  assert.equal(parseFccidDetailMarkdown(detailMarkdown, "2026-08-17T00:00:00.000Z", ["KWC"])[0].applicationPurpose, "Original Equipment");
+});

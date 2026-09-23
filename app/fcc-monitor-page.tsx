@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import SourceNav from "./source-nav";
 import { DEFAULT_FCC_PRESET, FCC_PRESETS, getFccPreset } from "./fcc-config";
-import { FCC_EAS_API, FCC_SEARCH_URL, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, fccSourcePresentation, parseFccScopes, type FccSearchResult, type NormalizedFccRecord } from "./fcc-core";
+import { FCC_EAS_API, FCC_SEARCH_URL, FCC_SOURCE_LABEL, fccLocation, fccRecordsInWindow, fccSourcePresentation, normalizeFccScope, parseFccScopes, type FccSearchResult, type NormalizedFccRecord } from "./fcc-core";
 import { fccPublicRecordUrl } from "./fcc-index";
 import { clearFccCache, searchFcc } from "./fcc-service";
 import { downloadExcel } from "./excel-export";
@@ -44,8 +44,13 @@ function syncMonitorUrl(scopes: string[], days: number, presetId = "") {
   window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
 }
 
-function cutoffIso(days: number) {
-  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+// Local calendar day: the window includes today and the N-1 previous days.
+function cutoffIso(days: number, now = new Date()) {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).toLocaleDateString("en-CA");
+}
+
+function inScopes(record: NormalizedFccRecord, scopes: string[]) {
+  return scopes.some((scope) => { const normalized = normalizeFccScope(scope); return record.fccId.startsWith(normalized) || !!record.granteeCode?.startsWith(normalized); });
 }
 
 function displayDate(value?: string) {
@@ -69,16 +74,22 @@ export default function FccMonitorPage() {
   const input = useRef<HTMLInputElement>(null);
   const request = useRef<AbortController | null>(null);
 
-  const cutoff = useMemo(() => cutoffIso(days), [days]);
-  const recent = useMemo(() => fccRecordsInWindow(records, cutoff), [records, cutoff]);
+  // Anchored to the refresh time so a tab left open overnight moves the window on the next refresh.
+  const cutoff = useMemo(() => cutoffIso(days, retrievedAt || new Date()), [days, retrievedAt]);
+  const scopedRecords = useMemo(() => records.filter((record) => inScopes(record, scopes)), [records, scopes]);
+  const recent = useMemo(() => fccRecordsInWindow(scopedRecords, cutoff), [scopedRecords, cutoff]);
   const originalRecent = useMemo(() => recent.filter((record) => record.purposeCategory === "Original authorization"), [recent]);
   const changedRecent = useMemo(() => recent.filter((record) => record.purposeCategory === "Class II permissive change" || record.purposeCategory === "Change in FCC ID"), [recent]);
-  const mostRecentOutside = useMemo(() => records
+  const mostRecentOutside = useMemo(() => scopedRecords
     .filter((record) => !!record.authorizationDate && record.authorizationDate < cutoff)
-    .sort((a, b) => (b.authorizationDate || "").localeCompare(a.authorizationDate || ""))[0], [records, cutoff]);
+    .sort((a, b) => (b.authorizationDate || "").localeCompare(a.authorizationDate || ""))[0], [scopedRecords, cutoff]);
 
   const update = useCallback(async (force = false, nextScopes = scopes) => {
     if (!nextScopes.length) {
+      request.current?.abort();
+      setRecords([]);
+      setSearchMeta(null);
+      setCoverageNote("");
       setError("Add at least one FCC ID, FCC-ID prefix, or complete grantee code to monitor.");
       setStatus("idle");
       return;
@@ -128,7 +139,7 @@ export default function FccMonitorPage() {
   };
 
   const exportWorkbook = () => downloadExcel({
-    filename: `fcc-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    filename: `fcc-monitoring-${days}-days-${new Date().toLocaleDateString("en-CA")}.xlsx`,
     sheetName: "FCC monitoring",
     columns: [
       { header: "Window (days)", type: "number", width: 14 },
@@ -184,7 +195,7 @@ export default function FccMonitorPage() {
         <div className="field monitor-codes">
           <span>FCC IDs, prefixes or grantee codes</span>
           <div className="chip-input" onClick={() => input.current?.focus()}>
-            {scopes.map((scope) => <span key={scope} className="chip">{scope}<button type="button" onClick={(event) => { event.stopPropagation(); setScopes((current) => current.filter((item) => item !== scope)); setPresetId(""); }} aria-label={`Remove ${scope}`}><X size={11} /></button></span>)}
+            {scopes.map((scope) => <span key={scope} className="chip">{scope}<button type="button" onClick={(event) => { event.stopPropagation(); const next = scopes.filter((item) => item !== scope); setScopes(next); setPresetId(""); if (!next.length) { request.current?.abort(); setRecords([]); setSearchMeta(null); setCoverageNote(""); setStatus("idle"); } }} aria-label={`Remove ${scope}`}><X size={11} /></button></span>)}
             <input ref={input} value={scopeDraft} onChange={(event) => { const value = event.target.value; if (/[,;\s]/.test(value)) commitScopes(value); else setScopeDraft(value.toUpperCase().replace(/\s+/g, "").replace(/[^A-Z0-9-]/g, "").slice(0, 19)); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); updateNow(); } }} placeholder="Add FCC ID or prefix…" />
           </div>
         </div>
@@ -207,7 +218,7 @@ export default function FccMonitorPage() {
         {status === "idle" && !scopes.length && <div className="section-empty"><b>Add an FCC monitoring scope.</b> Use a complete FCC ID, an FCC-ID prefix, or a complete grantee code, then select Update.</div>}
         {status === "loading" && <div className="section-empty"><LoaderCircle className="spin" size={14} /> Checking approved FCC authorization records…</div>}
         {status === "error" && <div className="section-error"><CircleAlert size={15} /> {error}</div>}
-        {status === "done" && !recent.length && <div className="section-empty"><b>{searchMeta?.unresolvedScopes.length && !records.length ? "This scope is not kept current by this site." : `None in the last ${days} days.`}</b>{searchMeta?.unresolvedScopes.length && !records.length ? " An empty window here does not mean the FCC has no activity — import the official response in Explorer to analyze that scope." : mostRecentOutside ? ` Most recent: ${displayDate(mostRecentOutside.authorizationDate)} — ${mostRecentOutside.fccId} — ${mostRecentOutside.granteeName || "grantee unavailable"}.` : " No dated authorization activity was returned for this scope."}</div>}
+        {status === "done" && !recent.length && <div className="section-empty"><b>{searchMeta?.unresolvedScopes.length && !scopedRecords.length ? "This scope is not kept current by this site." : `None in the last ${days} days.`}</b>{searchMeta?.unresolvedScopes.length && !scopedRecords.length ? " An empty window here does not mean the FCC has no activity — import the official response in Explorer to analyze that scope." : mostRecentOutside ? ` Most recent: ${displayDate(mostRecentOutside.authorizationDate)} — ${mostRecentOutside.fccId} — ${mostRecentOutside.granteeName || "grantee unavailable"}.` : " No dated authorization activity was returned for this scope."}</div>}
         {recent.length > 0 && <div className="table-wrap"><table className="m-table"><thead><tr><th>Date</th><th>FCC ID</th><th>Grantee</th><th>Activity</th><th>Source</th></tr></thead><tbody>{recent.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${index}`}><td className="date-cell">{displayDate(record.authorizationDate)}</td><td><a href={`/fcc/explorer?q=${encodeURIComponent(record.fccId)}`} className="fcc-id">{record.fccId}</a></td><td><a href={`/fcc/explorer?ids=${encodeURIComponent(record.granteeCode || record.fccId)}`}>{record.granteeName || "—"}</a><span>{record.granteeCode || fccLocation(record)}</span></td><td className="wrap-cell"><b>{record.purposeCategory || "Authorization activity"}</b><span>FCC: {record.applicationPurpose || "—"}</span></td><td><a className="open-record-button" href={fccPublicRecordUrl(record.fccId)} target="_blank" rel="noreferrer">Open FCC ID <ExternalLink size={11} /></a></td></tr>)}</tbody></table></div>}
         <div className="section-note">Recent activity means records with an FCC-reported grant date inside the selected window. This view does not claim to detect modifications or changes between refreshes.</div>
       </section>

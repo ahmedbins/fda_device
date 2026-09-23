@@ -9,10 +9,13 @@ import {
   companyCodeCoverage,
   filtersFromParams,
   filtersToParams,
+  findRecord,
+  hasActiveFilters,
   isNoMatches,
   matrixCompanyCount,
   normalizeCode,
   productCodeClause,
+  recordKey,
   recordProductCodes,
 } from "../app/fda-shared.ts";
 
@@ -171,4 +174,30 @@ test("openFDA NOT_FOUND is an empty result set, not a failure", () => {
   assert.equal(isNoMatches(404, {}), true);
   assert.equal(isNoMatches(500, { error: { code: "SERVER_ERROR", message: "boom" } }), false);
   assert.equal(isNoMatches(404, { error: { code: "OTHER", message: "Route missing" } }), false);
+});
+
+test("establishment role matches the exact role, not longer roles that contain it", () => {
+  assert.equal(
+    buildSearch({ ...EMPTY_FILTERS, establishment: "Manufacture Medical Device" }),
+    'establishment_type.exact:"Manufacture Medical Device"',
+  );
+});
+
+test("record keys tell apart listings that share a registration number", () => {
+  const first = listing("Acme", ["OSM"], { reg: "3005650109" });
+  const second = listing("Acme", ["KLW"], { reg: "3005650109" });
+  const items = [first, second];
+  assert.notEqual(recordKey(first), recordKey(second));
+  assert.match(recordKey(second), /^3005650109-[0-9a-z]+$/);
+  assert.equal(findRecord(items, recordKey(second)), second);
+  assert.equal(findRecord(items, "3005650109"), first, "older plain-registration links open the first listing");
+  assert.equal(findRecord(items, "3005650109-stale"), first);
+  assert.equal(findRecord(items, ""), undefined);
+});
+
+test("only real filters count as active; an unfiltered browse has none", () => {
+  assert.equal(hasActiveFilters(EMPTY_FILTERS), false);
+  assert.equal(hasActiveFilters({ ...EMPTY_FILTERS, keyword: "  " }), false);
+  assert.equal(hasActiveFilters({ ...EMPTY_FILTERS, codeMatch: "all" }), false);
+  assert.equal(hasActiveFilters({ ...EMPTY_FILTERS, establishment: "Repack or Relabel Medical Device" }), true);
 });

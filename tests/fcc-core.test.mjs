@@ -157,3 +157,10 @@ test("groups records by confirmed grantee identity", () => {
   assert.equal(groups[0].granteeCode, "2A3UL");
   assert.equal(groups[1].fccIds, 2);
 });
+
+test("reads authorizationDate from the scheduled capture's fallback index records", () => {
+  const iso = normalizeFccRecord({ FCCId: "KWC-ERF", authorizationDate: "2026-06-11" }, "2026-09-18T00:00:00.000Z", { confirmedCodes: ["KWC"] });
+  const slash = normalizeFccRecord({ FCCId: "KWC-ERF", authorizationDate: "6/11/2026" }, "2026-09-18T00:00:00.000Z", { confirmedCodes: ["KWC"] });
+  assert.equal(iso?.authorizationDate, "2026-06-11");
+  assert.equal(slash?.authorizationDate, "2026-06-11");
+});

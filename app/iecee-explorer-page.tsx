@@ -110,6 +110,7 @@ const IECEE_EXPORT_TOGGLES = [
   { id: "categories", label: "Product categories" },
   { id: "standards", label: "Base standards" },
   { id: "scopes", label: "Standards with editions" },
+  { id: "nationalDifferences", label: "National differences (loads each certificate)" },
   { id: "ncb", label: "Certification body" },
   { id: "ncbCountry", label: "Certification body country" },
   { id: "id", label: "IECEE record id" },
@@ -125,6 +126,7 @@ const IECEE_VISIBLE_TO_EXPORT: Partial<Record<ColumnKey, string[]>> = {
   product: ["product"],
   category: ["categories"],
   standards: ["standards"],
+  nd: ["nationalDifferences"],
   ncb: ["ncb", "ncbCountry"],
   issued: ["issued"],
   status: ["status"],
@@ -147,20 +149,26 @@ function initialState(): AppliedState & { autorun: boolean } {
   const requestedPreset = getIeceePreset(params.get("preset"));
   const anyFilter = countIeceeFilters(parsed.filters) > 0;
   if (requestedPreset && !parsed.filters.query) parsed.filters = { ...parsed.filters, query: requestedPreset.query };
-  const useDefault = !anyFilter && !params.has("preset") && !requestedPreset;
+  const browseAll = params.get("all") === "1";
+  const useDefault = !anyFilter && !params.has("preset") && !requestedPreset && !browseAll;
   if (useDefault) return fallback;
-  return { ...parsed, presetId: requestedPreset?.id || presetForQuery(parsed.filters.query)?.id || "", autorun: countIeceeFilters(parsed.filters) > 0 };
+  return { ...parsed, presetId: requestedPreset?.id || presetForQuery(parsed.filters.query)?.id || "", autorun: browseAll || countIeceeFilters(parsed.filters) > 0 };
 }
 
-function syncUrl(state: AppliedState) {
+/** `browseAll` marks a deliberate search with no filters, so a reload runs it instead of the default preset. */
+function syncUrl(state: AppliedState, browseAll = false) {
   if (typeof window === "undefined") return;
-  const value = ieceeStateToParams(state).toString();
+  const params = ieceeStateToParams(state);
+  if (browseAll) params.set("all", "1");
+  const value = params.toString();
   window.history.replaceState(null, "", value ? `${window.location.pathname}?${value}` : window.location.pathname);
 }
 
 function displayDate(value?: string) {
   if (!value) return "—";
-  return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  // Full timestamps (last update) show their local day, as the drawer does; bare days stay as written.
+  const date = value.length > 10 ? new Date(value) : new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
 function displayDateTime(value?: string) {
@@ -297,10 +305,20 @@ export default function IeceeExplorerPage() {
       clearIeceeCache();
       setNationalDiffs(new Map());
     }
-    syncUrl(clean);
+    const browseAll = countIeceeFilters(clean.filters) === 0;
+    syncUrl(clean, browseAll);
     try {
-      const page = await searchIecee({ filters: clean.filters, from: clean.page * clean.pageSize, size: clean.pageSize, sort: clean.sort, signal: controller.signal });
+      let page = await searchIecee({ filters: clean.filters, from: clean.page * clean.pageSize, size: clean.pageSize, sort: clean.sort, signal: controller.signal, fresh: force });
       if (controller.signal.aborted) return;
+      // A page past the end (an old link, or fewer matches than before) lands on the last page instead of "no matches".
+      const lastPage = Math.max(0, Math.ceil(Math.min(page.total, IECEE_RESULT_WINDOW) / clean.pageSize) - 1);
+      if (!page.certificates.length && page.total > 0 && clean.page > lastPage) {
+        clean.page = lastPage;
+        setApplied({ ...clean });
+        syncUrl(clean, browseAll);
+        page = await searchIecee({ filters: clean.filters, from: lastPage * clean.pageSize, size: clean.pageSize, sort: clean.sort, signal: controller.signal });
+        if (controller.signal.aborted) return;
+      }
       setResult(page);
       setRetrievedAt(new Date(page.retrievedAt));
       rememberRecent(recentSearchParams(ieceeStateToParams(clean).toString()), describeIeceeFilters(clean.filters));
@@ -319,8 +337,12 @@ export default function IeceeExplorerPage() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("iecee-explorer-columns", JSON.stringify(columns));
-    localStorage.setItem(COLUMNS_SEEN_KEY, JSON.stringify(LATER_DEFAULT_COLUMNS));
+    try {
+      localStorage.setItem("iecee-explorer-columns", JSON.stringify(columns));
+      localStorage.setItem(COLUMNS_SEEN_KEY, JSON.stringify(LATER_DEFAULT_COLUMNS));
+    } catch {
+      // Column choices are a convenience only.
+    }
   }, [columns]);
 
   const showNationalDiffs = columns.includes("nd");
@@ -366,7 +388,9 @@ export default function IeceeExplorerPage() {
     fetchIeceeCertificate(id, controller.signal)
       .then(async (detail) => {
         const family = await familyRequest;
-        if (!controller.signal.aborted) setDetailState({ id, status: "done", detail, family });
+        if (controller.signal.aborted) return;
+        setDetailState({ id, status: "done", detail, family });
+        setNationalDiffs((current) => new Map(current).set(id, detail.nationalDifferences));
       })
       .catch(async (caught) => {
         const family = await familyRequest;
@@ -478,6 +502,21 @@ export default function IeceeExplorerPage() {
         });
         rows = all.certificates;
       }
+      // The search index has no national differences, so each certificate's record is loaded (from the table's cache where it can be).
+      const differences = new Map<number, string[] | "error">(nationalDiffs);
+      if (include.has("nationalDifferences")) {
+        const queue = rows.filter((certificate) => !Array.isArray(differences.get(certificate.id))).map((certificate) => certificate.id);
+        const needed = queue.length;
+        let loaded = 0;
+        const worker = async () => {
+          for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+            differences.set(id, await fetchIeceeCertificate(id).then((detail) => detail.nationalDifferences, () => "error" as const));
+            loaded += 1;
+            setExportProgress(`Loading national differences ${loaded.toLocaleString()} of ${needed.toLocaleString()}…`);
+          }
+        };
+        await Promise.all(Array.from({ length: ND_CONCURRENCY }, worker));
+      }
       const link = (text: string, url: string) => asExportLink(text, url, exportOptions.clickableLinks);
       const fields: { id: string; column: ExcelColumn; value: (certificate: IeceeCertificate) => ExcelValue }[] = [
         { id: "ref", column: { header: "Certificate number", width: 22 }, value: (certificate) => certificate.refNumber },
@@ -492,6 +531,7 @@ export default function IeceeExplorerPage() {
         { id: "categories", column: { header: "Product categories", width: 28 }, value: (certificate) => certificate.categories.map(ieceeCategoryLabel).join("; ") },
         { id: "standards", column: { header: "Base standards", width: 34 }, value: (certificate) => certificate.standards.join("; ") },
         { id: "scopes", column: { header: "Standards with editions", width: 60 }, value: (certificate) => certificate.scopes.join("; ") },
+        { id: "nationalDifferences", column: { header: "National differences", width: 40 }, value: (certificate) => { const codes = differences.get(certificate.id); return codes === "error" ? "Could not be loaded" : codes ? codes.map(nationalDifferenceLabel).join("; ") || "None" : ""; } },
         { id: "ncb", column: { header: "Certification body", width: 34 }, value: (certificate) => certificate.ncb },
         { id: "ncbCountry", column: { header: "Certification body country", width: 22 }, value: (certificate) => certificate.ncbCountry || "" },
         { id: "id", column: { header: "IECEE record id", type: "number", width: 14 }, value: (certificate) => certificate.id },

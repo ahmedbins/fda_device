@@ -226,7 +226,7 @@ export function normalizeFccRecord(raw: RawFccRecord, retrievedAt: string, optio
     fccId: normalizedId,
     ...parts,
     granteeName: text(raw, "grantee", "granteeName"),
-    authorizationDate: isoFccDate(text(raw, "grantDate", "grant_date", "statusDate")),
+    authorizationDate: isoFccDate(text(raw, "grantDate", "grant_date", "statusDate", "authorizationDate")),
     applicationPurpose,
     purposeCategory: categorizeFccPurpose(applicationPurpose),
     address: cleanFccDisplayValue(text(raw, "address", "mailingAddress")),

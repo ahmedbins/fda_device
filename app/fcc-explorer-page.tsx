@@ -265,7 +265,8 @@ export default function FccExplorerPage() {
   }), sort), [records, from, purpose, to, sort]);
   const groupedRecords = useMemo(() => groupFccRecordsByGrantee(filteredRecords), [filteredRecords]);
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
-  const visibleRecords = filteredRecords.slice(page * pageSize, page * pageSize + pageSize);
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRecords = filteredRecords.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
 
   const runSearch = useCallback(async (force = false) => {
     if (!effectiveScopes.length) {
@@ -333,9 +334,17 @@ export default function FccExplorerPage() {
 
   const reset = () => {
     request.current?.abort();
+    setLoading(false);
     setQuery(""); setScopes([]); setScopeDraft(""); setFrom(""); setTo(""); setPurpose(""); setPresetId("");
     setRecords([]); setGrantees([]); setSearchMeta(null); setCoverageNote(""); setError(""); setSearched(false); setRetrievedAt(null); setPage(0);
     syncUrl("", [], "", "", "", sort, pageSize, resultView);
+  };
+
+  // Client-side filters go straight to the URL so Copy link and chip removal (which reloads from the URL) keep them.
+  const updateFilters = (next: { from?: string; to?: string; purpose?: string }) => {
+    const nextFrom = next.from ?? from, nextTo = next.to ?? to, nextPurpose = next.purpose ?? purpose;
+    setFrom(nextFrom); setTo(nextTo); setPurpose(nextPurpose); setPage(0);
+    syncUrl(query, scopes, nextFrom, nextTo, nextPurpose, sort, pageSize, resultView, presetId);
   };
 
   const applyPreset = (id: string) => {
@@ -436,7 +445,7 @@ export default function FccExplorerPage() {
     if (column === "grantee") return <><b>{record.granteeName || "—"}</b><span>FCC grantee</span></>;
     if (column === "granteeCode") return record.granteeCode ? <button type="button" className="source-cell clickable" onClick={(event) => { event.stopPropagation(); navigateWithParams((params) => { params.set("ids", record.granteeCode!); params.delete("q"); params.delete("preset"); }); }} title={`Only show authorizations under grantee code ${record.granteeCode}`}>{record.granteeCode}</button> : <span className="source-cell">—</span>;
     if (column === "authorizationDate") return <span className="date-cell">{displayDate(record.authorizationDate)}</span>;
-    if (column === "purpose") return record.purposeCategory ? <button type="button" className="cell-list clickable" onClick={(event) => { event.stopPropagation(); setPurpose((current) => current === record.purposeCategory ? "" : record.purposeCategory || ""); setPage(0); }} title={`Only show ${record.purposeCategory} records (FCC-reported purpose: ${record.applicationPurpose || "—"})`}>{record.applicationPurpose || "—"}</button> : <span className="cell-list">{record.applicationPurpose || "—"}</span>;
+    if (column === "purpose") return record.purposeCategory ? <button type="button" className="cell-list clickable" onClick={(event) => { event.stopPropagation(); updateFilters({ purpose: purpose === record.purposeCategory ? "" : record.purposeCategory || "" }); }} title={`Only show ${record.purposeCategory} records (FCC-reported purpose: ${record.applicationPurpose || "—"})`}>{record.applicationPurpose || "—"}</button> : <span className="cell-list">{record.applicationPurpose || "—"}</span>;
     if (column === "description") return <span className="cell-list">{record.equipmentDescription || "—"}</span>;
     if (column === "equipmentClass") return <span className="cell-list">{record.equipmentClasses?.join("; ") || "—"}</span>;
     if (column === "rf") return <span className="cell-list">{formatFccRfBands(record.rfBands) || "—"}</span>;
@@ -471,9 +480,9 @@ export default function FccExplorerPage() {
     ...(to ? [{ key: "to", label: `Granted to ${to}` }] : []),
   ];
   const removeChip = (chip: AppliedChip) => {
-    if (chip.key === "purpose") { setPurpose(""); setPage(0); return; }
-    if (chip.key === "from") { setFrom(""); setPage(0); return; }
-    if (chip.key === "to") { setTo(""); setPage(0); return; }
+    if (chip.key === "purpose") { updateFilters({ purpose: "" }); return; }
+    if (chip.key === "from") { updateFilters({ from: "" }); return; }
+    if (chip.key === "to") { updateFilters({ to: "" }); return; }
     navigateWithParams((params) => {
       if (chip.key === "preset") { params.delete("preset"); if (activePreset?.granteeCodes.length && !params.get("ids")) params.delete("ids"); }
       if (chip.key === "query") params.delete("q");
@@ -544,10 +553,10 @@ export default function FccExplorerPage() {
 
           <div className="filter-group-heading narrow-heading"><span>Narrow</span><small>Applied to FCC results</small></div>
           <div className="two-col">
-            <label className="field"><span>From grant date</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-            <label className="field"><span>To grant date</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+            <label className="field"><span>From grant date</span><input type="date" value={from} onChange={(event) => updateFilters({ from: event.target.value })} /></label>
+            <label className="field"><span>To grant date</span><input type="date" value={to} onChange={(event) => updateFilters({ to: event.target.value })} /></label>
           </div>
-          <label className="field"><span>Authorization activity</span><select value={purpose} onChange={(event) => { setPurpose(event.target.value); setPage(0); }}><option value="">All FCC-reported purposes</option><option>Original authorization</option><option>Class II permissive change</option><option>Change in FCC ID</option><option>Other authorization activity</option></select></label>
+          <label className="field"><span>Authorization activity</span><select value={purpose} onChange={(event) => updateFilters({ purpose: event.target.value })}><option value="">All FCC-reported purposes</option><option>Original authorization</option><option>Class II permissive change</option><option>Change in FCC ID</option><option>Other authorization activity</option></select></label>
           <small className="field-hint fcc-limit-note">Equipment description, class and RF come from official FCC grants and EAS search results for covered IDs.</small>
 
           <details className="fcc-import">
@@ -589,10 +598,10 @@ export default function FccExplorerPage() {
           {loading && <div className="loading-layer"><div className="loading-note"><LoaderCircle className="spin" size={24} /> Contacting the FCC Equipment Authorization source…</div></div>}
 
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">FCC</div><RadioTower size={34} /><h3>Start with an FCC ID.</h3><p>Search a complete FCC ID or the first three or more characters. Results come from the official FCC Equipment Authorization service.</p></div>
-          : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>{limitedCoverage ? "This FCC scope is not kept current by this site." : "No approved FCC IDs matched."}</h3><p>{limitedCoverage ? "The live FCC source is unavailable from this app, so an empty result here does not mean the FCC ID is unapproved. Open the official response and import it below." : "Check the FCC ID, use a shorter prefix, or remove the date filters."}</p><div className="empty-actions">{!limitedCoverage && <button className="secondary" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}<button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
+          : searched && !loading && !error && !filteredRecords.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>{limitedCoverage ? "This FCC scope is not kept current by this site." : "No approved FCC IDs matched."}</h3><p>{limitedCoverage ? "The live FCC source is unavailable from this app, so an empty result here does not mean the FCC ID is unapproved. Open the official response and import it below." : "Check the FCC ID, use a shorter prefix, or remove the date filters."}</p><div className="empty-actions">{!limitedCoverage && <button className="secondary" onClick={() => updateFilters({ from: "", to: "" })}>Clear dates</button>}<button className="secondary" onClick={() => runSearch(true)}>Retry</button></div></div>
           : resultView === "records" && filteredRecords.length > 0 && <>
             <div className="table-wrap" ref={tableScroll}><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={`${record.fccId}-${record.authorizationDate}-${record.applicationPurpose}-${index}`} tabIndex={0} onClick={() => setSelected(record)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(record); } }}>{columns.map((column) => <td key={column}>{renderCell(record, column)}</td>)}</tr>)}</tbody></table></div>
-            <div className="pagination"><span>{filteredRecords.length.toLocaleString()} matching authorization record{filteredRecords.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}{retrievedAt && <small className="fetch-meta">{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleDateString()} · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</span><label className="page-size">Rows <select value={pageSize} onChange={(event) => { const next = Number(event.target.value); setPageSize(next); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, next, resultView, presetId); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>
+            <div className="pagination"><span>{filteredRecords.length.toLocaleString()} matching authorization record{filteredRecords.length === 1 ? "" : "s"} · page {currentPage + 1} of {pageCount}{retrievedAt && <small className="fetch-meta">{searchMeta?.dataAsOf ? `FCC data as of ${new Date(searchMeta.dataAsOf).toLocaleDateString()} · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</span><label className="page-size">Rows <select value={pageSize} onChange={(event) => { const next = Number(event.target.value); setPageSize(next); setPage(0); syncUrl(query, scopes, from, to, purpose, sort, next, resultView, presetId); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label><div><button className="icon-button" onClick={() => setPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage(Math.min(pageCount - 1, currentPage + 1))} disabled={currentPage + 1 >= pageCount} aria-label="Next page">→</button></div></div>
           </>}
           {resultView === "grantees" && groupedRecords.length > 0 && <div className="fcc-grantee-grid">{groupedRecords.map((group) => <button key={group.key} className="fcc-grantee-card" onClick={() => setSelectedGrantee(group.key)}><span className="grantee-code">{group.granteeCode || "FCC"}</span><h3>{group.granteeName || "Unidentified grantee"}</h3><p>{group.fccIds} FCC IDs · {group.records.length} authorization records</p><dl><div><dt>Most recent</dt><dd>{displayDate(group.latestAuthorization)}</dd></div><div><dt>Location</dt><dd>{fccLocation(group.records[0])}</dd></div></dl><span className="open-profile">Open grantee profile →</span></button>)}</div>}
         </section>

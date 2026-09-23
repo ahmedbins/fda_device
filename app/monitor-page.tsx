@@ -93,9 +93,17 @@ export default function MonitorPage() {
   const presetActive = codes.length === PRESET_CODES.length && PRESET_CODES.every((code) => codes.includes(code));
 
   const refresh = (nextCodes: string[] = codes, nextDays: number = days) => {
-    if (!nextCodes.length) return;
     const run = ++seq.current;
     syncMonitorUrl(nextCodes, nextDays);
+    if (!nextCodes.length) {
+      // Nothing to watch: drop the previous codes' results instead of leaving them on screen.
+      setListings({ ...EMPTY_SECTION, status: "idle" });
+      setClearances({ ...EMPTY_SECTION, status: "idle" });
+      setRecalls({ ...EMPTY_SECTION, status: "idle" });
+      setEvents({ ...EMPTY_SECTION, status: "idle" });
+      setRefreshedAt(null);
+      return;
+    }
     setListings({ ...EMPTY_SECTION });
     setClearances({ ...EMPTY_SECTION });
     setRecalls({ ...EMPTY_SECTION });
@@ -124,14 +132,14 @@ export default function MonitorPage() {
   const removeCode = (code: string) => {
     const next = codes.filter((c) => c !== code);
     setCodes(next);
-    if (next.length) refresh(next);
+    refresh(next);
   };
 
   const togglePreset = () => {
     const next = presetActive ? [] : [...PRESET_CODES];
     setCodes(next);
     setCodeDraft("");
-    if (next.length) refresh(next);
+    refresh(next);
   };
 
   const updateNow = () => {
@@ -160,12 +168,18 @@ export default function MonitorPage() {
     }
   };
 
-  const cutoff = useMemo(() => cutoffIso(days), [days]);
+  // Recomputed on each refresh so a tab left open overnight moves its window forward.
+  const cutoff = useMemo(() => cutoffIso(days, refreshedAt || undefined), [days, refreshedAt]);
   const newListings = useMemo(() => windowRows(listings, (r) => r.createdDate, cutoff), [listings, cutoff]);
   const newClearances = useMemo(() => windowRows(clearances, (r) => r.decisionDate, cutoff), [clearances, cutoff]);
   const newRecalls = useMemo(() => windowRows(recalls, (r) => r.initiated, cutoff), [recalls, cutoff]);
   const newEvents = useMemo(() => windowRows(events, (r) => r.received, cutoff), [events, cutoff]);
-  const eventsPlus = events.capped && newEvents.length === events.rows.length && events.rows.length > 0;
+  // A capped section whose every fetched row is inside the window may have more matches beyond the cap.
+  const moreBeyondCap = <T,>(section: Section<T>, windowed: T[]) => section.capped && windowed.length === section.rows.length && section.rows.length > 0;
+  const listingsPlus = moreBeyondCap(listings, newListings);
+  const clearancesPlus = moreBeyondCap(clearances, newClearances);
+  const recallsPlus = moreBeyondCap(recalls, newRecalls);
+  const eventsPlus = moreBeyondCap(events, newEvents);
 
   const stamp = () => new Date().toISOString().slice(0, 10);
   const codesPart = () => codes.join("+") || "all";
@@ -226,6 +240,7 @@ export default function MonitorPage() {
   const sectionMeta = (section: Section<unknown>, windowed: number, plus = false) => {
     if (section.status === "loading") return <span className="section-count loading"><LoaderCircle className="spin" size={12} /></span>;
     if (section.status === "error") return <span className="section-count error">error</span>;
+    if (section.status === "idle") return null;
     return <span className="section-count">{windowed.toLocaleString()}{plus ? "+" : ""} in window</span>;
   };
 
@@ -307,15 +322,15 @@ export default function MonitorPage() {
       </section>
 
       <section className="stat-tiles" aria-label="Summary">
-        <div className="stat-tile"><PackagePlus size={17} /><div><b>{listings.status === "done" ? newListings.length : "—"}</b><span>New listings</span></div></div>
-        <div className="stat-tile"><BadgeCheck size={17} /><div><b>{clearances.status === "done" ? newClearances.length : "—"}</b><span>510(k) clearances</span></div></div>
-        <div className="stat-tile"><TriangleAlert size={17} /><div><b>{recalls.status === "done" ? newRecalls.length : "—"}</b><span>Recalls</span></div></div>
+        <div className="stat-tile"><PackagePlus size={17} /><div><b>{listings.status === "done" ? `${newListings.length}${listingsPlus ? "+" : ""}` : "—"}</b><span>New listings</span></div></div>
+        <div className="stat-tile"><BadgeCheck size={17} /><div><b>{clearances.status === "done" ? `${newClearances.length}${clearancesPlus ? "+" : ""}` : "—"}</b><span>510(k) clearances</span></div></div>
+        <div className="stat-tile"><TriangleAlert size={17} /><div><b>{recalls.status === "done" ? `${newRecalls.length}${recallsPlus ? "+" : ""}` : "—"}</b><span>Recalls</span></div></div>
         <div className="stat-tile"><Activity size={17} /><div><b>{events.status === "done" ? `${newEvents.length}${eventsPlus ? "+" : ""}` : "—"}</b><span>Adverse events</span></div></div>
       </section>
 
       <section className="monitor-section" aria-label="New device listings">
         <div className="section-head">
-          <h2><PackagePlus size={17} /> New device listings {sectionMeta(listings, newListings.length)}</h2>
+          <h2><PackagePlus size={17} /> New device listings {sectionMeta(listings, newListings.length, listingsPlus)}</h2>
           <div className="section-tools">
             {listings.datasetDate && <span className="dataset-date">FDA data as of {listings.datasetDate}</span>}
             <button className="icon-button small" onClick={exportListings} disabled={!newListings.length} aria-label="Export new listings CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
@@ -352,7 +367,7 @@ export default function MonitorPage() {
 
       <section className="monitor-section" aria-label="510(k) clearances">
         <div className="section-head">
-          <h2><BadgeCheck size={17} /> 510(k) clearances {sectionMeta(clearances, newClearances.length)}</h2>
+          <h2><BadgeCheck size={17} /> 510(k) clearances {sectionMeta(clearances, newClearances.length, clearancesPlus)}</h2>
           <div className="section-tools">
             {clearances.datasetDate && <span className="dataset-date">FDA data as of {clearances.datasetDate}</span>}
             <button className="icon-button small" onClick={exportClearances} disabled={!newClearances.length} aria-label="Export clearances CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
@@ -392,7 +407,7 @@ export default function MonitorPage() {
 
       <section className="monitor-section" aria-label="Recalls">
         <div className="section-head">
-          <h2><TriangleAlert size={17} /> Recalls {sectionMeta(recalls, newRecalls.length)}</h2>
+          <h2><TriangleAlert size={17} /> Recalls {sectionMeta(recalls, newRecalls.length, recallsPlus)}</h2>
           <div className="section-tools">
             {recalls.datasetDate && <span className="dataset-date">FDA data as of {recalls.datasetDate}</span>}
             <button className="icon-button small" onClick={exportRecalls} disabled={!newRecalls.length} aria-label="Export recalls CSV" title="Download this section as CSV"><ArrowDownToLine size={15} /></button>
@@ -466,7 +481,7 @@ export default function MonitorPage() {
           </div>
         )}
         <div className="section-note">
-          Showing the latest {Math.min(events.rows.length, FETCH_LIMIT)} of {events.total.toLocaleString()} reports on record.
+          {events.status === "done" && <>Showing the latest {Math.min(events.rows.length, FETCH_LIMIT)} of {events.total.toLocaleString()} reports on record. </>}
           MAUDE entries are raw reports, not confirmed device problems, and recent months arrive with a lag.
         </div>
       </section>

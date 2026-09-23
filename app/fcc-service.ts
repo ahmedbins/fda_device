@@ -38,26 +38,46 @@ function isCapture(value: unknown): value is FccCurrentCapture {
   return !!value && typeof value === "object" && typeof (value as FccCurrentCapture).refreshedAt === "string" && !!(value as FccCurrentCapture).scopes && typeof (value as FccCurrentCapture).scopes === "object";
 }
 
+/** Settles with `promise`, or rejects as soon as this caller's own signal aborts; shared work keeps running for other callers. */
+function raceSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  const abortReason = () => signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+  if (signal.aborted) return Promise.reject(abortReason());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
+
 /** Latest scheduled capture, cached for five minutes; null when the relay or the Worker is unavailable. */
 export async function fetchFccCurrentCapture(signal?: AbortSignal): Promise<FccCurrentCapture | null> {
   if (currentCapture && currentCapture.expires > Date.now()) return currentCapture.value;
-  if (currentCaptureRequest) return currentCaptureRequest;
+  if (currentCaptureRequest) return raceSignal(currentCaptureRequest, signal);
+  // Shared by every concurrent caller, so it runs on its own timeout rather than the first caller's signal.
   currentCaptureRequest = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new DOMException("The FCC capture request timed out.", "TimeoutError")), 10_000);
     try {
-      const response = await fetch(FCC_CURRENT_PATH, { signal, headers: { accept: "application/json" } });
+      const response = await fetch(FCC_CURRENT_PATH, { signal: controller.signal, headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload: unknown = await response.json();
       const value = isCapture(payload) ? payload : null;
       currentCapture = { expires: Date.now() + CACHE_MS, value };
       return value;
-    } catch {
-      currentCapture = { expires: Date.now() + 30_000, value: null };
+    } catch (error) {
+      // An unreachable relay is remembered briefly; an abort says nothing about the relay, so it is not cached.
+      if (!(error instanceof DOMException && error.name === "AbortError")) currentCapture = { expires: Date.now() + 30_000, value: null };
       return null;
     } finally {
+      clearTimeout(timeout);
       currentCaptureRequest = null;
     }
   })();
-  return currentCaptureRequest;
+  return raceSignal(currentCaptureRequest, signal);
 }
 
 /** Records for a scope from the scheduled capture, or null when the capture does not cover it. */
@@ -99,18 +119,10 @@ const snapshotRecords = (FCC_OFFICIAL_SNAPSHOT.records as readonly RawFccRecord[
   .filter((record): record is NormalizedFccRecord => record !== null)
   .map(applyOfficialGrantFields);
 
-function requestSignal(signal?: AbortSignal) {
+function requestSignal() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(new DOMException("The FCC request timed out.", "TimeoutError")), 22_000);
-  const onAbort = () => controller.abort(signal?.reason);
-  signal?.addEventListener("abort", onAbort, { once: true });
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", onAbort);
-    },
-  };
+  return { signal: controller.signal, cleanup: () => clearTimeout(timeout) };
 }
 
 function recordsFromPayload(payload: unknown, retrievedAt: string, sourceMode: NormalizedFccRecord["sourceMode"] = "live") {
@@ -171,10 +183,11 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
   const cached = cache.get(normalized);
   if (cached && cached.expires > Date.now()) return cached.result;
   const pending = inflight.get(normalized);
-  if (pending) return pending;
+  if (pending) return raceSignal(pending, signal);
 
+  // Shared by every caller for this scope, so it only honours its own timeout; each caller races its own signal.
   const request = (async () => {
-    const timed = requestSignal(signal);
+    const timed = requestSignal();
     try {
       const captured = captureScopeResult(await fetchFccCurrentCapture(timed.signal), normalized);
       if (captured) {
@@ -220,7 +233,6 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
       cache.set(normalized, { expires: Date.now() + CACHE_MS, result });
       return result;
     } catch (error) {
-      if (signal?.aborted) throw error;
       if (timed.signal.aborted) {
         const result: ScopeResult = { records: [], resolved: false };
         cache.set(normalized, { expires: Date.now() + 30_000, result });
@@ -233,7 +245,7 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
     }
   })();
   inflight.set(normalized, request);
-  return request;
+  return raceSignal(request, signal);
 }
 
 async function fetchGranteeRegistrations(scopes: string[], signal?: AbortSignal): Promise<FccGranteeRegistration[]> {

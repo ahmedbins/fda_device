@@ -113,6 +113,8 @@ test("builds the official search body from filter state", () => {
 test("normalizes standards and knows their facet level", () => {
   assert.equal(normalizeStandard("iec 60601-1"), "IEC 60601-1");
   assert.equal(normalizeStandard("60601-1 : 2005"), "IEC 60601-1:2005");
+  assert.equal(normalizeStandard("IEC60601-1"), "IEC 60601-1", "a prefix typed without a space still matches the index key");
+  assert.equal(normalizeStandard("en60601-1:2006"), "EN 60601-1:2006");
   assert.equal(normalizeStandard("IEC 62368-1:2018 / AMD1:2020"), "IEC 62368-1:2018/AMD1:2020");
   assert.equal(normalizeStandard(" en 60601-1 "), "EN 60601-1");
   assert.equal(normalizeStandard("   "), "");

@@ -185,14 +185,15 @@ function syncUrl(query: string, mode: MdallSearchMode, state: MdallLicenceState,
   if (pageSize !== 25) params.set("rows", String(pageSize));
   if (resultView !== "licences") params.set("view", resultView);
   if (presetId) params.set("preset", presetId);
+  else if (!query && !companyIds.length) params.set("preset", "none"); // stops start-up from re-applying the default preset
   if (companyIds.length && !presetId) params.set("company", companyIds.join(","));
   const value = params.toString();
   window.history.replaceState(null, "", value ? `${window.location.pathname}?${value}` : window.location.pathname);
 }
 
-function sortLicences(licences: MdallLicence[], sort: SortKey) {
+function sortLicences(licences: MdallLicence[], sort: SortKey, pinned: number[] = []) {
   const { key, dir } = splitSort(sort);
-  return [...licences].sort((a, b) => compareValues(sortValue(a, key), sortValue(b, key), dir) || a.licenceName.localeCompare(b.licenceName) || a.licenceNumber - b.licenceNumber);
+  return [...licences].sort((a, b) => Number(pinned.includes(b.licenceNumber)) - Number(pinned.includes(a.licenceNumber)) || compareValues(sortValue(a, key), sortValue(b, key), dir) || a.licenceName.localeCompare(b.licenceName) || a.licenceNumber - b.licenceNumber);
 }
 
 /** Short label for a search, used by the recent-searches list. */
@@ -221,6 +222,8 @@ export default function MdallExplorerPage() {
   const [presetId, setPresetId] = useState(initial.presetId);
   const [companyIds, setCompanyIds] = useState<number[]>(initial.companyIds);
   const [page, setPage] = useState(0);
+  // The search last sent to MDALL; chips, links, labels and the URL describe this, not unsubmitted form edits.
+  const [applied, setApplied] = useState({ query: initial.query, mode: initial.mode, state: initial.state, presetId: initial.presetId, companyIds: initial.companyIds });
   const [licences, setLicences] = useState<MdallLicence[]>([]);
   const [searchMeta, setSearchMeta] = useState<MdallSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -262,22 +265,24 @@ export default function MdallExplorerPage() {
   const recents = useRecentSearches("hc-recent-searches");
   const rememberRecent = recents.remember;
 
+  const exactNumbers = searchMeta?.exactLicenceNumbers;
   const filteredLicences = useMemo(() => sortLicences(licences.filter((licence) => {
     if (riskClass && String(licence.riskClass || "") !== riskClass) return false;
     if (licenceType && licence.licenceType !== licenceType) return false;
     if (from && (!licence.issuedAt || licence.issuedAt < from)) return false;
     if (to && (!licence.issuedAt || licence.issuedAt > to)) return false;
     return true;
-  }), sort), [from, licenceType, licences, riskClass, sort, to]);
+  }), sort, exactNumbers), [exactNumbers, from, licenceType, licences, riskClass, sort, to]);
   const groupedCompanies = useMemo(() => groupMdallLicencesByCompany(filteredLicences), [filteredLicences]);
   const pageCount = Math.max(1, Math.ceil(filteredLicences.length / pageSize));
-  const visibleLicences = filteredLicences.slice(page * pageSize, page * pageSize + pageSize);
-  const officialSearch = mdallSearchUrl(state === "archived" ? "archived" : "active");
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleLicences = filteredLicences.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
+  const officialSearch = mdallSearchUrl(applied.state === "archived" ? "archived" : "active");
   const deviceCountTargets = columns.includes("deviceCount")
     ? licences.filter((licence) => !licence.deviceDataStatus).map((licence) => licence.licenceNumber).join(",")
     : "";
 
-  const runSearch = useCallback(async (force = false) => {
+  const runSearch = useCallback(async (force = false, searchState: MdallLicenceState = state) => {
     if (!query.trim() && !companyIds.length) {
       setError("Enter a company, licence name, licence number, device name, or device identifier.");
       return;
@@ -292,14 +297,15 @@ export default function MdallExplorerPage() {
     setPage(0);
     setSearched(true);
     if (force) clearMdallCache();
-    syncUrl(query, mode, state, riskClass, licenceType, from, to, sort, pageSize, resultView, presetId, companyIds);
+    setApplied({ query, mode, state: searchState, presetId, companyIds });
+    syncUrl(query, mode, searchState, riskClass, licenceType, from, to, sort, pageSize, resultView, presetId, companyIds);
     try {
-      const next = await searchMdall({ query, mode, state, companyIds: query.trim() ? undefined : companyIds, signal: controller.signal });
+      const next = await searchMdall({ query, mode, state: searchState, companyIds: query.trim() ? undefined : companyIds, signal: controller.signal });
       if (controller.signal.aborted) return;
       setLicences(next.licences);
       setSearchMeta(next);
       setRetrievedAt(new Date(next.retrievedAt));
-      rememberRecent(recentSearchParams(window.location.search), describeSearch(query, mode, state, riskClass, licenceType, getMdallPreset(presetId)?.label));
+      rememberRecent(recentSearchParams(window.location.search), describeSearch(query, mode, searchState, riskClass, licenceType, getMdallPreset(presetId)?.label));
     } catch (caught) {
       if (controller.signal.aborted) return;
       setLicences([]);
@@ -318,6 +324,10 @@ export default function MdallExplorerPage() {
   useEffect(() => {
     localStorage.setItem("mdall-explorer-columns", JSON.stringify(columns));
   }, [columns]);
+
+  useEffect(() => {
+    syncUrl(applied.query, applied.mode, applied.state, riskClass, licenceType, from, to, sort, pageSize, resultView, applied.presetId, applied.companyIds);
+  }, [applied, from, licenceType, pageSize, resultView, riskClass, sort, to]);
 
   useEffect(() => {
     if (!deviceCountTargets) return;
@@ -362,8 +372,8 @@ export default function MdallExplorerPage() {
   const reset = () => {
     request.current?.abort();
     setQuery(""); setMode("auto"); setState("active"); setRiskClass(""); setLicenceType(""); setFrom(""); setTo(""); setPresetId(""); setCompanyIds([]);
-    setLicences([]); setSearchMeta(null); setError(""); setSearched(false); setRetrievedAt(null); setPage(0);
-    syncUrl("", "auto", "active", "", "", "", "", sort, pageSize, resultView);
+    setLicences([]); setSearchMeta(null); setError(""); setSearched(false); setRetrievedAt(null); setPage(0); setLoading(false);
+    setApplied({ query: "", mode: "auto", state: "active", presetId: "", companyIds: [] });
   };
 
   const applyPreset = (id: string) => {
@@ -457,7 +467,7 @@ export default function MdallExplorerPage() {
   const sourcePresentation = mdallSourcePresentation(!!retrievedAt);
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const selectedCompanyGroup = selectedCompany ? groupedCompanies.find((group) => group.key === selectedCompany) : undefined;
-  const activePreset = getMdallPreset(presetId);
+  const activePreset = getMdallPreset(applied.presetId);
   const sortState = splitSort(sort);
   const headerSpec = (column: ColumnKey): HeaderSpec => {
     const option = COLUMN_OPTIONS.find((entry) => entry.key === column)!;
@@ -472,9 +482,9 @@ export default function MdallExplorerPage() {
   };
   const appliedChips: AppliedChip[] = [
     ...(activePreset ? [{ key: "preset", label: activePreset.label }] : []),
-    ...(query ? [{ key: "query", label: `“${query}”` }] : []),
-    ...(mode !== "auto" ? [{ key: "mode", label: `Field: ${mode}` }] : []),
-    ...(state !== "active" ? [{ key: "state", label: state === "both" ? "Active and archived" : "Archived licences" }] : []),
+    ...(applied.query ? [{ key: "query", label: `“${applied.query}”` }] : []),
+    ...(applied.mode !== "auto" ? [{ key: "mode", label: `Field: ${applied.mode}` }] : []),
+    ...(applied.state !== "active" ? [{ key: "state", label: applied.state === "both" ? "Active and archived" : "Archived licences" }] : []),
     ...(riskClass ? [{ key: "class", label: `Class ${riskClass}` }] : []),
     ...(licenceType ? [{ key: "type", label: licenceType }] : []),
     ...(from ? [{ key: "from", label: `Issued from ${from}` }] : []),
@@ -490,6 +500,7 @@ export default function MdallExplorerPage() {
       if (chip.key === "query") params.delete("q");
       if (chip.key === "mode") params.delete("mode");
       if (chip.key === "state") params.delete("state");
+      if (!params.get("q") && !params.get("company") && !getMdallPreset(params.get("preset"))) params.set("preset", "none");
     });
   };
 
@@ -519,7 +530,7 @@ export default function MdallExplorerPage() {
           <div className="filter-group-heading"><span>Preset</span><small>Confirmed watch scope</small></div>
           <label className="field">
             <span>Health Canada watch scope</span>
-            <select value={presetId} onChange={(event) => event.target.value ? applyPreset(event.target.value) : setPresetId("")}>
+            <select value={presetId} onChange={(event) => { if (event.target.value) applyPreset(event.target.value); else { setPresetId(""); setCompanyIds([]); } }}>
               <option value="">Custom scope</option>
               {MDALL_PRESETS.map((preset) => <option value={preset.id} key={preset.id}>{preset.label}</option>)}
             </select>
@@ -545,12 +556,12 @@ export default function MdallExplorerPage() {
           </label>
 
           <div className="filter-group-heading narrow-heading"><span>Narrow</span><small>Applied to MDALL results</small></div>
-          <label className="field"><span>Licence state</span><select value={state} onChange={(event) => setState(event.target.value as MdallLicenceState)}><option value="active">Active licences</option><option value="archived">Archived licences</option><option value="both">Active and archived</option></select></label>
+          <label className="field"><span>Licence state</span><select value={state} onChange={(event) => { const next = event.target.value as MdallLicenceState; setState(next); if (searched) runSearch(false, next); }}><option value="active">Active licences</option><option value="archived">Archived licences</option><option value="both">Active and archived</option></select></label>
           <label className="field"><span>Risk class</span><select value={riskClass} onChange={(event) => { setRiskClass(event.target.value); setPage(0); }}><option value="">All classes</option><option value="2">Class II</option><option value="3">Class III</option><option value="4">Class IV</option></select></label>
           <label className="field"><span>Licence type</span><select value={licenceType} onChange={(event) => { setLicenceType(event.target.value); setPage(0); }}><option value="">All types</option><option>Single Device</option><option>Device Family</option><option>System</option><option>Test Kit</option><option>Device Group</option><option>Device Group Family</option></select></label>
           <div className="two-col">
-            <label className="field"><span>Issued from</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-            <label className="field"><span>Issued to</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+            <label className="field"><span>Issued from</span><input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(0); }} /></label>
+            <label className="field"><span>Issued to</span><input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(0); }} /></label>
           </div>
           <small className="field-hint fcc-limit-note">MDALL does not include Class I devices, investigational testing, or special-access authorizations. The official HTML search is POST-only, so this app uses the documented JSON API.</small>
 
@@ -586,10 +597,10 @@ export default function MdallExplorerPage() {
           {loading && <div className="loading-layer"><div className="loading-note"><LoaderCircle className="spin" size={24} /> Contacting Health Canada MDALL…</div></div>}
 
           {!searched && !loading ? <div className="empty-state"><div className="empty-number">HC</div><Landmark size={34} /><h3>Start with a Canadian licence search.</h3><p>Search a company, licence name, licence number, device trade name, or device identifier in the official Health Canada MDALL API.</p></div>
-          : searched && !loading && !error && !filteredLicences.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No MDALL licences matched.</h3><p>Try a company name, a shorter licence name, or switch between active and archived licences. Class I devices are not listed in MDALL.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); setRiskClass(""); }}>Clear narrow filters</button></div></div>
+          : searched && !loading && !error && !filteredLicences.length ? <div className="empty-state"><div className="empty-number">0</div><Search size={34} /><h3>No MDALL licences matched.</h3><p>Try a company name, a shorter licence name, or switch between active and archived licences. Class I devices are not listed in MDALL.</p><div className="empty-actions"><button className="secondary" onClick={() => { setFrom(""); setTo(""); setRiskClass(""); setLicenceType(""); setPage(0); }}>Clear narrow filters</button></div></div>
           : resultView === "licences" && filteredLicences.length > 0 && <>
             <div className="table-wrap" ref={tableScroll}><table className={`fcc-table${widthTools.fixedLayout ? " table-fixed" : ""}`} style={widthTools.tableStyle}>{widthTools.colGroup}<thead><tr>{columns.map((column) => <HeaderCell key={column} spec={headerSpec(column)} resizing={widthTools.resizing} onSort={sortByHeader} onResizeStart={widthTools.startResize} onResizeReset={widthTools.resetWidth} />)}</tr></thead><tbody>{visibleLicences.map((licence) => <tr key={`${licence.licenceNumber}-${licence.licenceStatus}-${licence.endDate || "open"}`} tabIndex={0} onClick={() => setSelected(licence)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(licence); } }}>{columns.map((column) => <td key={column}>{renderCell(licence, column)}</td>)}</tr>)}</tbody></table></div>
-            <div className="pagination"><span>{filteredLicences.length.toLocaleString()} matching MDALL licence{filteredLicences.length === 1 ? "" : "s"} · page {page + 1} of {pageCount}{retrievedAt && <small className="fetch-meta">{searchMeta?.lastRefreshAt ? `MDALL refresh ${displayDate(searchMeta.lastRefreshAt)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</span><label className="page-size">Rows <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label><div><button className="icon-button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} aria-label="Next page">→</button></div></div>
+            <div className="pagination"><span>{filteredLicences.length.toLocaleString()} matching MDALL licence{filteredLicences.length === 1 ? "" : "s"} · page {currentPage + 1} of {pageCount}{retrievedAt && <small className="fetch-meta">{searchMeta?.lastRefreshAt ? `MDALL refresh ${displayDate(searchMeta.lastRefreshAt)}` : `Pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}`}</small>}</span><label className="page-size">Rows <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label><div><button className="icon-button" onClick={() => setPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} aria-label="Previous page">←</button><button className="icon-button" onClick={() => setPage(Math.min(pageCount - 1, currentPage + 1))} disabled={currentPage + 1 >= pageCount} aria-label="Next page">→</button></div></div>
           </>}
           {resultView === "companies" && groupedCompanies.length > 0 && <div className="fcc-grantee-grid">{groupedCompanies.map((group) => <button key={group.key} className="fcc-grantee-card" onClick={() => setSelectedCompany(group.key)}><span className="grantee-code">{group.companyId || "HC"}</span><h3>{group.companyName}</h3><p>{group.licenceCount} MDALL licence{group.licenceCount === 1 ? "" : "s"}</p><dl><div><dt>Most recent</dt><dd>{displayDate(group.latestIssued)}</dd></div><div><dt>Location</dt><dd>{mdallLocation(group.company)}</dd></div></dl><span className="open-profile">Open company profile →</span></button>)}</div>}
         </section>
@@ -642,7 +653,7 @@ export default function MdallExplorerPage() {
         clickableLinks={exportOptions.clickableLinks}
         pageCount={visibleLicences.length}
         allCount={filteredLicences.length}
-        filters={[query, state !== "active" ? state : "", riskClass && `Class ${riskClass}`, licenceType, from && `From ${from}`, to && `To ${to}`].filter(Boolean) as string[]}
+        filters={[applied.query, applied.state !== "active" ? applied.state : "", riskClass && `Class ${riskClass}`, licenceType, from && `From ${from}`, to && `To ${to}`].filter(Boolean) as string[]}
         onFilename={(filename) => setExportOptions((current) => ({ ...current, filename }))}
         onScope={(scope) => setExportOptions((current) => ({ ...current, scope }))}
         onClickableLinks={(clickableLinks) => setExportOptions((current) => ({ ...current, clickableLinks }))}

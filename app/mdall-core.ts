@@ -68,6 +68,8 @@ export type MdallSearchResult = {
   lastRefreshAt?: string;
   resolved: boolean;
   notes: string[];
+  /** Licence numbers that exactly equal a numeric query; the UI pins these above looser matches. */
+  exactLicenceNumbers?: number[];
 };
 
 const LICENCE_STATUS: Record<string, string> = {

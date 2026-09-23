@@ -165,7 +165,8 @@ export function buildSearch(filters: ExplorerFilters) {
   if (filters.deviceClass)
     clauses.push(`products.openfda.device_class:${quote(filters.deviceClass)}`);
   if (filters.establishment)
-    clauses.push(`establishment_type:${quote(filters.establishment)}`);
+    // .exact: the tokenized field phrase-matches longer roles ("… for Another Party")
+    clauses.push(`establishment_type.exact:${quote(filters.establishment)}`);
   return clauses.join(" AND ");
 }
 
@@ -221,11 +222,35 @@ export function filtersFromParams(params: URLSearchParams) {
   };
   const rawView = params.get("view");
   const view: ExplorerView = rawView === "matrix" || rawView === "udi" ? rawView : "records";
-  const autorun = !!(
-    filters.keyword || filters.productCodes.length || filters.country ||
-    filters.state || filters.deviceClass || filters.establishment
+  return { filters, view, autorun: hasActiveFilters(filters) };
+}
+
+/** True when any filter narrows the search; with none, results are an unfiltered browse. */
+export function hasActiveFilters(filters: ExplorerFilters) {
+  return !!(
+    filters.keyword.trim() || filters.productCodes.length || filters.country.trim() ||
+    filters.state.trim() || filters.deviceClass || filters.establishment
   );
-  return { filters, view, autorun };
+}
+
+/**
+ * A link key for one listing. The registration number repeats once per listing, so it carries a
+ * short hash of what tells the listings apart (openFDA gives a listing no id of its own).
+ */
+export function recordKey(item: RecordItem) {
+  const products = (item.products || []).map((product) => `${product.product_code || ""}@${product.created_date || ""}`).join(",");
+  const identity = [item.k_number || "", item.pma_number || "", products, (item.proprietary_name || []).join("|")].join("~");
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < identity.length; index += 1) hash = Math.imul(hash ^ identity.charCodeAt(index), 0x01000193);
+  return `${item.registration?.registration_number || ""}-${(hash >>> 0).toString(36)}`;
+}
+
+/** The listing a link key names; a bare registration number (older links) or a stale hash opens that registration's first listing. */
+export function findRecord(items: RecordItem[], key: string) {
+  if (!key) return undefined;
+  const registration = key.split("-")[0];
+  return items.find((item) => recordKey(item) === key) ||
+    items.find((item) => String(item.registration?.registration_number || "") === registration);
 }
 
 /** Which draft filters differ from the applied ones — shown next to Search so stale results are obvious. */
@@ -505,6 +530,7 @@ export async function fetchOpenFda<T = unknown>(url: string): Promise<OpenFdaRes
 
 /** openFDA serves at most 1,000 records per call and stops at skip 25,000. */
 export const OPENFDA_PAGE = 1000;
+export const OPENFDA_MAX_SKIP = 25000;
 export const EXPORT_CAP = 26000;
 /** How many listings the Company + devices view loads before grouping — enough that company coverage is judged on the full set for any realistic code selection. */
 export const MATRIX_FETCH_CAP = 5000;

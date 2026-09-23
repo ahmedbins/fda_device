@@ -37,3 +37,18 @@ test("builds a single-sheet Excel workbook with filters, dates and hyperlinks", 
   const workbook = strFromU8(files["xl/workbook.xml"]);
   assert.match(workbook, /Authorizations/);
 });
+
+test("drops XML-forbidden control characters and clips text to Excel's cell limit", () => {
+  const bytes = excelBytes({
+    filename: "control.xlsx",
+    sheetName: "Records",
+    columns: [{ header: "Text" }],
+    rows: [["line\u000Bbreak\u0000"], ["x".repeat(40_000)]],
+  });
+  const files = unzipSync(bytes);
+  const xml = Object.entries(files).filter(([name]) => name.startsWith("xl/")).map(([, data]) => strFromU8(data)).join("");
+  assert.ok(xml.includes("linebreak"));
+  assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(xml));
+  assert.ok(!xml.includes("x".repeat(32_768)));
+  assert.ok(xml.includes("x".repeat(32_767)));
+});

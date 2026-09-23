@@ -281,10 +281,11 @@ async function ieceeCacheKey(kind, value) {
   return new Request(`https://iecee-relay.internal/${kind}/${hash}`, { method: "GET" });
 }
 
-async function ieceeRelay(ctx, kind, cacheValue, ttl, upstream) {
+async function ieceeRelay(ctx, kind, cacheValue, ttl, upstream, fresh = false) {
   const cache = caches.default;
   const cacheKey = await ieceeCacheKey(kind, cacheValue);
-  const cached = await cache.match(cacheKey);
+  // `fresh` (the page's Refresh button) skips the stored answer but still stores the new one.
+  const cached = fresh ? undefined : await cache.match(cacheKey);
   if (cached) {
     const hit = new Response(cached.body, cached);
     hit.headers.set("x-iecee-cache", "HIT");
@@ -326,7 +327,8 @@ async function ieceeSearch(request, ctx) {
   const cleaned = sanitizeIeceeBody(payload);
   if (cleaned.error) return Response.json({ error: cleaned.error }, { status: 400 });
   const body = JSON.stringify(cleaned.body);
-  return ieceeRelay(ctx, "search", body, 300, { url: `${IECEE_API}/search-es`, init: { method: "POST", headers: { ...IECEE_HEADERS, "content-type": "application/json" }, body } });
+  const fresh = new URL(request.url).searchParams.get("fresh") === "1";
+  return ieceeRelay(ctx, "search", body, 300, { url: `${IECEE_API}/search-es`, init: { method: "POST", headers: { ...IECEE_HEADERS, "content-type": "application/json" }, body } }, fresh);
 }
 
 async function ieceeCertificate(request, ctx) {

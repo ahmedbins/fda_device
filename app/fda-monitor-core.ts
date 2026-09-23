@@ -58,7 +58,7 @@ export type EventRow = {
 };
 
 export type Section<T> = {
-  status: "loading" | "done" | "error";
+  status: "idle" | "loading" | "done" | "error";
   rows: T[];
   total: number;
   datasetDate: string;
@@ -85,12 +85,15 @@ export function isoDate(raw?: string) {
   return raw.slice(0, 10);
 }
 
-export function cutoffIso(days: number) {
-  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+/** First local calendar day of a "last N days" window that includes today, as YYYY-MM-DD. */
+export function cutoffIso(days: number, now = new Date()) {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+  return start.toLocaleDateString("en-CA");
 }
 
 export async function loadListings(codes: string[]): Promise<Section<NewListing>> {
-  const params = new URLSearchParams({ limit: "1000", search: codesClause("products.product_code", codes) });
+  // Newest listings first, so a code with more than 1,000 registrations still returns its recent ones.
+  const params = new URLSearchParams({ limit: "1000", search: codesClause("products.product_code", codes), sort: "products.created_date:desc" });
   const data = await fetchJson(`${API}?${params.toString()}`);
   const records = (data.results || []) as RecordItem[];
   const codeSet = new Set(codes);

@@ -88,10 +88,16 @@ export function useColumnWidths(storageKey: string, activeKeys: readonly string[
   const widthsRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    // Drop the pre-2026-09-18 pixel map for this table; its numbers are not shares.
-    localStorage.removeItem(storageKey.replace("-col-shares", "-col-widths"));
-    const stored = parseColumnWidths(localStorage.getItem(storageKey));
-    const storedNatural = parseNaturalWidths(localStorage.getItem(columnNaturalKey(storageKey)));
+    let stored: Record<string, number> = {};
+    let storedNatural: Record<string, number> = {};
+    try {
+      // Drop the pre-2026-09-18 pixel map for this table; its numbers are not shares.
+      localStorage.removeItem(storageKey.replace("-col-shares", "-col-widths"));
+      stored = parseColumnWidths(localStorage.getItem(storageKey));
+      storedNatural = parseNaturalWidths(localStorage.getItem(columnNaturalKey(storageKey)));
+    } catch {
+      // Blocked storage: widths start from the defaults.
+    }
     queueMicrotask(() => {
       loadedKey.current = storageKey;
       setWidths(stored);
@@ -216,7 +222,12 @@ export function useRecentSearches(storageKey: string) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const stored = parseRecentEntries(localStorage.getItem(storageKey));
+    let stored: RecentEntry[] = [];
+    try {
+      stored = parseRecentEntries(localStorage.getItem(storageKey));
+    } catch {
+      // Blocked storage: no recent searches.
+    }
     queueMicrotask(() => {
       setRecent((current) => (current.length ? current : stored));
       setReady(true);
@@ -261,19 +272,26 @@ export function RecentSearches({ entries, onApply, onForget, onClear, compact = 
  * something. Re-measures on scroll and on resize, and re-runs whenever `deps` change the table.
  */
 export function useScrollShadow(deps: readonly unknown[] = []) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const pane = ref.current;
-    if (!pane) return;
-    const sync = () => pane.classList.toggle("scrolled-x", pane.scrollLeft > 1);
+  const pane = useRef<HTMLDivElement | null>(null);
+  const detach = useRef<(() => void) | null>(null);
+  // A callback ref, because the table pane usually mounts after the first render (once results arrive).
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    detach.current?.();
+    detach.current = null;
+    pane.current = node;
+    if (!node) return;
+    const sync = () => node.classList.toggle("scrolled-x", node.scrollLeft > 1);
     sync();
-    pane.addEventListener("scroll", sync, { passive: true });
+    node.addEventListener("scroll", sync, { passive: true });
     const observer = new ResizeObserver(sync);
-    observer.observe(pane);
-    return () => {
-      pane.removeEventListener("scroll", sync);
+    observer.observe(node);
+    detach.current = () => {
+      node.removeEventListener("scroll", sync);
       observer.disconnect();
     };
+  }, []);
+  useEffect(() => {
+    pane.current?.classList.toggle("scrolled-x", pane.current.scrollLeft > 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return ref;

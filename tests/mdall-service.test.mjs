@@ -125,3 +125,35 @@ test("device-name and identifier searches carry state and do not cap matching li
     clearMdallCache();
   }
 });
+
+test("numeric auto search pins the exact licence number above company, device and identifier matches", async () => {
+  clearMdallCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    const parsed = new URL(url);
+    if (url.includes("/company/?id=")) {
+      const companyId = Number(parsed.searchParams.get("id"));
+      return jsonResponse({ company_id: companyId, company_name: `COMPANY ${companyId}` });
+    }
+    if (url.includes("/licence/?company_id=1423")) return jsonResponse([500_001, 500_002, 500_003].map((number) => activeLicence(number, 1423)));
+    if (url.includes("/licence/?id=")) {
+      const number = Number(parsed.searchParams.get("id"));
+      return jsonResponse(activeLicence(number, 77));
+    }
+    if (url.includes("/device/?device_name=1423")) return jsonResponse([{ original_licence_no: 600_000, device_id: 1, first_licence_dt: "2026-01-01", end_date: null, trade_name: "MODEL 1423" }]);
+    if (url.includes("/deviceidentifier/?device_identifier=1423")) return jsonResponse([]);
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  try {
+    const result = await searchMdall({ query: "1423", mode: "auto", state: "active" });
+    assert.equal(result.licences.length, 5);
+    assert.equal(result.licences[0].licenceNumber, 1423);
+    assert.deepEqual(result.exactLicenceNumbers, [1423]);
+    assert.ok(result.licences.some((licence) => licence.licenceNumber === 600_000));
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearMdallCache();
+  }
+});

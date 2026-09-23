@@ -157,7 +157,8 @@ export function normalizeStandard(value: string) {
   let text = value.replace(/\s+/g, " ").trim();
   if (!text) return "";
   if (/^\d/.test(text)) text = `IEC ${text}`;
-  text = text.replace(/^(iec|iso|en|ieee|ul)\b\s*/i, (match) => `${match.trim().toUpperCase()} `);
+  // "IEC60601-1" has no word boundary between prefix and number, so match the prefix before a digit or space.
+  text = text.replace(/^(iec|iso|en|ieee|ul)(?=[\s\d])\s*/i, (match) => `${match.trim().toUpperCase()} `);
   return text.replace(/\s*:\s*/g, ":").replace(/\s*\/\s*/g, "/");
 }
 

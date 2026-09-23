@@ -234,7 +234,7 @@ export function UdiCompanyPanel({
       }
       const rows = premarketGapRows(devices, wanted);
       downloadExcel({
-        filename: sanitizeExportFilename("", `gudid-premarket-gap-${slug(company)}-${wanted.join("+") || "all-codes"}-${new Date().toISOString().slice(0, 10)}`),
+        filename: sanitizeExportFilename("", `gudid-premarket-gap-${slug(company)}-${wanted.join("+") || "all-codes"}-${new Date().toLocaleDateString("en-CA")}`),
         sheetName: "Premarket gap",
         columns: PREMARKET_GAP_COLUMNS.map((column) => ({ header: column.header, width: column.width })),
         rows: rows.map((row) => PREMARKET_GAP_COLUMNS.map((column) => row[column.key])),
@@ -318,7 +318,10 @@ export function UdiCompanyPanel({
       <p className="panel-note">{explanation}</p>
       {summary.breakdown.length > 1 && (
         <div className="udi-breakdown" aria-label="Devices per labeler">
-          {summary.breakdown.map((entry) => <span key={entry.name} className="code-count"><b>{entry.name}</b> {entry.count.toLocaleString()}</span>)}
+          {/* The Devices view searches one name, so each labeler opens on its own. */}
+          {summary.breakdown.map((entry) => onOpenDevicesView
+            ? <button key={entry.name} type="button" className="code-count" onClick={() => onOpenDevicesView(entry.name)} title={`Open ${entry.name} in Devices (UDI)`}><b>{entry.name}</b> {entry.count.toLocaleString()}</button>
+            : <span key={entry.name} className="code-count"><b>{entry.name}</b> {entry.count.toLocaleString()}</span>)}
         </div>
       )}
       <div className="udi-report">
@@ -334,7 +337,7 @@ export function UdiCompanyPanel({
           </div>
           <div className="udi-list-foot">
             <span>Showing {devices.length.toLocaleString()} of {(listedAll ? summary.all ?? 0 : summary.any).toLocaleString()} {listedAll ? `devices carrying all of ${codesJoined}` : "devices"} · newest published first</span>
-            {onOpenDevicesView && <button type="button" className="secondary" onClick={() => onOpenDevicesView(summary.breakdown[0]?.name || company)}>Open in Devices (UDI) <ArrowUpRight size={13} /></button>}
+            {onOpenDevicesView && <button type="button" className="secondary" onClick={() => onOpenDevicesView(summary.breakdown[0]?.name || company)} title={summary.breakdown.length > 1 ? "Opens the largest labeler — pick another labeler above" : undefined}>{summary.breakdown.length > 1 ? `Open ${summary.breakdown[0].name} in Devices (UDI)` : "Open in Devices (UDI)"} <ArrowUpRight size={13} /></button>}
           </div>
         </>
       )}

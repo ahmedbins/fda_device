@@ -55,12 +55,14 @@ function initialMonitorState() {
   };
 }
 
+/** First local calendar day of a "last N days" window that includes today. */
 function cutoffIso(days: number) {
-  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).toLocaleDateString("en-CA");
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date().toLocaleDateString("en-CA");
 }
 
 function displayDate(value?: string) {
@@ -85,6 +87,8 @@ export default function IeceeMonitorPage() {
   const [error, setError] = useState("");
   const [retrievedAt, setRetrievedAt] = useState<Date | null>(null);
   const [activeCutoff, setActiveCutoff] = useState(() => cutoffIso(initial.days));
+  // The window the loaded rows were fetched for; the select can change before Update is pressed.
+  const [appliedDays, setAppliedDays] = useState(initial.days);
   const [linkCopied, setLinkCopied] = useState(false);
   const request = useRef<AbortController | null>(null);
 
@@ -111,6 +115,7 @@ export default function IeceeMonitorPage() {
     if (force) clearIeceeCache();
     const cutoff = cutoffIso(days);
     setActiveCutoff(cutoff);
+    setAppliedDays(days);
     const params = new URLSearchParams({ days: String(days) });
     if (presetId) params.set("preset", presetId);
     else params.set("q", cleanQuery);
@@ -119,8 +124,8 @@ export default function IeceeMonitorPage() {
     const filters = normalizeIeceeFilters({ ...EMPTY_IECEE_FILTERS, query: cleanQuery, categories: category ? [category] : [] });
     try {
       const [issuedPage, updatedPage] = await Promise.all([
-        searchIecee({ filters: { ...filters, issuedFrom: cutoff, issuedTo: todayIso() }, size: IECEE_MAX_PAGE, sort: "issued-desc", signal: controller.signal }),
-        searchIecee({ filters, size: IECEE_MAX_PAGE, sort: "updated-desc", signal: controller.signal }),
+        searchIecee({ filters: { ...filters, issuedFrom: cutoff, issuedTo: todayIso() }, size: IECEE_MAX_PAGE, sort: "issued-desc", signal: controller.signal, fresh: force }),
+        searchIecee({ filters, size: IECEE_MAX_PAGE, sort: "updated-desc", signal: controller.signal, fresh: force }),
       ]);
       if (controller.signal.aborted) return;
       setIssued(issuedPage);
@@ -143,7 +148,7 @@ export default function IeceeMonitorPage() {
   }, []);
 
   const exportWorkbook = () => downloadExcel({
-    filename: `iecee-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    filename: `iecee-monitoring-${appliedDays}-days-${new Date().toLocaleDateString("en-CA")}.xlsx`,
     sheetName: "IECEE monitoring",
     columns: [
       { header: "Window (days)", type: "number", width: 14 },
@@ -166,7 +171,7 @@ export default function IeceeMonitorPage() {
       ...recentIssued.map((certificate) => ["Issued", certificate] as const),
       ...modified.map((certificate) => ["Updated", certificate] as const),
     ].map(([activity, certificate]) => [
-      days,
+      appliedDays,
       activity,
       certificate.issuedAt || "",
       certificate.updatedAt?.slice(0, 10) || "",
@@ -186,7 +191,7 @@ export default function IeceeMonitorPage() {
 
   const dateTimeFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
   const sourcePresentation = ieceeSourcePresentation(!!retrievedAt);
-  const windowLabel = days === 730 ? "last 2 years" : `last ${days} days`;
+  const windowLabel = appliedDays === 730 ? "last 2 years" : `last ${appliedDays} days`;
 
   const certificateRow = (certificate: IeceeCertificate, dateField: "issuedAt" | "updatedAt") => (
     <tr key={`${certificate.id}-${dateField}`}>
@@ -224,7 +229,7 @@ export default function IeceeMonitorPage() {
         <label className="field monitor-window"><span>Window</span><select value={days} onChange={(event) => setDays(Number(event.target.value))}>{WINDOWS.map((window) => <option key={window} value={window}>{window === 730 ? "Last 2 years" : `Last ${window} days`}</option>)}</select></label>
         <div className="monitor-actions">
           <button className="primary" onClick={() => update()} disabled={status === "loading"}><RefreshCw className={status === "loading" ? "spin" : ""} size={15} /> Update</button>
-          <button className="icon-button" onClick={async () => { await navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1600); }} aria-label="Copy shareable IECEE monitoring URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
+          <button className="icon-button" onClick={async () => { try { await navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1600); } catch { /* address bar fallback */ } }} aria-label="Copy shareable IECEE monitoring URL">{linkCopied ? <Check size={16} /> : <Link2 size={16} />}</button>
         </div>
         <small className="monitor-refreshed">Source: {IECEE_SOURCE_LABEL}{retrievedAt ? ` · pulled ${retrievedAt.toLocaleString([], dateTimeFormat)}` : ""} · activity uses IECEE issue dates and last-update timestamps, not snapshot change detection</small>
       </section>

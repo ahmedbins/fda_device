@@ -100,3 +100,41 @@ test("falls back to the bundled FCC copy when the capture relay is unavailable",
     clearFccCache();
   }
 });
+
+test("a caller that aborts does not poison the shared capture or another caller's search", async () => {
+  const { clearFccCache, searchFcc } = await import("../app/fcc-service.ts");
+  clearFccCache();
+  const originalFetch = globalThis.fetch;
+  let captureCalls = 0;
+  let releaseCapture;
+  const captureGate = new Promise((resolve) => { releaseCapture = resolve; });
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url === "/api/fcc/current") {
+      captureCalls += 1;
+      assert.ok(!init?.signal || !init.signal.aborted);
+      await captureGate;
+      return new Response(JSON.stringify({
+        refreshedAt: "2026-09-18T06:00:12.000Z",
+        scopes: { KWC: { scope: "KWC", capturedAt: "2026-09-18T06:00:10.000Z", source: "official_relay", records: [{ FCCId: "KWC-ERF", grantDate: "06/11/2026", grantee: "Sonova USA Inc.", applicationPurpose: "Original Equipment" }] } },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("opendata.fcc.gov")) return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  try {
+    const first = new AbortController();
+    const aborted = searchFcc(["KWC"], first.signal);
+    const second = searchFcc(["KWC"], new AbortController().signal);
+    first.abort();
+    await assert.rejects(aborted, (error) => error.name === "AbortError");
+    releaseCapture();
+    const result = await second;
+    assert.equal(result.sourceMode, "official_capture");
+    assert.deepEqual(result.records.map((record) => record.fccId), ["KWC-ERF"]);
+    assert.equal(captureCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearFccCache();
+  }
+});

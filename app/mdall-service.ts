@@ -249,14 +249,18 @@ export async function searchMdall(options: SearchOptions): Promise<MdallSearchRe
     licences = licences.filter((licence) => state === "archived" ? licence.state === "archived" : licence.state === "active");
   }
 
+  // A numeric auto query also matches company IDs, device names and identifiers; keep the exact licence first.
+  const exactLicenceNumbers = query && (mode === "auto" || mode === "licenceNumber") && looksLikeMdallNumber(query) ? [Number(query)] : [];
   const withCompanies = await attachCompanies(licences, options.signal);
+  const unique = uniqueMdallLicences(withCompanies);
   const result: MdallSearchResult = {
-    licences: uniqueMdallLicences(withCompanies),
+    licences: [...unique.filter((licence) => exactLicenceNumbers.includes(licence.licenceNumber)), ...unique.filter((licence) => !exactLicenceNumbers.includes(licence.licenceNumber))],
     companies: [...new Map([...companies, ...withCompanies.map((licence) => licence.company).filter((company): company is MdallCompany => !!company)].map((company) => [company.companyId, company])).values()],
     retrievedAt,
     lastRefreshAt: withCompanies.find((licence) => licence.lastRefreshAt)?.lastRefreshAt,
     resolved: true,
     notes,
+    exactLicenceNumbers,
   };
   searchCache.set(key, { expires: Date.now() + CACHE_MS, result });
   return result;

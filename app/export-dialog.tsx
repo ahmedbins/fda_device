@@ -171,7 +171,7 @@ export function ExportDialog({
 }
 
 export function defaultExportFilename(prefix: string) {
-  return `${prefix}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  return `${prefix}-${new Date().toLocaleDateString("en-CA")}.xlsx`;
 }
 
 export function loadExportToggles(key: string, fallback: string[]) {
@@ -203,7 +203,11 @@ export function loadExportSettings(key: string, fallback: ExportSettings): Expor
 
 export function saveExportSettings(key: string, value: ExportSettings) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Settings are a convenience; the export itself still runs.
+  }
 }
 
 export function sanitizeExportFilename(value: string, fallback: string) {

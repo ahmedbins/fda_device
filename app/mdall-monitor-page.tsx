@@ -48,9 +48,8 @@ function initialMonitorState() {
   };
 }
 
-function cutoffIso(days: number) {
-  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-}
+// Local calendar days: the window includes today and the N-1 previous days.
+function cutoffIso(days: number) { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).toLocaleDateString("en-CA"); }
 
 function displayDate(value?: string) {
   if (!value) return "—";
@@ -72,7 +71,7 @@ export default function MdallMonitorPage() {
   const request = useRef<AbortController | null>(null);
   const officialSearch = mdallSearchUrl("active");
 
-  const cutoff = useMemo(() => cutoffIso(days), [days]);
+  const cutoff = cutoffIso(days); // recomputed every render so a tab left open overnight moves forward
   const recentIssued = useMemo(() => mdallLicencesInWindow(licences, cutoff, "issuedAt"), [cutoff, licences]);
   const recentEnded = useMemo(() => mdallLicencesInWindow(licences, cutoff, "endDate"), [cutoff, licences]);
   const higherClass = useMemo(() => recentIssued.filter((licence) => (licence.riskClass || 0) >= 3), [recentIssued]);
@@ -110,10 +109,18 @@ export default function MdallMonitorPage() {
     } catch (caught) {
       if (controller.signal.aborted) return;
       setLicences([]);
+      setSearchMeta(null);
+      setRetrievedAt(null);
       setError(caught instanceof Error ? caught.message : "The Health Canada MDALL source could not be reached.");
       setStatus("error");
     }
   }, [companyIds, days, presetId, query]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("days", String(days));
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+  }, [days]);
 
   useEffect(() => {
     if (initial.query || initial.companyIds.length) queueMicrotask(() => update());
@@ -122,7 +129,7 @@ export default function MdallMonitorPage() {
   }, []);
 
   const exportWorkbook = () => downloadExcel({
-    filename: `mdall-monitoring-${days}-days-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    filename: `mdall-monitoring-${days}-days-${new Date().toLocaleDateString("en-CA")}.xlsx`,
     sheetName: "MDALL monitoring",
     columns: [
       { header: "Window (days)", type: "number", width: 14 },
@@ -198,13 +205,13 @@ export default function MdallMonitorPage() {
         {status === "loading" && <div className="section-empty"><LoaderCircle className="spin" size={14} /> Checking Health Canada MDALL licences…</div>}
         {status === "error" && <div className="section-error"><CircleAlert size={15} /> {error}</div>}
         {status === "done" && !recentIssued.length && <div className="section-empty"><b>None first issued in the last {days} days.</b> {licences.length ? ` ${licences.length} licence${licences.length === 1 ? "" : "s"} were returned outside this window.` : " No MDALL licences were returned for this scope."}</div>}
-        {recentIssued.length > 0 && <div className="table-wrap"><table className="m-table"><thead><tr><th>Issued</th><th>Licence</th><th>Company</th><th>Class / status</th><th>Source</th></tr></thead><tbody>{recentIssued.map((licence) => <tr key={`${licence.licenceNumber}-${licence.issuedAt}`}><td className="date-cell">{displayDate(licence.issuedAt)}</td><td><a href={`/hc/explorer?q=${encodeURIComponent(String(licence.licenceNumber))}&mode=licenceNumber`} className="fcc-id">{licence.licenceNumber}</a><span>{licence.licenceName}</span></td><td><a href={`/hc/explorer?q=${encodeURIComponent(licence.companyName || String(licence.companyId || ""))}&mode=company`}>{licence.companyName || "—"}</a><span>{licence.companyId ? `ID ${licence.companyId}` : mdallLocation(licence.company)}</span></td><td className="wrap-cell"><b>{licence.riskClassLabel}</b><span>{licence.licenceStatusLabel}</span></td><td><a className="ext-link" href={officialSearch} target="_blank" rel="noreferrer">MDALL search <ExternalLink size={11} /></a></td></tr>)}</tbody></table></div>}
+        {recentIssued.length > 0 && <div className="table-wrap"><table className="m-table"><thead><tr><th>Issued</th><th>Licence</th><th>Company</th><th>Class / status</th><th>Source</th></tr></thead><tbody>{recentIssued.map((licence) => <tr key={`${licence.licenceNumber}-${licence.issuedAt}`}><td className="date-cell">{displayDate(licence.issuedAt)}</td><td><a href={`/hc/explorer?q=${encodeURIComponent(String(licence.licenceNumber))}&mode=licenceNumber&state=${licence.endDate ? "archived" : "both"}`} className="fcc-id">{licence.licenceNumber}</a><span>{licence.licenceName}</span></td><td><a href={`/hc/explorer?q=${encodeURIComponent(licence.companyName || String(licence.companyId || ""))}&mode=company`}>{licence.companyName || "—"}</a><span>{licence.companyId ? `ID ${licence.companyId}` : mdallLocation(licence.company)}</span></td><td className="wrap-cell"><b>{licence.riskClassLabel}</b><span>{licence.licenceStatusLabel}</span></td><td><a className="ext-link" href={officialSearch} target="_blank" rel="noreferrer">MDALL search <ExternalLink size={11} /></a></td></tr>)}</tbody></table></div>}
         <div className="section-note">Recent activity means licences whose first-issued date falls inside the selected window. This is not a claim that MDALL published a change-log or that older licences were modified.</div>
       </section>
 
       <section className="monitor-section" aria-label="Ended MDALL licences">
         <div className="section-head"><h2><RefreshCw size={17} /> Ended or archived licences</h2><div className="section-tools"><span className="section-count">{recentEnded.length} in window</span></div></div>
-        {!recentEnded.length ? <div className="section-empty"><b>No MDALL end dates in this window.</b> This section only includes licences that carry an MDALL end or cancellation date.</div> : <div className="table-wrap"><table className="m-table"><thead><tr><th>End date</th><th>Licence</th><th>Company</th><th>Status</th></tr></thead><tbody>{recentEnded.map((licence) => <tr key={`${licence.licenceNumber}-end`}><td>{displayDate(licence.endDate)}</td><td><a href={`/hc/explorer?q=${encodeURIComponent(String(licence.licenceNumber))}&mode=licenceNumber`} className="fcc-id">{licence.licenceNumber}</a></td><td>{licence.companyName || "—"}</td><td>{licence.licenceStatusLabel}</td></tr>)}</tbody></table></div>}
+        {!recentEnded.length ? <div className="section-empty"><b>No MDALL end dates in this window.</b> This section only includes licences that carry an MDALL end or cancellation date.</div> : <div className="table-wrap"><table className="m-table"><thead><tr><th>End date</th><th>Licence</th><th>Company</th><th>Status</th></tr></thead><tbody>{recentEnded.map((licence) => <tr key={`${licence.licenceNumber}-end`}><td>{displayDate(licence.endDate)}</td><td><a href={`/hc/explorer?q=${encodeURIComponent(String(licence.licenceNumber))}&mode=licenceNumber&state=${licence.endDate ? "archived" : "both"}`} className="fcc-id">{licence.licenceNumber}</a></td><td>{licence.companyName || "—"}</td><td>{licence.licenceStatusLabel}</td></tr>)}</tbody></table></div>}
         <div className="section-note">Cancelled, discontinued and other archived statuses come from the official MDALL licence-status codes.</div>
       </section>
     </main>

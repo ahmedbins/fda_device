@@ -4,7 +4,7 @@ import { EMPTY_IECEE_FILTERS } from "../app/iecee-core.ts";
 import { clearIeceeCache, fetchIeceeCertificate, fetchIeceeCertificatesAll, fetchIeceeTrademarks, searchIecee } from "../app/iecee-service.ts";
 
 function jsonResponse(payload, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => payload, text: async () => JSON.stringify(payload) };
+  return { ok: status >= 200 && status < 300, status, headers: new Headers({ "x-iecee-fetched-at": "2026-09-23T12:00:00.000Z" }), json: async () => payload, text: async () => JSON.stringify(payload) };
 }
 
 function source(id, overrides = {}) {
@@ -36,6 +36,30 @@ test("posts the official search body to the same-origin relay and caches identic
     await searchIecee({ filters: { ...EMPTY_IECEE_FILTERS, query: "sonova", statuses: ["VALID"] }, from: 25, size: 25, sort: "issued-asc" });
     assert.equal(calls.length, 1, "the second identical search is served from the cache");
     await assert.rejects(searchIecee({ filters: EMPTY_IECEE_FILTERS, from: 9_990, size: 25 }), /first 10,000 results/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearIeceeCache();
+  }
+});
+
+test("a search joining a cancelled identical search still gets its results", async () => {
+  clearIeceeCache();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return jsonResponse(searchPayload([7], 1));
+  };
+  try {
+    const first = new AbortController();
+    const cancelled = searchIecee({ filters: { ...EMPTY_IECEE_FILTERS, query: "phonak" }, signal: first.signal });
+    first.abort();
+    await assert.rejects(cancelled, { name: "AbortError" });
+    const joined = await searchIecee({ filters: { ...EMPTY_IECEE_FILTERS, query: "phonak" }, signal: new AbortController().signal });
+    assert.deepEqual(joined.certificates.map((certificate) => certificate.refNumber), ["NL-7"]);
+    assert.equal(joined.retrievedAt, "2026-09-23T12:00:00.000Z", "the pulled time comes from the relay");
+    assert.equal(calls, 1, "the cancelled caller did not cancel the shared request");
   } finally {
     globalThis.fetch = originalFetch;
     clearIeceeCache();

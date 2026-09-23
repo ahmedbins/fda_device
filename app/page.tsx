@@ -40,6 +40,7 @@ import {
   MATRIX_FETCH_CAP,
   MATRIX_NUMERIC_KEYS,
   MATRIX_SORT_PRESETS,
+  OPENFDA_MAX_SKIP,
   PRESET,
   PRESET_CODES,
   RECENT_SEARCHES_KEY,
@@ -69,7 +70,9 @@ import {
   fetchOpenFda,
   filtersFromParams,
   filtersToParams,
+  findRecord,
   firmName,
+  hasActiveFilters,
   listedDeviceNames,
   locationSummary,
   matchingProducts,
@@ -82,6 +85,7 @@ import {
   productCodeClause,
   productFilterActive,
   recordSortParam,
+  recordKey,
   rememberSearch,
   sortMatrixBy,
 } from "./fda-shared";
@@ -191,8 +195,10 @@ function regionName(code: string) {
 const DEFAULT_LIMIT = 25;
 
 /** Writes the whole view to the address bar: filters, sort, page size, page and any open detail pane. */
-function searchParamsFor(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number) {
+function searchParamsFor(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, searched: boolean) {
   const params = filtersToParams(filters, view);
+  // An unfiltered browse has no filter params, so it needs a marker to reload as results rather than the landing page.
+  if (searched && !hasActiveFilters(filters)) params.set("browse", "1");
   if (view !== "matrix" && sort !== "relevance") params.set("sort", sort);
   if (view !== "matrix" && limit !== DEFAULT_LIMIT) params.set("rows", String(limit));
   if (view !== "matrix" && skip > 0) params.set("page", String(Math.floor(skip / Math.max(1, limit)) + 1));
@@ -200,20 +206,24 @@ function searchParamsFor(filters: Filters, view: ViewMode, sort: RecordSort, lim
 }
 
 /** Everything that identifies a set of results, so a popstate can tell a new search from a reopened pane. */
-function searchSignature(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number) {
-  return searchParamsFor(filters, view, sort, limit, skip).toString();
+function searchSignature(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, searched: boolean) {
+  return searchParamsFor(filters, view, sort, limit, skip, searched).toString();
 }
 
-function writeUrl(params: URLSearchParams, push: boolean) {
+/** History entries for an open pane carry this state, so closing the pane can step back instead of stacking another entry. */
+const PANE_STATE = { fdaPane: true };
+const isPaneEntry = () => typeof window !== "undefined" && !!(window.history.state as { fdaPane?: boolean } | null)?.fdaPane;
+
+function writeUrl(params: URLSearchParams, push: boolean, state: unknown = null) {
   if (typeof window === "undefined") return;
   const query = params.toString();
   const url = query ? `?${query}` : window.location.pathname;
-  if (push && query !== window.location.search.replace(/^\?/, "")) window.history.pushState(null, "", url);
-  else window.history.replaceState(null, "", url);
+  if (push && query !== window.location.search.replace(/^\?/, "")) window.history.pushState(state, "", url);
+  else window.history.replaceState(state, "", url);
 }
 
-function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, push = false) {
-  writeUrl(searchParamsFor(filters, view, sort, limit, skip), push);
+function syncUrl(filters: Filters, view: ViewMode, sort: RecordSort, limit: number, skip: number, searched: boolean, push = false) {
+  writeUrl(searchParamsFor(filters, view, sort, limit, skip, searched), push);
 }
 
 function initialStateFromUrl() {
@@ -221,9 +231,11 @@ function initialStateFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const rows = Number(params.get("rows"));
   const limit = [25, 50, 100].includes(rows) ? rows : DEFAULT_LIMIT;
-  const page = Math.max(1, Math.floor(Number(params.get("page")) || 1));
+  const page = Math.min(Math.floor(OPENFDA_MAX_SKIP / limit) + 1, Math.max(1, Math.floor(Number(params.get("page")) || 1)));
+  const state = filtersFromParams(params);
   return {
-    ...filtersFromParams(params),
+    ...state,
+    autorun: state.autorun || params.get("browse") === "1",
     sort: asRecordSort(params.get("sort")),
     limit,
     skip: (page - 1) * limit,
@@ -333,6 +345,8 @@ export default function Home() {
 
   const hasSearched = fetchedAt !== null;
   const pendingOpen = useRef({ record: initial.record, device: initial.device });
+  /** Set when a search starts over an open pane's entry: that search replaces the entry instead of stacking after it. */
+  const replacePaneEntry = useRef(false);
   const [popTick, setPopTick] = useState(0);
 
   /**
@@ -342,14 +356,18 @@ export default function Home() {
   useEffect(() => {
     if (!hasSearched) return;
     const params = new URLSearchParams(window.location.search);
-    const record = selected?.registration?.registration_number ? String(selected.registration.registration_number) : "";
+    const record = selected?.registration?.registration_number ? recordKey(selected) : "";
     const device = selectedDevice?.primaryDi || "";
     const had = params.has("record") || params.has("device");
+    // A Back/Forward or link is still waiting to reopen the pane its URL names.
+    if (!record && !device && had && (pendingOpen.current.record || pendingOpen.current.device)) return;
     if (record) params.set("record", record); else params.delete("record");
     if (device) params.set("device", device); else params.delete("device");
     const wants = !!(record || device);
     if (wants === had && params.toString() === window.location.search.replace(/^\?/, "")) return;
-    writeUrl(params, wants && !had);
+    if (!wants && had && isPaneEntry() && !replacePaneEntry.current) window.history.back();
+    else if (wants && !had) writeUrl(params, true, PANE_STATE);
+    else writeUrl(params, false, wants ? window.history.state : null);
   }, [selected, selectedDevice, hasSearched]);
 
 
@@ -358,7 +376,7 @@ export default function Home() {
     const wanted = pendingOpen.current;
     if (!wanted.record && !wanted.device) return;
     if (!records.length && !udiDevices.length) return;
-    const record = wanted.record ? records.find((item) => String(item.registration?.registration_number || "") === wanted.record) : undefined;
+    const record = findRecord(records, wanted.record);
     const device = wanted.device ? udiDevices.find((item) => item.primaryDi === wanted.device) : undefined;
     pendingOpen.current = { record: "", device: "" };
     if (record) setSelected(record);
@@ -430,10 +448,13 @@ export default function Home() {
   const selectedCodes = useMemo(() => normalizeCodes(appliedFilters.productCodes), [appliedFilters.productCodes]);
   const unknownApplied = selectedCodes.filter((code) => codeInfo.has(code) && codeInfo.get(code) === null);
 
+  /** `replace` is for restoring a URL (load, Back/Forward): it rewrites the current entry and keeps any pane it names. */
   const runSearch = useCallback(
-    async (nextSkip = 0, requestedView: ViewMode = viewMode, nextFilters: Filters = filters, nextLimit: number = limit, nextSort: RecordSort = recordSort) => {
+    async (nextSkip = 0, requestedView: ViewMode = viewMode, nextFilters: Filters = filters, nextLimit: number = limit, nextSort: RecordSort = recordSort, replace = false) => {
       const seq = ++searchSeq.current;
+      if (!replace && isPaneEntry()) replacePaneEntry.current = true;
       setError("");
+      setCodeCounts(null);
       setSelected(null);
       setSelectedDevice(null);
       setLoading(true);
@@ -488,7 +509,13 @@ export default function Home() {
           if (requestedView === "udi") setUdiUpdated(meta.last_updated);
           else setDatasetUpdated(meta.last_updated);
         }
-        syncUrl(nextFilters, requestedView, nextSort, nextLimit, requestedView === "matrix" ? 0 : nextSkip, true);
+        const params = searchParamsFor(nextFilters, requestedView, nextSort, nextLimit, requestedView === "matrix" ? 0 : nextSkip, true);
+        if (replace) {
+          const here = new URLSearchParams(window.location.search);
+          ["record", "device"].forEach((key) => { const value = here.get(key); if (value) params.set(key, value); });
+        }
+        writeUrl(params, !replace && !replacePaneEntry.current, replace ? window.history.state : null);
+        replacePaneEntry.current = false;
         if (nextSkip === 0) setRecent((current) => rememberSearch(current, nextFilters, requestedView));
         if (countUrl) {
           fetchOpenFda<{ term?: string; count?: number }>(countUrl)
@@ -497,9 +524,7 @@ export default function Home() {
               const terms = new Map(countData.results.map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]));
               setCodeCounts(nextFilters.productCodes.map((code) => ({ code, count: terms.get(code) ?? 0 })));
             })
-            .catch(() => setCodeCounts(null));
-        } else {
-          setCodeCounts(null);
+            .catch(() => { if (seq === searchSeq.current) setCodeCounts(null); });
         }
       } catch (caught) {
         if (seq !== searchSeq.current) return;
@@ -544,7 +569,7 @@ export default function Home() {
     fetchOpenFda<{ term?: string; count?: number }>(`${API}?${presetParams.toString()}`)
       .then((data) => setPresetCounts(new Map(data.results.map((entry) => [String(entry.term).toUpperCase(), entry.count || 0]))))
       .catch(() => {});
-    if (initial.autorun) queueMicrotask(() => runSearch(initial.skip, initial.view, initial.filters, initial.limit, initial.sort));
+    if (initial.autorun) queueMicrotask(() => runSearch(initial.skip, initial.view, initial.filters, initial.limit, initial.sort, true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -594,15 +619,23 @@ export default function Home() {
 
   useEffect(() => {
     if (!columnPrefsReady) return;
-    localStorage.setItem("fda-record-columns", JSON.stringify(recordColumns));
-    localStorage.setItem("fda-matrix-columns", JSON.stringify(matrixColumns));
-    localStorage.setItem("fda-udi-columns", JSON.stringify(udiColumns));
+    try {
+      localStorage.setItem("fda-record-columns", JSON.stringify(recordColumns));
+      localStorage.setItem("fda-matrix-columns", JSON.stringify(matrixColumns));
+      localStorage.setItem("fda-udi-columns", JSON.stringify(udiColumns));
+    } catch {
+      // Storage may be full or blocked; column choices then last for this visit only.
+    }
   }, [columnPrefsReady, recordColumns, matrixColumns, udiColumns]);
 
   useEffect(() => {
     colWidthsRef.current = colWidths;
     if (!colWidthsReady) return;
-    COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(columnSharesKey(`fda-${view}`), JSON.stringify(colWidths[view] || {})));
+    try {
+      COLUMN_WIDTH_VIEWS.forEach((view) => localStorage.setItem(columnSharesKey(`fda-${view}`), JSON.stringify(colWidths[view] || {})));
+    } catch {
+      // Storage may be full or blocked; widths then last for this visit only.
+    }
   }, [colWidthsReady, colWidths]);
 
   /** While a header is being dragged, follow the pointer anywhere on the page and stop on any release, cancel or window blur. */
@@ -642,10 +675,11 @@ export default function Home() {
 
 
   useEffect(() => {
-    const saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
+    let saved = false;
     let storedRecent: RecentSearch[] = [];
     let storedAliases: Record<string, string[]> = {};
     try {
+      saved = localStorage.getItem("fda-filter-panel-collapsed") === "1";
       storedRecent = parseRecentSearches(localStorage.getItem(RECENT_SEARCHES_KEY));
       storedAliases = parseUdiAliases(localStorage.getItem(UDI_ALIASES_KEY));
     } catch {
@@ -662,7 +696,11 @@ export default function Home() {
 
   useEffect(() => {
     if (!filterPanelPrefsReady) return;
-    localStorage.setItem("fda-filter-panel-collapsed", filtersCollapsed ? "1" : "0");
+    try {
+      localStorage.setItem("fda-filter-panel-collapsed", filtersCollapsed ? "1" : "0");
+    } catch {
+      // Storage may be full or blocked; the panel state is a convenience only.
+    }
   }, [filterPanelPrefsReady, filtersCollapsed]);
 
   useEffect(() => {
@@ -795,7 +833,7 @@ export default function Home() {
     }
     const applied = { ...appliedFilters, codeMatch: mode };
     setAppliedFilters(applied);
-    syncUrl(applied, viewMode, recordSort, limit, skip);
+    syncUrl(applied, viewMode, recordSort, limit, skip, true);
   };
 
   const changeLimit = (nextLimit: number) => {
@@ -820,9 +858,12 @@ export default function Home() {
     setFiltersOpen(false);
   };
 
-  /** Jump from a company (matrix row or GUDID labeler) to its listings in the Records view, keeping the current codes. */
-  const showCompanyListings = (company: string, codes?: string[]) => {
-    const next = { ...appliedFilters, keyword: company, productCodes: codes?.length ? codes : appliedFilters.productCodes };
+  /**
+   * Jump from a company (matrix row or GUDID labeler) to its listings in the Records view, keeping the current codes.
+   * From a GUDID device start fresh: the Devices view ignored country/state/role, so carrying them over can hide every listing.
+   */
+  const showCompanyListings = (company: string, codes?: string[], keepFilters = true) => {
+    const next = { ...(keepFilters ? appliedFilters : EMPTY_FILTERS), keyword: company, productCodes: codes?.length ? codes : appliedFilters.productCodes };
     setFilters(next);
     setViewMode("records");
     setSelected(null);
@@ -872,8 +913,9 @@ export default function Home() {
     runSearch(0, state.view, state.filters, limit, sort);
   };
 
-  const reset = () => {
+  const reset = (view: ViewMode = viewMode) => {
     searchSeq.current += 1;
+    replacePaneEntry.current = false;
     setFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
     setCodeDraft("");
@@ -890,7 +932,7 @@ export default function Home() {
     setUdiCompany(null);
     setFetchedAt(null);
     setRecordSort("relevance");
-    syncUrl(EMPTY_FILTERS, viewMode, "relevance", limit, 0);
+    syncUrl(EMPTY_FILTERS, view, "relevance", limit, 0, false);
   };
 
   /**
@@ -900,12 +942,12 @@ export default function Home() {
   useEffect(() => {
     const onPop = () => {
       const next = initialStateFromUrl();
-      const current = searchSignature(appliedFilters, viewMode, recordSort, limit, skip);
+      const current = searchSignature(appliedFilters, viewMode, recordSort, limit, skip, hasSearched);
       pendingOpen.current = { record: next.record, device: next.device };
       if (!next.record) setSelected(null);
       if (!next.device) setSelectedDevice(null);
       setUdiCompany(null);
-      if (searchSignature(next.filters, next.view, next.sort, next.limit, next.skip) === current) {
+      if (searchSignature(next.filters, next.view, next.sort, next.limit, next.skip, next.autorun) === current) {
         setPopTick((tick) => tick + 1);
         return;
       }
@@ -914,7 +956,7 @@ export default function Home() {
       setRecordSort(next.sort);
       setLimit(next.limit);
       if (next.autorun) runSearch(next.skip, next.view, next.filters, next.limit, next.sort, true);
-      else reset();
+      else reset(next.view);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -925,7 +967,7 @@ export default function Home() {
     if (!popTick) return;
     const wanted = pendingOpen.current;
     pendingOpen.current = { record: "", device: "" };
-    if (wanted.record) setSelected(records.find((item) => String(item.registration?.registration_number || "") === wanted.record) || null);
+    if (wanted.record) setSelected(findRecord(records, wanted.record) || null);
     if (wanted.device) setSelectedDevice(udiDevices.find((item) => item.primaryDi === wanted.device) || null);
   }, [records, udiDevices, popTick]);
 
@@ -946,7 +988,7 @@ export default function Home() {
     const codesPart = codes.length ? codes.join("+") : "all";
     const modePart = allTogether ? "-all-codes" : "";
     const prefix = viewMode === "matrix" ? "fda-devices-matrix" : viewMode === "udi" ? "fda-udi-devices" : "fda-devices";
-    return `${prefix}-${codesPart}${modePart}-${new Date().toISOString().slice(0, 10)}`;
+    return `${prefix}-${codesPart}${modePart}-${new Date().toLocaleDateString("en-CA")}`;
   };
 
   const exportCsv = async () => {
@@ -1062,6 +1104,8 @@ export default function Home() {
   };
 
   const pageCount = isUdi ? udiDevices.length : records.length;
+  /** openFDA refuses a skip past 25,000, so Next stops there even when more results match. */
+  const pageCapped = skip + limit > OPENFDA_MAX_SKIP && skip + pageCount < total;
   const rangeLabel = useMemo(() => {
     if (!total) return isUdi ? "0 devices" : "0 records";
     return `${(skip + 1).toLocaleString()}–${Math.min(skip + pageCount, total).toLocaleString()} of ${total.toLocaleString()}${isUdi ? " devices" : ""}`;
@@ -1083,7 +1127,7 @@ export default function Home() {
     if (hasSearched) {
       runSearch(0, nextView, appliedFilters);
     } else {
-      syncUrl(appliedFilters, nextView, recordSort, limit, 0, true);
+      syncUrl(appliedFilters, nextView, recordSort, limit, 0, false, true);
     }
   };
 
@@ -1499,7 +1543,7 @@ export default function Home() {
 
           <div className="query-actions">
             <button className={`primary${pendingChanges.length ? " attention" : ""}`} onClick={searchNow} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />} {isUdi ? "Search devices" : "Search records"}</button>
-            <button className="text-button" onClick={reset}>Clear all</button>
+            <button className="text-button" onClick={() => reset()}>Clear all</button>
           </div>
           {pendingChanges.length > 0 && <small className="pending-note" role="status">{pendingChanges.length} unapplied change{pendingChanges.length === 1 ? "" : "s"} ({pendingChanges.join(", ")}) — press Search to update the results.</small>}
           </div>
@@ -1567,7 +1611,7 @@ export default function Home() {
                 <div className="applied-filters" aria-label="Applied filters">
                   <span className="strip-label"><Filter size={12} /> Applied</span>
                   {appliedChips.map((chip) => <span key={chip.key} className="applied-chip">{chip.label}<button type="button" onClick={() => removeChip(chip)} aria-label={`Remove filter ${chip.label}`} title="Remove this filter"><X size={11} /></button></span>)}
-                  <button type="button" className="text-button" onClick={reset}>Clear all</button>
+                  <button type="button" className="text-button" onClick={() => reset()}>Clear all</button>
                 </div>
               )}
               {!showEmpty && codeCountStrip}
@@ -1622,7 +1666,7 @@ export default function Home() {
                 )}
                 <div className="empty-actions">
                   {allTogether && (records.length > 0 || isUdi) && <button className="primary" onClick={() => setCodeMatch("any")}>Match any selected code</button>}
-                  <button className="secondary" onClick={reset}>Clear all filters</button>
+                  <button className="secondary" onClick={() => reset()}>Clear all filters</button>
                 </div>
               </div>
             </>
@@ -1656,7 +1700,7 @@ export default function Home() {
                       const listingCount = item.products?.length || 0;
                       const tradeNames = listedDeviceNames(item);
                       return (
-                        <tr key={`${item.registration?.registration_number || "record"}-${index}`} onClick={() => setSelected(item)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelected(item)}>
+                        <tr key={`${recordKey(item)}-${index}`} onClick={() => setSelected(item)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && setSelected(item)}>
                           {recordColumns.includes("establishment") && <td><div className="name-cell"><b>{firmName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: firmName(item) }); }} aria-label={`Only listings named ${firmName(item)}`} title="Only listings with this name"><ListFilter size={12} /></button></div><span title={item.establishment_type?.join(" · ")}>{item.establishment_type?.[0] || "Role not listed"}</span></td>}
                           {recordColumns.includes("ownerOperator") && <td><div className="name-cell"><b>{companyName(item)}</b><button type="button" className="mini-action row-filter" onClick={(e) => { e.stopPropagation(); applyValueFilter({ keyword: companyName(item) }); }} aria-label={`Only listings for ${companyName(item)}`} title="Only listings for this owner / operator"><ListFilter size={12} /></button></div><span>Operator {item.registration?.owner_operator?.owner_operator_number || "—"}</span></td>}
                           {recordColumns.includes("primaryDevice") && <td className="device-cell"><b title={primary?.openfda?.device_name || undefined}>{primary?.openfda?.device_name || item.proprietary_name?.[0] || "Unspecified device"}</b><span>{primary?.openfda?.medical_specialty_description || "Specialty unavailable"}</span></td>}
@@ -1705,7 +1749,7 @@ export default function Home() {
                   </tr></thead>
                   <tbody>
                     {udiDevices.map((device) => (
-                      <tr key={device.key} onClick={() => setSelectedDevice(device)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSelectedDevice(device)}>
+                      <tr key={device.key} onClick={() => setSelectedDevice(device)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && setSelectedDevice(device)}>
                         {UDI_COLUMN_OPTIONS.filter((option) => udiColumns.includes(option.key)).map((option) => udiCell(device, option.key))}
                         <td><ArrowRight size={17} /></td>
                       </tr>
@@ -1714,9 +1758,9 @@ export default function Home() {
                 </table>}
               </div>
               {!isMatrix && <div className="pagination">
-                <span>{rangeLabel}{pulledNote}</span>
+                <span>{rangeLabel}{pageCapped && <small className="fetch-meta">openFDA stops paging at {OPENFDA_MAX_SKIP.toLocaleString()} — narrow the filters or export</small>}{pulledNote}</span>
                 <label className="page-size">Rows <select value={limit} onChange={(e) => changeLimit(Number(e.target.value))} aria-label="Rows per page"><option>25</option><option>50</option><option>100</option></select></label>
-                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + pageCount >= total || loading}>Next <ArrowRight size={15} /></button></div>
+                <div><button className="secondary" onClick={() => runSearch(Math.max(0, skip - limit), viewMode, appliedFilters)} disabled={skip === 0 || loading}><ArrowLeft size={15} /> Previous</button><button className="secondary" onClick={() => runSearch(skip + limit, viewMode, appliedFilters)} disabled={skip + pageCount >= total || pageCapped || loading} title={pageCapped ? `openFDA pages stop at ${OPENFDA_MAX_SKIP.toLocaleString()} records` : undefined}>Next <ArrowRight size={15} /></button></div>
               </div>}
             </>
           )}
@@ -1793,7 +1837,7 @@ export default function Home() {
               <h2>{selectedDevice.brand || "Unnamed device"}</h2>
               <p><Barcode size={15} /> {selectedDevice.model || "No model number"}{selectedDevice.catalog ? ` · Cat. ${selectedDevice.catalog}` : ""}{selectedDevice.primaryDi && <> · <a href={accessGudidUrl(selectedDevice.primaryDi)} target="_blank" rel="noreferrer">AccessGUDID <ExternalLink size={11} /></a></>}</p>
             </div>
-            <UdiDeviceDetail device={selectedDevice} highlight={selectedCodes} codeLabel={codeLabel} onShowListings={showCompanyListings} />
+            <UdiDeviceDetail device={selectedDevice} highlight={selectedCodes} codeLabel={codeLabel} onShowListings={(company, codes) => showCompanyListings(company, codes, false)} />
           </aside>
         </div>
       )}

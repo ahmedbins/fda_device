@@ -47,8 +47,9 @@ function localDay() {
 }
 
 /** The first visit of the day plays the header welcome; `?welcome` replays it. Reduced-motion visitors never get it. */
-function welcomeState(): { play: boolean; returning: boolean } {
-  if (typeof window === "undefined") return { play: false, returning: false };
+function welcomeState(hasTitle: boolean): { play: boolean; returning: boolean } {
+  // Monitoring pages have no title slot to greet in, so they leave the day's welcome for an explorer.
+  if (typeof window === "undefined" || !hasTitle) return { play: false, returning: false };
   try {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { play: false, returning: false };
     const last = localStorage.getItem(WELCOME_KEY);
@@ -66,12 +67,16 @@ function greeting(returning: boolean) {
 
 function destination(source: RegulatorySource, view: RegulatoryView) {
   if (typeof window === "undefined") return ROUTES[source][view];
-  return sessionStorage.getItem(`regulatory:last:${source}:${view}`) || ROUTES[source][view];
+  try {
+    return sessionStorage.getItem(`regulatory:last:${source}:${view}`) || ROUTES[source][view];
+  } catch {
+    return ROUTES[source][view];
+  }
 }
 
 export default function SourceNav({ source, view, status, statusState = "ready", title, tagline }: SourceNavProps) {
   const devHost = useDevHost();
-  const [welcome] = useState(welcomeState);
+  const [welcome] = useState(() => welcomeState(!!title));
   const [welcoming, setWelcoming] = useState(welcome.play);
 
   useEffect(() => {
@@ -87,7 +92,11 @@ export default function SourceNav({ source, view, status, statusState = "ready",
 
   const rememberCurrent = () => {
     if (typeof window === "undefined") return;
-    sessionStorage.setItem(`regulatory:last:${source}:${view}`, `${window.location.pathname}${window.location.search}`);
+    try {
+      sessionStorage.setItem(`regulatory:last:${source}:${view}`, `${window.location.pathname}${window.location.search}`);
+    } catch {
+      // Blocked storage only costs the "return to your last search" convenience.
+    }
   };
 
   const navTo = (nextSource: RegulatorySource, nextView: RegulatoryView) => {

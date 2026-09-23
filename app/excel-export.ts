@@ -22,8 +22,14 @@ const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationsh
 const NS_PKG = "http://schemas.openxmlformats.org/package/2006/relationships";
 const NS_CT = "http://schemas.openxmlformats.org/package/2006/content-types";
 
+/** Excel's per-cell text limit. */
+const MAX_CELL_TEXT = 32_767;
+
 function xmlEscape(value: string) {
   return value
+    // XML 1.0 forbids these control characters; one in a cell makes Excel report the file as damaged.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "")
+    .slice(0, MAX_CELL_TEXT)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -233,7 +239,8 @@ export function downloadExcel(options: WorkbookOptions) {
   anchor.href = url;
   anchor.download = name;
   anchor.click();
-  URL.revokeObjectURL(url);
+  // Safari can still be reading the blob when click() returns.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 export function excelBytes(options: WorkbookOptions) {
