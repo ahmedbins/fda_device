@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { PackageSearch } from "lucide-react";
 import { useDevHost } from "./fda-shared";
 
@@ -38,6 +38,32 @@ type SourceNavProps = {
   tagline?: string;
 };
 
+const WELCOME_KEY = "regulatory:welcome-day";
+/** Long enough for the last step of the welcome (the tagline) to finish before the plain header returns. */
+const WELCOME_MS = 5200;
+
+function localDay() {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+/** The first visit of the day plays the header welcome; `?welcome` replays it. Reduced-motion visitors never get it. */
+function welcomeState(): { play: boolean; returning: boolean } {
+  if (typeof window === "undefined") return { play: false, returning: false };
+  try {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { play: false, returning: false };
+    const last = localStorage.getItem(WELCOME_KEY);
+    return { play: last !== localDay() || new URLSearchParams(window.location.search).has("welcome"), returning: !!last };
+  } catch {
+    return { play: false, returning: false };
+  }
+}
+
+function greeting(returning: boolean) {
+  const hour = new Date().getHours();
+  const part = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  return <>{part}. <em>{returning ? "Welcome back." : "Welcome."}</em></>;
+}
+
 function destination(source: RegulatorySource, view: RegulatoryView) {
   if (typeof window === "undefined") return ROUTES[source][view];
   return sessionStorage.getItem(`regulatory:last:${source}:${view}`) || ROUTES[source][view];
@@ -45,6 +71,19 @@ function destination(source: RegulatorySource, view: RegulatoryView) {
 
 export default function SourceNav({ source, view, status, statusState = "ready", title, tagline }: SourceNavProps) {
   const devHost = useDevHost();
+  const [welcome] = useState(welcomeState);
+  const [welcoming, setWelcoming] = useState(welcome.play);
+
+  useEffect(() => {
+    if (!welcome.play) return;
+    try {
+      localStorage.setItem(WELCOME_KEY, localDay());
+    } catch {
+      // The welcome simply plays again next time.
+    }
+    const timer = setTimeout(() => setWelcoming(false), WELCOME_MS);
+    return () => clearTimeout(timer);
+  }, [welcome.play]);
 
   const rememberCurrent = () => {
     if (typeof window === "undefined") return;
@@ -57,16 +96,16 @@ export default function SourceNav({ source, view, status, statusState = "ready",
   };
 
   return (
-    <header className="topbar regulatory-topbar">
+    <header className={`topbar regulatory-topbar${welcoming ? " welcoming" : ""}`}>
       <button className="brand brand-button" type="button" onClick={() => navTo(source, "explorer")} aria-label={`${source.toUpperCase()} Explorer home`}>
         <span className="brand-mark"><PackageSearch size={19} /></span>
-        <span><b>SONOVA</b> / REGULATORY DATA HUB</span>
+        <span className="brand-name"><b>SONOVA</b> / REGULATORY DATA HUB</span>
         {devHost && <span className="dev-badge">DEV</span>}
       </button>
 
       {title && (
         <div className="topbar-identity">
-          <h1>{title}</h1>
+          <h1>{welcoming && <span className="welcome-greeting" aria-hidden="true">{greeting(welcome.returning)}</span>}<span className="identity-title">{title}</span></h1>
           {tagline && <p>{tagline}</p>}
         </div>
       )}
