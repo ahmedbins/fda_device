@@ -73,7 +73,7 @@ import { clearIeceeCache, fetchIeceeCertificate, fetchIeceeCertificatesAll, fetc
 import { downloadExcel, type ExcelColumn, type ExcelValue } from "./excel-export";
 import { ExportDialog, asExportLink, defaultExportFilename, loadExportSettings, sanitizeExportFilename, saveExportSettings } from "./export-dialog";
 
-type ColumnKey = "ref" | "manufacturer" | "trademark" | "product" | "category" | "standards" | "ncb" | "issued" | "status" | "type" | "updated" | "open";
+type ColumnKey = "ref" | "manufacturer" | "trademark" | "product" | "category" | "standards" | "nd" | "ncb" | "issued" | "status" | "type" | "updated" | "open";
 
 const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "ref", label: "Certificate", hint: "IECEE certificate reference number" },
@@ -82,6 +82,7 @@ const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "product", label: "Product", hint: "Product description" },
   { key: "category", label: "Category", hint: "CB Scheme product category" },
   { key: "standards", label: "Standards", hint: "Base IEC standards cited (editions in the drawer)" },
+  { key: "nd", label: "National differences", hint: "Countries whose national differences were assessed (loaded per certificate)" },
   { key: "ncb", label: "Certification body", hint: "Issuing National Certification Body" },
   { key: "issued", label: "Issued", hint: "Certificate issue date" },
   { key: "status", label: "Status", hint: "Valid, cancelled or suspended" },
@@ -89,7 +90,13 @@ const COLUMN_OPTIONS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "updated", label: "Updated", hint: "Last update recorded by IECEE" },
   { key: "open", label: "Open record", hint: "Official certificate page on certificates.iecee.org" },
 ];
-const DEFAULT_COLUMNS: ColumnKey[] = ["ref", "manufacturer", "trademark", "product", "category", "standards", "ncb", "issued", "status", "open"];
+const DEFAULT_COLUMNS: ColumnKey[] = ["ref", "manufacturer", "trademark", "product", "category", "standards", "nd", "ncb", "issued", "status", "open"];
+/** Columns added to the defaults after launch. A saved layout gains each one once; after that the user's choice stands. */
+const LATER_DEFAULT_COLUMNS: ColumnKey[] = ["nd"];
+const COLUMNS_SEEN_KEY = "iecee-explorer-columns-seen";
+/** The search index has no national differences, so the column loads each visible row's full record, a few at a time. */
+const ND_CONCURRENCY = 6;
+const ND_PREVIEW = 12;
 const IECEE_EXPORT_TOGGLES = [
   { id: "ref", label: "Certificate number", required: true },
   { id: "type", label: "Certificate type" },
@@ -170,6 +177,12 @@ function countryName(code: string) {
   }
 }
 
+/** "Canada (CA)"; entries that are not ISO codes, such as "EU Group Differences", stay as written. */
+function nationalDifferenceLabel(code: string) {
+  const name = countryName(code);
+  return name === code ? code : `${name} (${code})`;
+}
+
 function facetOptions(base: { key: string; label: string }[], facets: IeceeFacetOption[] | undefined, selected: string[]) {
   const byKey = new Map((facets || []).map((option) => [option.key, option]));
   const known = base.map((item) => ({ key: item.key, label: item.label, count: byKey.get(item.key)?.count ?? (facets ? 0 : undefined), total: byKey.get(item.key)?.total ?? (facets ? 0 : undefined) }));
@@ -201,6 +214,7 @@ export default function IeceeExplorerPage() {
   const [selected, setSelected] = useState<IeceeCertificate | null>(null);
   const [drawerWide, setDrawerWide] = useState(false);
   const [detailState, setDetailState] = useState<DetailState | null>(null);
+  const [nationalDiffs, setNationalDiffs] = useState<Map<number, string[] | "error">>(() => new Map());
   useEscapeToClose(!!selected, () => setSelected(null));
   // The pane is a normal column above 720px; this only opens the off-canvas drawer on phones.
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -224,7 +238,14 @@ export default function IeceeExplorerPage() {
     if (typeof window === "undefined") return DEFAULT_COLUMNS;
     try {
       const parsed = (JSON.parse(localStorage.getItem("iecee-explorer-columns") || "[]") as ColumnKey[]).filter((key) => COLUMN_OPTIONS.some((option) => option.key === key));
-      return parsed.length ? parsed : DEFAULT_COLUMNS;
+      if (!parsed.length) return DEFAULT_COLUMNS;
+      const seen = JSON.parse(localStorage.getItem(COLUMNS_SEEN_KEY) || "[]") as string[];
+      for (const key of LATER_DEFAULT_COLUMNS) {
+        if (seen.includes(key) || parsed.includes(key)) continue;
+        const after = DEFAULT_COLUMNS.slice(DEFAULT_COLUMNS.indexOf(key) + 1).find((next) => parsed.includes(next));
+        parsed.splice(after ? parsed.indexOf(after) : parsed.length, 0, key);
+      }
+      return parsed;
     } catch {
       return DEFAULT_COLUMNS;
     }
@@ -272,7 +293,10 @@ export default function IeceeExplorerPage() {
     setError("");
     setSearched(true);
     setSelected(null);
-    if (force) clearIeceeCache();
+    if (force) {
+      clearIeceeCache();
+      setNationalDiffs(new Map());
+    }
     syncUrl(clean);
     try {
       const page = await searchIecee({ filters: clean.filters, from: clean.page * clean.pageSize, size: clean.pageSize, sort: clean.sort, signal: controller.signal });
@@ -296,7 +320,25 @@ export default function IeceeExplorerPage() {
 
   useEffect(() => {
     localStorage.setItem("iecee-explorer-columns", JSON.stringify(columns));
+    localStorage.setItem(COLUMNS_SEEN_KEY, JSON.stringify(LATER_DEFAULT_COLUMNS));
   }, [columns]);
+
+  const showNationalDiffs = columns.includes("nd");
+  const pageCertificates = result?.certificates;
+  useEffect(() => {
+    if (!showNationalDiffs || !pageCertificates?.length) return;
+    const controller = new AbortController();
+    const queue = pageCertificates.map((certificate) => certificate.id);
+    const worker = async () => {
+      for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+        const found = await fetchIeceeCertificate(id, controller.signal).then((detail) => detail.nationalDifferences, () => "error" as const);
+        if (controller.signal.aborted) return;
+        setNationalDiffs((current) => current.get(id) === found ? current : new Map(current).set(id, found));
+      }
+    };
+    for (let lane = 0; lane < ND_CONCURRENCY; lane += 1) void worker();
+    return () => controller.abort();
+  }, [showNationalDiffs, pageCertificates]);
 
   useEffect(() => {
     const query = draftTrademark.trim();
@@ -488,6 +530,14 @@ export default function IeceeExplorerPage() {
     if (column === "standards") {
       const shown = certificate.standards.slice(0, 4);
       return <span className="pill-row" title={certificate.scopesJoined}>{shown.map((standard) => <button key={standard} type="button" className={`code-pill std clickable ${filters.standards.includes(standard) ? "hit" : ""}`} onClick={(event) => { event.stopPropagation(); toggleValue("standards", standard); }} title={`Click to filter by ${standard}`}>{standard}</button>)}{certificate.standards.length > shown.length && <span className="pill-more">+{certificate.standards.length - shown.length}</span>}{!certificate.standards.length && <span className="code-pill neutral">—</span>}</span>;
+    }
+    if (column === "nd") {
+      const codes = nationalDiffs.get(certificate.id);
+      if (codes === undefined) return <span className="nd-loading" aria-label="Loading national differences"><LoaderCircle className="spin" size={12} /></span>;
+      if (codes === "error") return <span title="The certificate record could not be loaded. Open the row to retry.">—</span>;
+      if (!codes.length) return <span className="code-pill neutral" title="No national differences recorded on this certificate">None</span>;
+      const shown = codes.slice(0, ND_PREVIEW);
+      return <span className="pill-row nd-row" title={codes.map(nationalDifferenceLabel).join(", ")}>{shown.map((code) => <span key={code} className="code-pill nd-pill">{code}</span>)}{codes.length > shown.length && <span className="pill-more">+{codes.length - shown.length}</span>}</span>;
     }
     if (column === "ncb") return <span className="name-cell"><span><b>{certificate.ncb || "—"}</b><span>{certificate.ncbCountry || ""}</span></span>{certificate.ncb && <button type="button" className="icon-button row-filter" onClick={(event) => { event.stopPropagation(); toggleValue("ncbs", certificate.ncb); }} aria-label={`Only show certificates issued by ${certificate.ncb}`} title="Only this certification body"><Filter size={11} /></button>}</span>;
     if (column === "issued") return <span className="date-cell">{displayDate(certificate.issuedAt)}</span>;
@@ -685,7 +735,7 @@ export default function IeceeExplorerPage() {
           <section className="detail-section"><h3><ListChecks size={16} /> Standards and national differences</h3>
             <div className="chips standards-chips">{(detailRecord?.standards.length ? detailRecord.standards : selected.scopes).map((standard) => <button key={standard} type="button" className="chip-link" onClick={() => { setSelected(null); addStandard(baseStandard(standard)); }} title={`Filter by ${baseStandard(standard)}`}>{standard}</button>)}{!(detailRecord?.standards.length || selected.scopes.length) && <span>No standards recorded</span>}</div>
             <dl className="fcc-detail-list">
-              <div><dt>National differences</dt><dd>{detailRecord ? detailRecord.nationalDifferences.length ? detailRecord.nationalDifferences.map((code) => `${countryName(code)} (${code})`).join(", ") : "None recorded" : "Loading…"}</dd></div>
+              <div><dt>National differences</dt><dd>{detailRecord ? detailRecord.nationalDifferences.length ? detailRecord.nationalDifferences.map(nationalDifferenceLabel).join(", ") : "None recorded" : "Loading…"}</dd></div>
               {detailRecord?.scopesComment && <div><dt>Scope comment</dt><dd className="prewrap">{detailRecord.scopesComment}</dd></div>}
               {detailRecord?.testReportRef && <div><dt>Test report reference</dt><dd>{detailRecord.testReportRef}</dd></div>}
               {detailRecord?.testingLab && <div><dt>Testing laboratory</dt><dd>{detailRecord.testingLab}</dd></div>}

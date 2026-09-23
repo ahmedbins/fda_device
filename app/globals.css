@@ -775,6 +775,9 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .iecee-table .name-cell > span { display: flex; flex-direction: column; min-width: 0; }
 .iecee-table .name-cell > span > span { color: var(--muted); font-size: 11px; }
 .iecee-table .pill-row { max-width: 260px; }
+.iecee-table .code-pill.nd-pill { min-width: 26px; padding: 3px 5px; font-size: 10px; }
+.iecee-table td > span.nd-loading { display: inline-flex; color: var(--muted); }
+.iecee-table td > span.pill-row.nd-row { display: flex; margin-top: 0; overflow: visible; white-space: normal; }
 .standards-chips { margin-bottom: 14px; }
 .standards-chips .chip-link { border: 0; cursor: pointer; }
 .fcc-detail-list dd.prewrap { white-space: pre-wrap; word-break: break-word; }
