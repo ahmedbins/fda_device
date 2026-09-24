@@ -5,7 +5,9 @@ compatibility_date = "2025-12-01"
 workers_dev = true
 
 [triggers]
-crons = ["0 6,18 * * *"]
+# Every two hours at :23, away from the top of the hour when most scheduled jobs hit shared services.
+# Scopes captured in the last 10 hours are skipped, so a healthy day still makes about two captures.
+crons = ["23 */2 * * *"]
 
 [[kv_namespaces]]
 binding = "FCC_SNAPSHOT"

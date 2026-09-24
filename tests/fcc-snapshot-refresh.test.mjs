@@ -6,6 +6,7 @@ import {
   diffCaptures,
   parseOfficialBody,
   parseScopes,
+  recordKey,
   summarizeScope,
   unwrapReaderBody,
 } from "../cron/fcc-snapshot/src/refresh-core.ts";
@@ -61,6 +62,36 @@ test("uses the official endpoint directly when it answers, and the public index 
   const failed = await captureScope("KWC", async () => response(503, "down"));
   assert.equal(failed.error, "No source answered with records.");
   assert.equal(failed.attempts.length, 4, "direct, two relay tries, public index");
+});
+
+test("waits out the reader's rate limit, sends the reader key, and stops on answers that will not change", async () => {
+  const waits = [];
+  const seen = [];
+  let relayCalls = 0;
+  const capture = await captureScope("2A3UL", async (url, init) => {
+    if (url.startsWith("https://apps.fcc.gov/")) return response(403, "Access Denied");
+    seen.push(init?.headers?.authorization);
+    relayCalls += 1;
+    return relayCalls < 3 ? response(429, "RateLimitTriggeredError: Per IP rate limit exceeded") : response(200, READER_XML);
+  }, () => new Date("2026-09-23T08:23:00Z"), { readerKey: "k-123", relayDelays: [0, 20_000, 45_000, 75_000], sleep: async (ms) => waits.push(ms) });
+  assert.equal(capture.source, "official_relay");
+  assert.equal(relayCalls, 3);
+  assert.deepEqual(waits, [20_000, 45_000]);
+  assert.ok(seen.every((value) => value === "Bearer k-123"));
+
+  let calls = 0;
+  const refused = await captureScope("2A3UL", async (url) => {
+    if (url.startsWith("https://r.jina.ai/https://apps.fcc.gov/")) calls += 1;
+    return url.startsWith("https://r.jina.ai/https://apps.fcc.gov/") ? response(401, "bad key") : response(403, "Access Denied");
+  }, undefined, { relayDelays: [0, 20_000, 45_000], sleep: async () => {} });
+  assert.equal(refused.error, "No source answered with records.");
+  assert.equal(calls, 1, "a 401 is not retried");
+});
+
+test("compares official and index dates in one form when the capture source changes", () => {
+  const official = { FCCId: "KWC-ERF", grantDate: "06/11/2026", applicationPurpose: "Original Equipment" };
+  const index = { fccId: "KWC-ERF", authorizationDate: "2026-06-11", applicationPurpose: "Original Equipment" };
+  assert.equal(recordKey(official), recordKey(index));
 });
 
 test("summarises what changed between captures and keeps a bounded history", () => {

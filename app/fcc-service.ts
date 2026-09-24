@@ -31,6 +31,14 @@ export type FccCurrentCapture = {
   refreshedAt: string;
   scopes: Record<string, { scope: string; capturedAt: string; source: FccCaptureSource; records: RawFccRecord[]; recordCount?: number }>;
 };
+/**
+ * The FCC refuses automated clients, so the Worker reads it through the r.jina.ai reader. That relay limits
+ * anonymous use per IP, and Cloudflare's shared outbound IPs are usually over the limit. A visitor's browser has
+ * its own quota, so when the capture is stale (or does not cover a search) the page asks the relay itself.
+ */
+export const FCC_READER_RELAY = "https://r.jina.ai/";
+/** A capture older than this is refreshed from the visitor's browser; the Worker aims to capture twice a day. */
+export const FCC_CAPTURE_FRESH_MS = 14 * 60 * 60 * 1000;
 let currentCapture: { expires: number; value: FccCurrentCapture | null } | null = null;
 let currentCaptureRequest: Promise<FccCurrentCapture | null> | null = null;
 
@@ -140,6 +148,24 @@ async function fetchDirect(normalized: string, signal: AbortSignal) {
   return recordsFromPayload(parseFccPayload(body, response.headers.get("content-type") || ""), new Date().toISOString());
 }
 
+/** The FCC's own EAS response for a scope, read through the reader relay from this browser; null when the relay cannot help. */
+async function fetchViaReader(normalized: string, signal: AbortSignal) {
+  const response = await fetch(`${FCC_READER_RELAY}${FCC_EAS_API}?fccId=${encodeURIComponent(normalized)}`, { signal, headers: { "x-return-format": "html" } });
+  if (!response.ok) return null;
+  let body = (await response.text()).trim();
+  if (body.startsWith("{")) {
+    try {
+      const wrapped = JSON.parse(body) as { data?: { html?: string; content?: string } };
+      body = wrapped.data?.html || wrapped.data?.content || "";
+    } catch {
+      return null;
+    }
+  }
+  if (!body || /access denied/i.test(body)) return null;
+  const records = recordsFromPayload(parseFccPayload(body, ""), new Date().toISOString());
+  return records.length ? records : null;
+}
+
 async function fetchProxy(normalized: string, signal: AbortSignal): Promise<{ records: NormalizedFccRecord[]; sourceMode: "live" | "public_index" }> {
   let response = await fetch(`/api/fcc/search?fccId=${encodeURIComponent(normalized)}`, {
     signal,
@@ -190,6 +216,23 @@ async function fetchScope(scope: string, signal?: AbortSignal): Promise<ScopeRes
     const timed = requestSignal();
     try {
       const captured = captureScopeResult(await fetchFccCurrentCapture(timed.signal), normalized);
+      const captureAge = captured?.dataAsOf ? Date.now() - Date.parse(captured.dataAsOf) : Number.POSITIVE_INFINITY;
+      if (captured && captureAge < FCC_CAPTURE_FRESH_MS) {
+        cache.set(normalized, { expires: Date.now() + CACHE_MS, result: captured });
+        return captured;
+      }
+      if (typeof window !== "undefined") {
+        const relayed = await fetchViaReader(normalized, timed.signal).catch((error) => {
+          if (timed.signal.aborted) throw error;
+          return null;
+        });
+        if (relayed) {
+          const result: ScopeResult = { records: relayed.map(applyOfficialGrantFields), resolved: true, sourceMode: "live", dataAsOf: new Date().toISOString() };
+          cache.set(normalized, { expires: Date.now() + CACHE_MS, result });
+          return result;
+        }
+      }
+      // A stale capture still beats the older bundled copy.
       if (captured) {
         cache.set(normalized, { expires: Date.now() + CACHE_MS, result: captured });
         return captured;
