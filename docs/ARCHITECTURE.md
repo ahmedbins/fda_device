@@ -22,8 +22,8 @@ There is intentionally no `main-site/` and `internal-site/` duplication. Environ
 - Main project: `fda-device-index`
 - Internal project: `fda-device-internaluseonly`
 - Client-side FDA requests go directly to openFDA.
-- Confirmed FCC scopes resolve from the scheduled capture served by `cron/fcc-snapshot` (a Cloudflare Worker with a cron trigger and KV storage) through `/api/fcc/current`; the bundled official copy is the fallback.
-- The app attempts the live FCC endpoint for other scopes where the browser supports it.
+- Confirmed FCC scopes resolve from the scheduled capture served by `cron/fcc-snapshot` (a Cloudflare Worker with a cron trigger and KV storage) through `/api/fcc/current`, while that capture is under 14 hours old.
+- Otherwise, and for any other FCC ID, the browser reads the official FCC response through the r.jina.ai reader (`fetchViaReader` in `app/fcc-service.ts`); an older capture, the live FCC endpoint, the app proxy and the bundled official copy follow as fallbacks.
 - Uncovered FCC scopes can be imported from the official FCC XML/JSON response.
 - IECEE certificate requests go through `public/_worker.js` (`/api/iecee/search`, `/api/iecee/certificate`, `/api/iecee/trademarks`) because the IECEE API only allows browser requests from certificates.iecee.org; the relay validates the body, strips upstream cookies and caches answers at the edge.
 
@@ -46,7 +46,7 @@ app/fcc-core.ts               FCC parsing, normalization, grouping, provenance
 app/fcc-service.ts            FCC snapshot/live/import orchestration
 app/fcc-config.ts             Confirmed FCC presets and watchlists
 app/fcc-official-snapshot.ts  Provenance-labelled official FCC response (bundled fallback copy)
-cron/fcc-snapshot/            Scheduled Worker that captures the confirmed FCC scopes twice a day
+cron/fcc-snapshot/            Scheduled Worker that captures the confirmed FCC scopes (every 2 h when due)
 app/mdall-core.ts             MDALL parsing, status labels, grouping
 app/mdall-service.ts          Official Health Canada MDALL API orchestration
 app/mdall-config.ts           Confirmed MDALL company watchlists
@@ -68,11 +68,13 @@ flowchart TD
   S -->|IECEE| IR["Same-origin relay (_worker.js)"]
   IR --> IE["IECEE certificate search API"]
   IE --> IN["IECEE normalization"]
-  S -->|FCC| C{"Scope in the scheduled capture?"}
+  S -->|FCC| C{"Scope in a capture under 14 h old?"}
   C -->|Yes| SN["Capture records (cron/fcc-snapshot via KV)"]
-  C -->|No| L["Live FCC request"]
-  L -->|Supported| LN["Live records"]
-  L -->|Blocked by CORS/upstream| IM["Official response import"]
+  C -->|No| RD["Browser reads the FCC through the r.jina.ai reader"]
+  RD -->|Answers| LN["Live official records"]
+  RD -->|Refused| L["Older capture, live FCC, app proxy, bundled copy"]
+  L -->|Answers| LN
+  L -->|Nothing| IM["Official response import"]
   SN --> N["FCC normalization + provenance"]
   LN --> N
   IM --> N

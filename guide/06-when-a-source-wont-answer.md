@@ -27,25 +27,41 @@ Chapter 1's rule — never make anything up — cuts both ways. Inventing a reco
 
 When you search FCC records, the data file (`fcc-service.ts`) works down a ladder, and the site **always tells you which rung answered**:
 
-**Rung 1 — Ask the FCC directly.** When it works, perfect: live official data.
+**Rung 1 — Our scheduled capture.** For the company scopes this tool exists to watch (Sonova's confirmed FCC grantee codes), a small program on Cloudflare (the "capture Worker", in `cron/fcc-snapshot`) fetches the official FCC records every day and stores them. If that copy is less than 14 hours old, the site uses it: fast, official, and labelled with the time it was captured.
 
-**Rung 2 — Ask through our proxy.** The site can relay the question through a small server-side helper — sometimes a question refused from a browser succeeds from a server. The proxy tries the official FCC endpoint first, then a public index of FCC filings called fccid.io. That index is a third party, not the FCC — so when it's the rung that answered, the site labels it as such and keeps official FCC links on every record.
+**Rung 2 — Your browser asks through a reader.** The FCC won't answer programs directly, but a public service called r.jina.ai (a "reader") can fetch a web page and pass back exactly what the FCC sent. If the capture is getting old, or you searched for an FCC ID the capture doesn't cover, your own browser asks the reader to fetch the official FCC answer. It's still the FCC's own record, just carried by a messenger.
 
-**Rung 3 — The bundled snapshot.** For the company scopes this tool exists to watch (Sonova's confirmed FCC grantee codes), the repository carries an exact copy of a real official FCC response, captured on a known date and stored in `fcc-official-snapshot.ts`. If everything live fails, those scopes still show correct official data — clearly labelled as a snapshot, with its capture timestamp.
+**Rung 3 — The older capture.** If the reader is busy too, an older official capture still beats nothing, and the site shows its date so you know how old it is.
 
-**Rung 4 — Ask a human to fetch it.** For anything not covered above, the site shows a link to the official FCC lookup (which works fine in a browser, remember) and offers an **import** button: open the link, save what the FCC returns, hand the file to the site, and it parses and displays those records like any others.
+**Rung 4 — Other routes.** The site then tries the FCC directly (rarely allowed), a small server-side helper that tries the FCC and then a public index of FCC filings called fccid.io (a third party, and labelled as such), and finally an exact copy of a real FCC response kept in the project itself (`fcc-official-snapshot.ts`), labelled with the date it was saved.
+
+**Rung 5 — Ask a human to fetch it.** For anything not covered above, the site shows a link to the official FCC lookup (which works fine in a browser, remember) and offers an **import** button: open the link, save what the FCC returns, hand the file to the site, and it parses and displays those records like any others.
 
 ```mermaid
 flowchart TD
-  Q["FCC search"] --> R1["1. Live official FCC lookup"]
-  R1 -->|answers| OK["Results — source and time labelled"]
-  R1 -->|blocked| R2["2. Our proxy: official first, then the fccid.io index"]
+  Q["FCC search"] --> R1["1. Scheduled capture, if under 14 hours old"]
+  R1 -->|covers it| OK["Results — source and time labelled"]
+  R1 -->|old or not covered| R2["2. Your browser asks the FCC through the reader"]
   R2 -->|answers| OK
-  R2 -->|blocked| R3["3. Bundled official snapshot (confirmed scopes)"]
-  R3 -->|covers this scope| OK
-  R3 -->|doesn't| R4["4. Official link + manual import"]
-  R4 --> OK
+  R2 -->|busy| R3["3. The older capture"]
+  R3 -->|covers it| OK
+  R3 -->|doesn't| R4["4. FCC direct, our helper, fccid.io, saved copy"]
+  R4 -->|answers| OK
+  R4 -->|nothing| R5["5. Official link + manual import"]
+  R5 --> OK
 ```
+
+## A real outage, and what it taught us
+
+In September 2026 the capture quietly stopped working for six days. The reader allows each internet address about 20 requests a minute when you don't have an account. Cloudflare runs many customers' programs from the same shared addresses, so by the time our Worker asked, other people's programs had often used up that allowance, and the reader said "too many requests". Because a failed capture never replaces a good one, the site kept showing the last good copy, which was correct but getting older by the day.
+
+Three changes came out of it:
+
+- **Try again, patiently.** The Worker now waits and retries several times over a few minutes, since each try may go out from a different address. It also runs every two hours instead of twice a day, so one bad run is fixed by the next.
+- **Share the load with the visitor.** Rung 2 exists because of this outage: each visitor's browser has its own allowance, so the site stays current even when the Worker is stuck.
+- **An account key.** With a free reader account, the limit belongs to the key instead of the shared address. The deployment notes explain how to add one.
+
+The lesson is general: when a system depends on someone else's service, check what happens when that service says "not now", and make sure somebody can tell it's happening. The Worker's `/history` page lists what each run tried.
 
 ## The principle underneath
 

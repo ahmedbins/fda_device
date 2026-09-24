@@ -39,7 +39,7 @@ That creates eight main workflows:
 | **FCC Monitoring** | Review recent original authorizations and FCC-labelled authorization changes for configured scopes. |
 | **HC Explorer** | Search Health Canada MDALL licences, companies, device names, and identifiers. |
 | **HC Monitoring** | Review recently issued and ended Canadian medical device licences. |
-| **IECEE Explorer** | Search the IECEE CB Scheme certificate index by manufacturer, trademark, model, product or certificate number; narrow by status, product category, standard (any or every selected standard), certification body, trademark and issue date; open the full certificate record with model, ratings, standards with editions, national differences and parties; find a certificate's amendments; export Excel workbooks. |
+| **IECEE Explorer** | Search the IECEE CB Scheme certificate index by manufacturer, trademark, model, product or certificate number; narrow by status, product category, standard (any or every selected standard), certification body, trademark and issue date; see each certificate's national-difference countries as a table column (loaded from the full record); open the full certificate record with model, ratings, standards with editions, national differences and parties; find a certificate's amendments; export Excel workbooks. |
 | **IECEE Monitoring** | Review recently issued certificates, older certificates that IECEE updated, and cancellations or suspensions for a manufacturer, trademark or watch scope. |
 
 Every workflow keeps source links and timestamps visible. FCC views also distinguish official source fields from app-derived labels and preserve the raw FCC record.
@@ -119,7 +119,7 @@ The page components do not need to understand every source-specific detail:
 | `app/fcc-service.ts` | Orchestrates the FCC snapshot, live request, server proxy, cache, grantee registry, and manual official-response import. |
 | `app/fcc-config.ts` | Explicitly confirmed FCC presets and watchlist scopes. |
 | `app/fcc-official-snapshot.ts` | Exact provenance-labelled FCC EAS records, the offline fallback behind the scheduled capture. |
-| `cron/fcc-snapshot/` | Scheduled Cloudflare Worker that captures the confirmed FCC scopes twice a day (the FCC blocks automated requests, so it goes through a reader relay) and serves them to the site. |
+| `cron/fcc-snapshot/` | Scheduled Cloudflare Worker that captures the confirmed FCC scopes about twice a day (the FCC blocks automated requests, so it goes through the r.jina.ai reader, retrying when the reader rate-limits) and serves them to the site. |
 | `app/mdall-core.ts` | Health Canada MDALL normalization, status labels, and grouping. |
 | `app/mdall-service.ts` | Official MDALL API search, company joins, and device lookup. |
 | `app/iecee-core.ts` | IECEE search-body builder, response parsing (results, facets, primary/secondary searches), certificate and detail normalization, URL state, certificate families. |
@@ -147,16 +147,23 @@ FDA Explorer uses the Registration & Listing API. FDA Monitoring uses the 510(k)
 
 ```mermaid
 flowchart TD
-  U["FCC search or watchlist"] --> L["Try live official FCC API"]
-  L -->|Available| N["Normalize records"]
-  L -->|Blocked| P["App proxy: official API, then fccid.io"]
-  P -->|Index available| N
-  P -->|Still unavailable| S["Bundled official snapshot"]
+  U["FCC search or watchlist"] --> C{"Scheduled capture covers it<br/>and is under 14 hours old?"}
+  C -->|Yes| N["Normalize records"]
+  C -->|No| R["Visitor's browser reads the official FCC response<br/>through the r.jina.ai reader"]
+  R -->|Answers| N
+  R -->|Refused| O["Older capture, then live FCC / app proxy / fccid.io"]
+  O -->|Answers| N
+  O -->|Still unavailable| S["Bundled official snapshot, then manual import"]
   S --> N
   N --> V["Explorer or Monitoring view"]
 ```
 
-The FCC endpoint is public, but FCC/Akamai and browser CORS policies can block some automated request modes. The app treats that as a coverage limitation—not evidence that a record does not exist. Confirmed scopes load from a scheduled capture that a Cloudflare Worker refreshes twice a day (with the bundled official copy as fallback), and uncovered scopes can be imported from the official XML/JSON response. ([Friendly Guide, Chapter 6](guide/06-when-a-source-wont-answer.md) explains the reasoning behind this fallback ladder.)
+The FCC endpoint is public, but it refuses automated clients (HTTP 403), including Cloudflare, and it does not allow browser CORS requests. The app treats that as a coverage limitation, never as evidence that a record does not exist. Two layers keep the data current:
+
+- **Scheduled capture.** A Cloudflare Worker (`cron/fcc-snapshot`) reads the confirmed scopes (`KWC`, `2A3UL`) through the r.jina.ai reader every two hours when they are due, and stores them in KV.
+- **Browser reader fallback.** When the capture is older than 14 hours, or a search is outside the captured scopes, the visitor's browser asks the reader for the same official FCC response. The reader limits anonymous use per IP address, and each visitor has their own allowance, so this keeps working when the Worker's shared Cloudflare IPs are over the limit.
+
+Uncovered scopes can still be imported from the official XML/JSON response. See [Data sources: troubleshooting the FCC capture](docs/DATA-SOURCES.md#troubleshooting-the-fcc-capture) when FCC data looks stale, and [Friendly Guide, Chapter 6](guide/06-when-a-source-wont-answer.md) for the reasoning behind this fallback ladder.
 
 ### 5. Two production build paths share the same UI
 
@@ -219,6 +226,10 @@ Cloudflare deployment requires an authenticated Wrangler session with access to 
 | [Canada Gazette Parts I, II and III](https://gazette.gc.ca/rp-pr/publications-eng.html) | Canada Gazette intelligence (design preview) |
 
 Read [Data sources and provenance](docs/DATA-SOURCES.md) before changing source mappings, FCC presets, normalized categories, or snapshot records.
+
+## What changed recently
+
+See [CHANGELOG.md](CHANGELOG.md) for dated notes on each round of changes, including what was fixed and anything left for later.
 
 ## Adding or changing a feature
 

@@ -76,13 +76,33 @@ The endpoint accepts a complete FCC ID or an initial prefix. It returns XML in a
 
 ### Scheduled capture (primary FCC source)
 
-The FCC endpoint answers HTTP 403 to automated clients, including Cloudflare Workers, so the site cannot query it at request time. Instead a scheduled Cloudflare Worker, `cron/fcc-snapshot` (`fcc-snapshot-refresh`), captures the confirmed scopes (`KWC`, `2A3UL`) twice a day (06:00 and 18:00 UTC):
+The FCC endpoint answers HTTP 403 to automated clients, including Cloudflare Workers, so the site cannot query it directly. Instead a scheduled Cloudflare Worker, `cron/fcc-snapshot` (`fcc-snapshot-refresh`), captures the confirmed scopes (`KWC`, `2A3UL`). The cron fires every two hours at :23 UTC and skips any scope captured in the last 10 hours, so a healthy day makes about two captures and a failed run is retried two hours later. For each scope that is due:
 
 1. It tries the official endpoint directly (kept in case the FCC ever allows it).
 2. It fetches the official endpoint through the r.jina.ai reader in raw-source mode, which returns the FCC's own XML records re-serialised with lower-case tags. Records captured this way carry `source: "official_relay"` and show as "Official FCC EAS response, captured automatically twice a day".
-3. Only if both fail does it fall back to the fccid.io public index, stored and shown as `public_index`, never as official.
+3. Only if both fail does it fall back to the fccid.io public index (also read through the reader), stored and shown as `public_index`, never as official.
 
-Captures live in the `FCC_SNAPSHOT` KV namespace with the previous capture and a 30-run history of what changed. The Pages worker relays `GET /api/fcc/current` to the Worker's `/snapshot` route (edge-cached 10 minutes), and `app/fcc-service.ts` uses that capture as the primary source for the confirmed scopes: the pages show "FCC data as of <capture time>" and "Pulled <page load time>", exactly like the other sources. A failed run never overwrites the last good capture.
+**The reader's rate limit.** Without a key, r.jina.ai allows about 20 requests a minute per IP address. Cloudflare Workers share outbound IP addresses with many other Workers, so the Worker's requests are often refused with `HTTP 429 RateLimitTriggeredError: Per IP rate limit exceeded`. That happened on every scheduled run from 2026-09-18 to 2026-09-23. The Worker now:
+
+- retries the reader up to five times over about four minutes (`SCHEDULED_RELAY_DELAYS`), because each attempt may leave from a different IP and the per-minute window resets; it stops early on answers that will not change (for example a 401);
+- runs the two scopes in parallel so the whole run stays inside a scheduled Worker's 15-minute limit;
+- sends `Authorization: Bearer <key>` when the optional `JINA_API_KEY` secret is set. With a key the limit applies to the key, not the IP, which makes captures dependable. See [Deployment](DEPLOYMENT.md#the-fcc-capture-worker).
+
+Captures live in the `FCC_SNAPSHOT` KV namespace with the previous capture and a 30-run history of what changed. The Pages worker relays `GET /api/fcc/current` to the Worker's `/snapshot` route (edge-cached 10 minutes), and `app/fcc-service.ts` uses that capture for the confirmed scopes while it is under 14 hours old (`FCC_CAPTURE_FRESH_MS`): the pages show "FCC data as of <capture time>" and "Pulled <page load time>", exactly like the other sources. A failed run never overwrites the last good capture.
+
+### Browser reader fallback
+
+When the capture is older than 14 hours, or a search is outside the captured scopes, `fetchViaReader` in `app/fcc-service.ts` fetches `https://r.jina.ai/https://apps.fcc.gov/OETLabServices/getFCCIDList?fccId=<scope>` from the visitor's browser. The reader allows cross-origin requests, returns the FCC's own XML, and counts the request against the visitor's IP rather than Cloudflare's, so it keeps working when the Worker is rate-limited. Records from this path are labelled as a live FCC response with "FCC data as of" set to the time of the request. If the reader refuses, the older capture is used, then the remaining fallbacks below.
+
+### Troubleshooting the FCC capture
+
+If FCC pages show an old "FCC data as of" date:
+
+1. Open `https://fcc-snapshot-refresh.ahmedbinsaeed1997.workers.dev/history`. Each run lists, per scope, the source that answered or every attempt that failed.
+2. `official: HTTP 403` on every run is normal; the FCC always refuses Cloudflare.
+3. `official via reader relay: HTTP 429 ... Per IP rate limit exceeded` on every retry means the shared Cloudflare IPs are over the reader's anonymous limit. Add a reader key (`JINA_API_KEY`, see Deployment). Until then, the browser reader fallback keeps the site current.
+4. `FCC refused the relay` (an "Access Denied" page returned through the reader) means the FCC has started blocking the reader too. The browser fallback will fail the same way; refresh the bundled copy by hand (below) and look for a new route.
+5. To run a capture now: `curl -X POST https://fcc-snapshot-refresh.ahmedbinsaeed1997.workers.dev/refresh` (at most once every 10 minutes; it can take a few minutes while it waits out a rate limit).
 
 ### Official bundled copy (fallback)
 
@@ -103,12 +123,17 @@ The snapshot is a reliability layer for the confirmed internal watchlist, not a 
 
 The FCC Open Data dataset is an older registry snapshot. A grantee absent there may still be confirmed by a newer official EAS authorization response. The UI states which source established the identity.
 
-## FCC live lookup order
+## FCC lookup order
 
-1. Official `getFCCIDList` when the browser or server proxy can reach it.
-2. The public [fccid.io](https://fccid.io/) index of FCC filings, retrieved through the app proxy. This is how Explorer and Monitoring stay current without a weekly snapshot recapture.
-3. The bundled official snapshot for confirmed scopes, if both live sources fail.
-4. Manual import of an official FCC XML/JSON response.
+`fetchScope` in `app/fcc-service.ts` works down this list for each scope and labels the result with the source that answered:
+
+1. The scheduled capture, when it covers the scope and is under 14 hours old.
+2. The browser reader fallback: the official `getFCCIDList` response, read through r.jina.ai from the visitor's browser.
+3. The scheduled capture even if it is older (still official, and newer than the bundled copy).
+4. Official `getFCCIDList` directly from the browser (normally blocked by CORS; kept in case the FCC allows it).
+5. The app proxy: the official endpoint from the server, then the public [fccid.io](https://fccid.io/) index of FCC filings.
+6. The bundled official snapshot for confirmed scopes.
+7. Manual import of an official FCC XML/JSON response.
 
 fccid.io is a third-party index of public FCC grants, not the FCC itself. The UI labels that source when it is used. Official FCC search links remain available on each record.
 
