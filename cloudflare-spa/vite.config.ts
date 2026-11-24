@@ -159,12 +159,33 @@ function ieceeProxy(): Plugin {
   };
 }
 
-export default defineConfig({
+const internalTheme: Plugin = {
+  name: "internal-theme",
+  transformIndexHtml: {
+    order: "pre",
+    handler: () => [
+      {
+        tag: "script",
+        injectTo: "head-prepend",
+        children: `(() => {
+          let preference;
+          try { preference = localStorage.getItem("regulatory:theme"); } catch {}
+          document.documentElement.dataset.theme = preference === "light" || preference === "dark"
+            ? preference
+            : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        })();`,
+      },
+      { tag: "link", attrs: { rel: "stylesheet", href: "/internal-theme.css" }, injectTo: "head" },
+    ],
+  },
+};
+
+export default defineConfig(({ mode }) => ({
   root: __dirname,
   publicDir: resolve(__dirname, "../public"),
-  plugins: [react(), cleanUrls(), gazetteProxy(), ieceeProxy()],
+  plugins: [react(), cleanUrls(), gazetteProxy(), ieceeProxy(), mode === "internal" && internalTheme],
   build: {
-    outDir: resolve(__dirname, "../work/cloudflare-pages"),
+    outDir: resolve(__dirname, mode === "internal" ? "../work/cloudflare-pages-internal" : "../work/cloudflare-pages"),
     emptyOutDir: true,
     rollupOptions: {
       input: {
@@ -185,4 +206,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

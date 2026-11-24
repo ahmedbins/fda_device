@@ -7,11 +7,11 @@
 | Internal Use Only | `fda-device-internaluseonly` | `npm run deploy:internal` |
 | Main | `fda-device-index` | `npm run deploy:main` |
 
-Main and Internal use the same static multi-route build. The target project name is the only difference between their deployment commands.
+Both deployments use the same source. The Internal Use Only build enables dark mode.
 
 ## Automatic deploys from GitHub
 
-Every push to `main` on GitHub (a direct push or a merged pull request, by anyone with access) runs `.github/workflows/deploy.yml`: it installs, runs `npm test`, builds once and deploys that build to **both** projects, Internal Use Only first. If a test fails, neither site changes. The Actions tab's "Run workflow" button redeploys the current `main` by hand.
+Every push to `main` on GitHub (a direct push or a merged pull request, by anyone with access) runs `.github/workflows/deploy.yml`. It installs dependencies, runs `npm test`, builds each site and deploys to both projects, Internal Use Only first. If a test or build fails, neither site changes. The Actions tab's "Run workflow" button redeploys the current `main` by hand.
 
 The workflow needs two repository secrets (Settings → Secrets and variables → Actions):
 
@@ -108,6 +108,8 @@ No code change or redeploy is needed; the next run uses it. Never commit the key
 ## Build details
 
 `npm run build:pages` uses `cloudflare-spa/vite.config.ts` and writes output to `work/cloudflare-pages/`. That directory is generated and ignored by Git.
+
+`npm run build:pages:internal` uses the same Vite config in internal mode and writes to `work/cloudflare-pages-internal/`.
 
 `npm run build` creates the full vinext Worker build used for production validation. `dist/` is generated and ignored by Git.
 

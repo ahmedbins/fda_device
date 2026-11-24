@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Activity, Compass, FileSearch, Radio, ScrollText, ShieldCheck } from "lucide-react";
 import { useDevHost } from "../fda-shared";
+import { ThemeControl } from "../theme-control";
 
 export type NextRoute = "hub" | "fda-workspace" | "fda-explorer" | "gazette";
 
@@ -47,6 +48,7 @@ export function NextShell({ active, children }: NextShellProps) {
           <a className={`nx-rail-link ${active === "gazette" ? "active" : ""}`} href="/next/gazette" aria-current={active === "gazette" ? "page" : undefined}><ScrollText size={15} /> Intelligence <em>new</em></a>
         </div>
         <div className="nx-rail-foot">
+          {import.meta.env.MODE === "internal" && <ThemeControl />}
           <p>Design preview. <em>new</em> is the scope workbench, <em>preview</em> the earlier restyle, <em>current</em> the existing pages.</p>
           <p><a href="/fda/explorer">Back to the current design</a></p>
           <p>Questions? <a href="mailto:muzaffar.bhatti@sonova.com?subject=Regulatory%20Data%20Portal%20Question">Muzaffar Bhatti</a></p>

@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { PackageSearch } from "lucide-react";
 import { useDevHost } from "./fda-shared";
+import { ThemeControl } from "./theme-control";
 
 export type RegulatorySource = "fda" | "fcc" | "hc" | "iecee";
 export type RegulatoryView = "explorer" | "monitoring";
@@ -141,6 +142,7 @@ export default function SourceNav({ source, view, status, statusState = "ready",
             ))}
           </nav>
         </div>
+        {import.meta.env.MODE === "internal" && <ThemeControl />}
         <div className={`source-status status-${statusState}`}>
           <span className="pulse" aria-hidden="true" /> {status}
         </div>

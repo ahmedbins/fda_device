@@ -1,0 +1,106 @@
+/* Dark theme: tokens keep the light palette unchanged and native controls legible. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e3edf7;
+  --ink-2: #c5d5e5;
+  --paper: #101923;
+  --paper-2: #172431;
+  --white: #1c2b39;
+  --coral: #64c5f2;
+  --sage: #90bbce;
+  --line: #344958;
+  --muted: #aabdc8;
+}
+html[data-theme="dark"] .hero { background: linear-gradient(110deg, #142534, #1b3240); }
+html[data-theme="dark"] :is(.site-contact-footer, .field > span:first-child, .match-mode-label, .export-filename > span, .export-section-head > span) { color: var(--muted); }
+html[data-theme="dark"] .site-contact-footer a { color: var(--coral); }
+html[data-theme="dark"] :is(.source-switch, .preset-state) { background: #273947; }
+html[data-theme="dark"] :is(.field input, .field select, .chip-input, .alias-form input, .match-mode-switch, .preset-toggle, .fcc-import textarea, .export-filename input, .country-quick button, .facet-suggest button, .fcc-source-block, .fcc-limit-note) { background: var(--white); border-color: var(--line); }
+html[data-theme="dark"] :is(.narrow-heading, .more-filters, .import-box, .fcc-detail-list > div, .history-row) { border-color: var(--line); }
+html[data-theme="dark"] :is(.secondary:hover, .icon-button:hover, .column-options label:hover, .facet-list label:hover, .export-toggles label:hover) { background: #2a4050; }
+html[data-theme="dark"] :is(.column-picker[open] > summary, .preset-toggle.active, .export-choices label.on) { background: #203d50; }
+html[data-theme="dark"] :is(.primary, .view-switch button.active, .match-mode-switch button.active, .preset-toggle.active .preset-state, .code-pill.hit, .code-count.together b, .more-filters > summary b) { background: #087ab0; color: #fff; }
+html[data-theme="dark"] .primary:hover { background: #096a99; }
+html[data-theme="dark"] :is(th, .results-panel .table-wrap thead th:first-child, .section-head, .section-note) { background: #233443; }
+html[data-theme="dark"] :is(td, .matrix-table tr.group-start td) { border-color: var(--line); }
+html[data-theme="dark"] :is(tbody tr:hover, tbody tr:focus, .matrix-table tbody tr:hover, .m-table tbody tr:hover, .results-panel .table-wrap tbody tr:hover td:first-child, .results-panel .table-wrap tbody tr:focus td:first-child, .results-panel .table-wrap .matrix-table tbody tr:hover td:first-child) { background: #293e4e; }
+html[data-theme="dark"] .table-wrap { background: var(--white); }
+html[data-theme="dark"] .table-wrap::-webkit-scrollbar-track, html[data-theme="dark"] .table-wrap::-webkit-scrollbar-corner { background: #182632; }
+html[data-theme="dark"] .table-wrap::-webkit-scrollbar-thumb { background: #506777; border-color: #182632; }
+html[data-theme="dark"] :is(.matrix-note, .coverage-banner, .udi-report, .code-count-strip) { background: #203947; border-color: var(--line); color: var(--ink-2); }
+html[data-theme="dark"] :is(.coverage-banner a, .fcc-table .date-cell, .m-table .date-cell, .history-row time) { color: #a7d8ef; }
+html[data-theme="dark"] :is(.device-name-list span, .code-pill, .di-pill, .udi-flag, .chip-link, .applied-chip, .chip, .code-count b, .source-cell, .grantee-code, .section-count, .export-filters span, .open-record-button) { background: #25485b; color: #b9e3f6; }
+html[data-theme="dark"] .source-cell { color: #b9e3f6 !important; }
+html[data-theme="dark"] :is(.code-pill.neutral, .code-pill.missing, .class-u, .chips span, .evt-other, .iecee-status.unknown) { background: #354651; color: #c1d0d7; }
+html[data-theme="dark"] :is(.class-1, .pm-yes, .applied-chip.alias, .match-tag, .iecee-status.valid, .m-table td > span.iecee-status.valid) { background: #244b3d; color: #a4dfb9; }
+html[data-theme="dark"] :is(.class-2, .pm-exempt, .applied-chip.group, .evt-malfunction, .iecee-status.suspended, .m-table td > span.iecee-status.suspended, .nav-preview-link, .dev-badge) { background: #50452b; color: #f2d38e; }
+html[data-theme="dark"] :is(.class-3, .pm-none, .chip.unknown, .code-count.unknown b, .evt-injury, .iecee-status.cancelled, .m-table td > span.iecee-status.cancelled, .section-count.error, .error-banner, .section-error, .udi-tile.warn) { background: #543633; color: #ffbbae; border-color: #80534c; }
+html[data-theme="dark"] :is(.field-hint.warn, .pending-note, .udi-tile.warn b) { color: #ffbbae; }
+html[data-theme="dark"] :is(.chip button, .applied-chip button) { color: #b9e3f6; }
+html[data-theme="dark"] :is(.chip button:hover, .applied-chip button:hover, .chip-link:hover, .names-more:hover, .code-pill.link:hover, .open-record-button:hover) { background: #345c70; }
+html[data-theme="dark"] .loading-layer { background: rgba(16,25,35,.82); }
+html[data-theme="dark"] .drawer-top { background: #142534; color: var(--ink); }
+html[data-theme="dark"] .drawer-top .icon-button { color: #e3edf7; }
+html[data-theme="dark"] .raw-section pre { background: #0d1720; color: #d7e3df; }
+
+.theme-toggle { min-height: 34px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 17px; background: var(--white); color: var(--ink); font: 600 11px var(--font-roboto), sans-serif; white-space: nowrap; }
+.theme-toggle:hover { border-color: var(--coral); }
+.theme-toggle-icon { display: inline-grid; place-items: center; }
+.nx-rail-foot .theme-toggle { margin-bottom: 10px; border-color: #435674; background: #1a2b49; color: #e1ebf8; font-family: var(--nx-sans); }
+.nx-rail-foot .theme-toggle:hover { border-color: #7cc3ef; }
+@media (max-width: 720px) {
+  .regulatory-nav .theme-toggle { margin-left: auto; }
+}
+@media (max-width: 900px) {
+  .nx-app .nx-rail-foot { display: flex; align-items: center; margin: 0 8px 0 auto; padding: 6px 0; border: 0; }
+  .nx-rail-foot p { display: none; }
+  .nx-rail-foot .theme-toggle { margin: 0; }
+}
+
+/* Dark preview surfaces. Keep the preview palette independent of the legacy UI. */
+html[data-theme="dark"] .nx-app {
+  color-scheme: dark;
+  --nx-bg: #0d1421;
+  --nx-surface: #151f2e;
+  --nx-line: #2b394b;
+  --nx-line-2: #435267;
+  --nx-ink: #edf3fb;
+  --nx-ink-2: #cbd6e5;
+  --nx-muted: #a5b3c5;
+  --nx-faint: #8999ad;
+  --nx-accent: #2384c0;
+  --nx-accent-2: #176b9f;
+  --nx-accent-soft: #193a52;
+  --nx-accent-ink: #a1d5f5;
+  --nx-ok: #70d99b;
+  --nx-danger: #ff9a8e;
+  --nx-rail-bg: #0a1220;
+  --nx-rail-line: #29374a;
+}
+html[data-theme="dark"] .nx-app :is(kbd, .nx-search, .nx-btn, .nx-codes, .nx-seg, .nx-select, .nx-preset, .nx-pop-menu, .nx-pop-menu .nx-field input, .nx-pop-menu .nx-field select, .nx-count, .nx-workbench, .nx-detail, .nx-detail-head, .nx-kv div, .nx-empty, .nx-quick > button, .nx-quick > a, .nx-status, .nx-card, .nx-principles div, .export-card, .nx-tab-area, .nx-tile, .nx-chart, .nx-chart-tip, .nx-cov.on, .nx-pagebar, .nx-listing-line, .nx-gz-summary, .nx-gz-chip, .nx-gz-item, .nx-gz-snippet, .nx-gz-disclaimer) { background: var(--nx-surface); }
+html[data-theme="dark"] .nx-app :is(.nx-table th, .nx-matrix-note, .nx-subbar, .nx-gz-fresh, .nx-gz-detail) { background: #1a2636; }
+html[data-theme="dark"] .nx-app :is(.nx-table td, .nx-list li button, .nx-site, .nx-gz-detail td, .nx-gz-rules li) { border-bottom-color: var(--nx-line); }
+html[data-theme="dark"] .nx-app :is(.nx-table tbody tr:hover td, .nx-tile.link:hover, button.nx-bar-row:hover, .nx-list li button:hover, .nx-pop-menu label.nx-check:hover, .nx-search .nx-clear:hover, .nx-btn.ghost:hover) { background: #233347; }
+html[data-theme="dark"] .nx-app .nx-table tbody tr.selected td { background: #193d57; }
+html[data-theme="dark"] .nx-app .nx-btn:hover { background: #233347; border-color: #71849b; }
+html[data-theme="dark"] .nx-app .nx-btn.primary { background: var(--nx-accent-2); border-color: var(--nx-accent-2); color: #fff; }
+html[data-theme="dark"] .nx-app .nx-btn.primary:hover { background: #2384c0; border-color: #2384c0; }
+html[data-theme="dark"] .nx-app .nx-btn.ghost { background: transparent; }
+html[data-theme="dark"] .nx-app :is(.nx-select.on, .nx-preset.on) { background: var(--nx-accent-soft); color: var(--nx-accent-ink); }
+html[data-theme="dark"] .nx-app :is(.nx-seg button.active, .nx-count.together b, .nx-gz-chip.on) { background: #a1d5f5; border-color: #a1d5f5; color: #102235; }
+html[data-theme="dark"] .nx-app .nx-gz-chip.on em { color: #29475e; }
+html[data-theme="dark"] .nx-app :is(.nx-code.dim, .nx-class, .nx-chips span, .nx-tabs button em, .nx-bar-track, .nx-pill, .nx-gz-topic, .p-very-low .nx-gz-priority) { background: #2a384a; color: #cbd6e5; }
+html[data-theme="dark"] .nx-app :is(.nx-class.c2, .nx-gz-topic.t-lifecycle, .p-low .nx-gz-priority) { background: var(--nx-accent-soft); color: var(--nx-accent-ink); }
+html[data-theme="dark"] .nx-app :is(.nx-class.c1, .nx-tag, .nx-gz-fresh .nx-pill.ok, .nx-gz-topic.t-organization) { background: #173c30; color: #9be2b8; }
+html[data-theme="dark"] .nx-app :is(.nx-class.c3, .nx-pill.bad, .nx-gz-fresh .nx-pill.bad, .p-critical .nx-gz-priority, .nx-gz-topic.t-device) { background: #512d30; color: #ffb4a9; }
+html[data-theme="dark"] .nx-app :is(.nx-banner, .nx-dev, .nx-gz-fresh .nx-pill.partial, .nx-gz-fresh .nx-pill.stale, .p-high .nx-gz-priority, .p-medium .nx-gz-priority, .nx-gz-topic.t-hearing) { background: #493a21; border-color: #705a32; color: #f1d59a; }
+html[data-theme="dark"] .nx-app .nx-gz-topic.t-technology { background: #3b345d; color: #d3c5ff; }
+html[data-theme="dark"] .nx-app .nx-error { background: #512d30; border-color: #8b5150; color: #ffb4a9; }
+html[data-theme="dark"] .nx-app .nx-loading { background: rgba(13, 20, 33, .82); }
+html[data-theme="dark"] .nx-app .nx-grid { stroke: var(--nx-line-2); }
+html[data-theme="dark"] .nx-app .nx-stack-plot g.hot rect[fill="transparent"] { fill: rgba(255, 255, 255, .08); }
+html[data-theme="dark"] .nx-app .nx-gz-snippet mark { background: #66561d; color: #fff1bd; }
+html[data-theme="dark"] .nx-app .nx-code-chip button { color: #a1d5f5; }
+html[data-theme="dark"] .nx-app .nx-code-chip button:hover { background: #315c79; }
+html[data-theme="dark"] .nx-app .nx-tray .nx-btn.ghost { background: transparent; color: #c9d3e3; }
+html[data-theme="dark"] .nx-app .nx-tray .nx-btn.ghost:hover { background: #1a2742; color: #fff; }
