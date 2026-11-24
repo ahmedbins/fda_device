@@ -40,6 +40,10 @@ flowchart TD
 
 The crucial detail is in step 4: **the exact same version**. Git gives every saved change a unique fingerprint (a **commit**), and the rule is that the fingerprint deployed to Main must be the one that was verified on Internal — no "one tiny extra fix" slipped in between checking and publishing. Tiny unverified fixes are where surprises come from.
 
+## Automatic deploys from GitHub
+
+Since November 2026, nobody has to run the deploy commands by hand. Whenever a change lands on `main` on GitHub, from Ahmed or any collaborator, GitHub runs the automated checks and, if they pass, uploads the same build to **both** sites (Internal first, then Main). A failing check stops both uploads. This trades the hand check on Internal for speed, so checking a change *before* it reaches `main` matters more: open a pull request, look at it, then merge. The workflow lives in `.github/workflows/deploy.yml`.
+
 ## When something goes wrong anyway
 
 Cloudflare keeps every previous deployment of each site. If a bad change reaches Main despite everything, the fix is one click: promote the last known-good deployment, and the site is instantly back to its previous state while the underlying mistake gets fixed calmly. An undo button for the whole website.

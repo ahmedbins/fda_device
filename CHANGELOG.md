@@ -2,6 +2,12 @@
 
 Dated notes on what changed, newest first. Each entry says what a user will notice, what was fixed behind the scenes, and anything left for later.
 
+## 2026-11-24
+
+### Automatic deploys
+
+- **Pushes to `main` now deploy both sites.** A GitHub Actions workflow (`.github/workflows/deploy.yml`) runs the tests, builds once and deploys to Internal Use Only and Main on every push or merge to `main`, from any collaborator. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#automatic-deploys-from-github).
+
 ## 2026-09-23 / 24
 
 ### New

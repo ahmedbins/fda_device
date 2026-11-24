@@ -9,6 +9,19 @@
 
 Main and Internal use the same static multi-route build. The target project name is the only difference between their deployment commands.
 
+## Automatic deploys from GitHub
+
+Every push to `main` on GitHub (a direct push or a merged pull request, by anyone with access) runs `.github/workflows/deploy.yml`: it installs, runs `npm test`, builds once and deploys that build to **both** projects, Internal Use Only first. If a test fails, neither site changes. The Actions tab's "Run workflow" button redeploys the current `main` by hand.
+
+The workflow needs two repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token with only **Account → Cloudflare Pages → Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account ID that owns both projects |
+
+The `npm run deploy:*` commands below still work for deploying from a local machine.
+
 ## Prerequisites
 
 - Node.js 22.13 or newer
