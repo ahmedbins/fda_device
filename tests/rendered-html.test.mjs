@@ -42,6 +42,24 @@ test("keeps FDA Explorer and Monitoring content intact", async () => {
   assert.match(monitoring, /Adverse events/);
 });
 
+test("renders the FDA standards mapping and links to it from FDA Explorer", async () => {
+  const response = await render("/fda/standards");
+  assert.equal(response.status, 200);
+  const html = (await response.text()).replaceAll("<!-- -->", "");
+  assert.match(html, /Clause-to-requirement matrix/);
+  assert.match(html, /(\d+) of \1 mappings across \d+ standards/);
+  const acoustics = html.match(/<h3 id="standard-acoustics">[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.equal((acoustics.match(/IEC 60118-0:2022<\/a>/g) ?? []).length, 1);
+  assert.match(acoustics, /Maximum acoustic output/);
+  assert.match(acoustics, /Full-on gain/);
+  assert.match(html, /FDA 2-313 · Partial/);
+  assert.match(html, /MRI exposure and labeling/);
+  assert.match(html, /Aseptic presentation/);
+
+  const explorer = await (await render("/fda/explorer")).text();
+  assert.match(explorer, /href="\/fda\/standards"/);
+});
+
 test("renders FCC Explorer and conservative FCC Monitoring language", async () => {
   const explorer = await (await render("/fcc/explorer")).text();
   assert.match(explorer, /Equipment authorizations/);

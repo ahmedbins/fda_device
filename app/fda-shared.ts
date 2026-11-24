@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 
 export type Product = {
   product_code?: string;
@@ -698,14 +698,19 @@ export function parseRecentSearches(raw: string | null): RecentSearch[] {
   }
 }
 
+function getDevHostSnapshot() {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host.includes("internaluseonly");
+}
+
+function subscribeToDevHost() {
+  // A document's hostname stays fixed for its lifetime.
+  return () => {};
+}
+
 /** True on the internal dev deployment and local previews — drives the DEV badge. */
 export function useDevHost() {
-  const [dev] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const host = window.location.hostname;
-    return host === "localhost" || host === "127.0.0.1" || host.includes("internaluseonly");
-  });
-  return dev;
+  return useSyncExternalStore(subscribeToDevHost, getDevHostSnapshot, () => false);
 }
 
 function escapeCsv(value: unknown) {

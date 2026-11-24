@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { PackageSearch } from "lucide-react";
 import { useDevHost } from "./fda-shared";
+import { ThemeControl } from "./theme-control";
 
 export type RegulatorySource = "fda" | "fcc" | "hc" | "iecee";
 export type RegulatoryView = "explorer" | "monitoring";
@@ -30,7 +31,7 @@ const SOURCE_TITLE: Record<RegulatorySource, string> = {
 
 type SourceNavProps = {
   source: RegulatorySource;
-  view: RegulatoryView;
+  view: RegulatoryView | "standards";
   status: string;
   statusState?: "ready" | "connected" | "error";
   /** What this page is, shown in the gap between the brand and the source tabs. */
@@ -46,16 +47,15 @@ function localDay() {
   return new Date().toLocaleDateString("en-CA");
 }
 
-/** The first visit of the day plays the header welcome; `?welcome` replays it. Reduced-motion visitors never get it. */
-function welcomeState(hasTitle: boolean): { play: boolean; returning: boolean } {
-  // Monitoring pages have no title slot to greet in, so they leave the day's welcome for an explorer.
-  if (typeof window === "undefined" || !hasTitle) return { play: false, returning: false };
+/** Return whether the visitor is returning, or null when the welcome should stay hidden. */
+function welcomeReturning(day: string): boolean | null {
   try {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { play: false, returning: false };
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
     const last = localStorage.getItem(WELCOME_KEY);
-    return { play: last !== localDay() || new URLSearchParams(window.location.search).has("welcome"), returning: !!last };
+    const replay = new URLSearchParams(window.location.search).has("welcome");
+    return last !== day || replay ? Boolean(last) : null;
   } catch {
-    return { play: false, returning: false };
+    return null;
   }
 }
 
@@ -76,22 +76,37 @@ function destination(source: RegulatorySource, view: RegulatoryView) {
 
 export default function SourceNav({ source, view, status, statusState = "ready", title, tagline }: SourceNavProps) {
   const devHost = useDevHost();
-  const [welcome] = useState(() => welcomeState(!!title));
-  const [welcoming, setWelcoming] = useState(welcome.play);
+  const [returning, setReturning] = useState<boolean | null>(null);
+  const hasTitle = Boolean(title);
 
   useEffect(() => {
-    if (!welcome.play) return;
-    try {
-      localStorage.setItem(WELCOME_KEY, localDay());
-    } catch {
-      // The welcome simply plays again next time.
-    }
-    const timer = setTimeout(() => setWelcoming(false), WELCOME_MS);
-    return () => clearTimeout(timer);
-  }, [welcome.play]);
+    // Monitoring pages leave the day's welcome for an explorer with a title.
+    if (!hasTitle) return;
+    const day = localDay();
+    const visitorReturning = welcomeReturning(day);
+    if (visitorReturning === null) return;
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setReturning(visitorReturning);
+      try {
+        localStorage.setItem(WELCOME_KEY, day);
+      } catch {
+        // The welcome simply plays again next time.
+      }
+    });
+    const timer = setTimeout(() => setReturning(null), WELCOME_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [hasTitle]);
+
+  const welcoming = hasTitle && returning !== null;
 
   const rememberCurrent = () => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || view === "standards") return;
     try {
       sessionStorage.setItem(`regulatory:last:${source}:${view}`, `${window.location.pathname}${window.location.search}`);
     } catch {
@@ -114,7 +129,7 @@ export default function SourceNav({ source, view, status, statusState = "ready",
 
       {title && (
         <div className="topbar-identity">
-          <h1>{welcoming && <span className="welcome-greeting" aria-hidden="true">{greeting(welcome.returning)}</span>}<span className="identity-title">{title}</span></h1>
+          <h1>{welcoming && <span className="welcome-greeting" aria-hidden="true">{greeting(returning)}</span>}<span className="identity-title">{title}</span></h1>
           {tagline && <p>{tagline}</p>}
         </div>
       )}
@@ -125,7 +140,10 @@ export default function SourceNav({ source, view, status, statusState = "ready",
           <span>Source</span>
           <nav className="top-nav" aria-label="Regulatory source">
             {(["fda", "fcc", "hc", "iecee"] as const).map((item) => (
-              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view)} aria-current={source === item ? "page" : undefined} title={SOURCE_TITLE[item]}>
+              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => {
+                if (view === "standards" && item === "fda") return;
+                navTo(item, view === "standards" ? "explorer" : view);
+              }} aria-current={source === item ? "page" : undefined} title={SOURCE_TITLE[item]}>
                 {SOURCE_LABEL[item]}
               </button>
             ))}
@@ -139,8 +157,12 @@ export default function SourceNav({ source, view, status, statusState = "ready",
                 {item}
               </button>
             ))}
+            {source === "fda" && (
+              <a href="/fda/standards" onClick={rememberCurrent} className={view === "standards" ? "current" : undefined} aria-current={view === "standards" ? "page" : undefined}>Standards</a>
+            )}
           </nav>
         </div>
+        <ThemeControl />
         <div className={`source-status status-${statusState}`}>
           <span className="pulse" aria-hidden="true" /> {status}
         </div>

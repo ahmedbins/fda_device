@@ -9,6 +9,7 @@ function cleanUrls(): Plugin {
     ["/monitor", "/monitor.html"],
     ["/fda/explorer", "/fda/explorer.html"],
     ["/fda/monitoring", "/fda/monitoring.html"],
+    ["/fda/standards", "/fda/standards.html"],
     ["/fcc/explorer", "/fcc/explorer.html"],
     ["/fcc/monitoring", "/fcc/monitoring.html"],
     ["/hc/explorer", "/hc/explorer.html"],
@@ -162,7 +163,19 @@ function ieceeProxy(): Plugin {
 export default defineConfig({
   root: __dirname,
   publicDir: resolve(__dirname, "../public"),
-  plugins: [react(), cleanUrls(), gazetteProxy(), ieceeProxy()],
+  plugins: [
+    {
+      name: "theme-init",
+      transformIndexHtml: {
+        order: "post",
+        handler: () => [{ tag: "script", attrs: { src: "/theme-init.js" }, injectTo: "head-prepend" }],
+      },
+    },
+    react(),
+    cleanUrls(),
+    gazetteProxy(),
+    ieceeProxy(),
+  ],
   build: {
     outDir: resolve(__dirname, "../work/cloudflare-pages"),
     emptyOutDir: true,
@@ -172,6 +185,7 @@ export default defineConfig({
         monitor: resolve(__dirname, "monitor.html"),
         "fda/explorer": resolve(__dirname, "fda/explorer.html"),
         "fda/monitoring": resolve(__dirname, "fda/monitoring.html"),
+        "fda/standards": resolve(__dirname, "fda/standards.html"),
         "fcc/explorer": resolve(__dirname, "fcc/explorer.html"),
         "fcc/monitoring": resolve(__dirname, "fcc/monitoring.html"),
         "hc/explorer": resolve(__dirname, "hc/explorer.html"),
