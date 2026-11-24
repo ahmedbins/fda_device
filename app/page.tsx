@@ -1422,7 +1422,11 @@ export default function Home() {
       <SourceNav
         source="fda"
         view="explorer"
-        status={`openFDA live${datasetTotal ? ` · ${datasetTotal.toLocaleString()} records` : ""}${datasetUpdated ? ` · as of ${datasetUpdated}` : ""}`}
+        status="openFDA live"
+        statusDetail={[
+          datasetTotal ? `${datasetTotal.toLocaleString()} records` : "",
+          datasetUpdated ? `as of ${datasetUpdated}` : "",
+        ].filter(Boolean).join(" · ")}
         statusState="connected"
         title={<>Device registrations. <em>Made searchable.</em></>}
         tagline="Search FDA registrations, listings and GUDID device identifiers."

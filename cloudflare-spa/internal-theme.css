@@ -46,6 +46,10 @@ html[data-theme="dark"] .raw-section pre { background: #0d1720; color: #d7e3df; 
 .theme-toggle { min-height: 34px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 17px; background: var(--white); color: var(--ink); font: 600 11px var(--font-roboto), sans-serif; white-space: nowrap; }
 .theme-toggle:hover { border-color: var(--coral); }
 .theme-toggle-icon { display: inline-grid; place-items: center; }
+.source-status.source-status-stacked { flex: 0 0 245px; max-width: none; align-items: flex-start; line-height: 1.35; }
+.source-status-stacked .pulse { flex: 0 0 7px; margin-top: 4px; }
+.source-status-lines { display: grid; grid-template-rows: repeat(2, 1lh); min-width: 0; }
+.source-status-lines > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nx-rail-foot .theme-toggle { margin-bottom: 10px; border-color: #435674; background: #1a2b49; color: #e1ebf8; font-family: var(--nx-sans); }
 .nx-rail-foot .theme-toggle:hover { border-color: #7cc3ef; }
 @media (max-width: 720px) {

@@ -33,6 +33,7 @@ type SourceNavProps = {
   source: RegulatorySource;
   view: RegulatoryView;
   status: string;
+  statusDetail?: string;
   statusState?: "ready" | "connected" | "error";
   /** What this page is, shown in the gap between the brand and the source tabs. */
   title?: ReactNode;
@@ -75,8 +76,9 @@ function destination(source: RegulatorySource, view: RegulatoryView) {
   }
 }
 
-export default function SourceNav({ source, view, status, statusState = "ready", title, tagline }: SourceNavProps) {
+export default function SourceNav({ source, view, status, statusDetail, statusState = "ready", title, tagline }: SourceNavProps) {
   const devHost = useDevHost();
+  const stackedStatus = import.meta.env.MODE === "internal" && statusDetail !== undefined;
   const [welcome] = useState(() => welcomeState(!!title));
   const [welcoming, setWelcoming] = useState(welcome.play);
 
@@ -143,8 +145,16 @@ export default function SourceNav({ source, view, status, statusState = "ready",
           </nav>
         </div>
         {import.meta.env.MODE === "internal" && <ThemeControl />}
-        <div className={`source-status status-${statusState}`}>
-          <span className="pulse" aria-hidden="true" /> {status}
+        <div className={`source-status status-${statusState}${stackedStatus ? " source-status-stacked" : ""}`}>
+          <span className="pulse" aria-hidden="true" />
+          {stackedStatus ? (
+            <span className="source-status-lines">
+              <span>{status}</span>
+              <span>{statusDetail}</span>
+            </span>
+          ) : (
+            <> {status}{statusDetail && ` · ${statusDetail}`}</>
+          )}
         </div>
       </div>
     </header>
