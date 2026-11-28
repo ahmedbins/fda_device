@@ -31,7 +31,7 @@ const SOURCE_TITLE: Record<RegulatorySource, string> = {
 
 type SourceNavProps = {
   source: RegulatorySource;
-  view: RegulatoryView;
+  view: RegulatoryView | "standards";
   status: string;
   statusDetail?: string;
   statusState?: "ready" | "connected" | "error";
@@ -94,7 +94,7 @@ export default function SourceNav({ source, view, status, statusDetail, statusSt
   }, [welcome.play]);
 
   const rememberCurrent = () => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || view === "standards") return;
     try {
       sessionStorage.setItem(`regulatory:last:${source}:${view}`, `${window.location.pathname}${window.location.search}`);
     } catch {
@@ -128,7 +128,7 @@ export default function SourceNav({ source, view, status, statusDetail, statusSt
           <span>Source</span>
           <nav className="top-nav" aria-label="Regulatory source">
             {(["fda", "fcc", "hc", "iecee"] as const).map((item) => (
-              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view)} aria-current={source === item ? "page" : undefined} title={SOURCE_TITLE[item]}>
+              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view === "standards" ? "explorer" : view)} aria-current={source === item ? "page" : undefined} title={SOURCE_TITLE[item]}>
                 {SOURCE_LABEL[item]}
               </button>
             ))}
@@ -142,6 +142,9 @@ export default function SourceNav({ source, view, status, statusDetail, statusSt
                 {item}
               </button>
             ))}
+            {import.meta.env.MODE === "internal" && source === "fda" && (
+              <a href="/fda/standards" onClick={rememberCurrent} className={view === "standards" ? "current" : undefined} aria-current={view === "standards" ? "page" : undefined}>Standards</a>
+            )}
           </nav>
         </div>
         {import.meta.env.MODE === "internal" && <ThemeControl />}

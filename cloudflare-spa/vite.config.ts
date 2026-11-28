@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { IECEE_SEARCH_UPSTREAM, ieceeCertificateUpstream, ieceeTrademarkUpstream, sanitizeIeceeSearchBody } from "../app/iecee-relay";
 
 // Cloudflare Pages serves extensionless HTML routes in production; mirror that locally.
-function cleanUrls(): Plugin {
+function cleanUrls(internal: boolean): Plugin {
   const routeFiles = new Map([
     ["/monitor", "/monitor.html"],
     ["/fda/explorer", "/fda/explorer.html"],
@@ -21,6 +21,7 @@ function cleanUrls(): Plugin {
     ["/next/fda/workspace", "/next/fda/workspace.html"],
     ["/next/gazette", "/next/gazette.html"],
   ]);
+  if (internal) routeFiles.set("/fda/standards", "/fda/standards.html");
   const rewrite = (url?: string) => {
     if (!url) return url;
     const [pathname, query] = url.split("?");
@@ -180,30 +181,34 @@ const internalTheme: Plugin = {
   },
 };
 
-export default defineConfig(({ mode }) => ({
-  root: __dirname,
-  publicDir: resolve(__dirname, "../public"),
-  plugins: [react(), cleanUrls(), gazetteProxy(), ieceeProxy(), mode === "internal" && internalTheme],
-  build: {
-    outDir: resolve(__dirname, mode === "internal" ? "../work/cloudflare-pages-internal" : "../work/cloudflare-pages"),
-    emptyOutDir: true,
-    rollupOptions: {
-      input: {
-        main: resolve(__dirname, "index.html"),
-        monitor: resolve(__dirname, "monitor.html"),
-        "fda/explorer": resolve(__dirname, "fda/explorer.html"),
-        "fda/monitoring": resolve(__dirname, "fda/monitoring.html"),
-        "fcc/explorer": resolve(__dirname, "fcc/explorer.html"),
-        "fcc/monitoring": resolve(__dirname, "fcc/monitoring.html"),
-        "hc/explorer": resolve(__dirname, "hc/explorer.html"),
-        "hc/monitoring": resolve(__dirname, "hc/monitoring.html"),
-        "iecee/explorer": resolve(__dirname, "iecee/explorer.html"),
-        "iecee/monitoring": resolve(__dirname, "iecee/monitoring.html"),
-        "next/index": resolve(__dirname, "next/index.html"),
-        "next/fda/explorer": resolve(__dirname, "next/fda/explorer.html"),
-        "next/fda/workspace": resolve(__dirname, "next/fda/workspace.html"),
-        "next/gazette": resolve(__dirname, "next/gazette.html"),
+export default defineConfig(({ mode }) => {
+  const internal = mode === "internal";
+  return {
+    root: __dirname,
+    publicDir: resolve(__dirname, "../public"),
+    plugins: [react(), cleanUrls(internal), gazetteProxy(), ieceeProxy(), internal && internalTheme],
+    build: {
+      outDir: resolve(__dirname, internal ? "../work/cloudflare-pages-internal" : "../work/cloudflare-pages"),
+      emptyOutDir: true,
+      rollupOptions: {
+        input: {
+          main: resolve(__dirname, "index.html"),
+          monitor: resolve(__dirname, "monitor.html"),
+          "fda/explorer": resolve(__dirname, "fda/explorer.html"),
+          "fda/monitoring": resolve(__dirname, "fda/monitoring.html"),
+          ...(internal && { "fda/standards": resolve(__dirname, "fda/standards.html") }),
+          "fcc/explorer": resolve(__dirname, "fcc/explorer.html"),
+          "fcc/monitoring": resolve(__dirname, "fcc/monitoring.html"),
+          "hc/explorer": resolve(__dirname, "hc/explorer.html"),
+          "hc/monitoring": resolve(__dirname, "hc/monitoring.html"),
+          "iecee/explorer": resolve(__dirname, "iecee/explorer.html"),
+          "iecee/monitoring": resolve(__dirname, "iecee/monitoring.html"),
+          "next/index": resolve(__dirname, "next/index.html"),
+          "next/fda/explorer": resolve(__dirname, "next/fda/explorer.html"),
+          "next/fda/workspace": resolve(__dirname, "next/fda/workspace.html"),
+          "next/gazette": resolve(__dirname, "next/gazette.html"),
+        },
       },
     },
-  },
-}));
+  };
+});

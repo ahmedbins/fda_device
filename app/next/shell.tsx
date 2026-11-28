@@ -39,6 +39,9 @@ export function NextShell({ active, children }: NextShellProps) {
           <a className={`nx-rail-link ${active === "fda-workspace" ? "active" : ""}`} href="/next/fda/workspace" aria-current={active === "fda-workspace" ? "page" : undefined}><Compass size={15} /> Workspace <em>new</em></a>
           <a className={`nx-rail-link ${active === "fda-explorer" ? "active" : ""}`} href="/next/fda/explorer" aria-current={active === "fda-explorer" ? "page" : undefined}><FileSearch size={15} /> Explorer <em>preview</em></a>
           <a className="nx-rail-link" href="/fda/monitoring"><Activity size={15} /> Monitoring <em>current</em></a>
+          {import.meta.env.MODE === "internal" && (
+            <a className="nx-rail-link" href="/fda/standards"><ScrollText size={15} /> Standards mapping</a>
+          )}
         </div>
         <div className="nx-rail-group">
           <span>FCC · Equipment authorizations</span>
