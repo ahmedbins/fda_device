@@ -4,6 +4,9 @@ import { useState } from "react";
 import { ArrowUpRight, Download, Search } from "lucide-react";
 import { downloadExcel } from "./excel-export";
 import SourceNav from "./source-nav";
+import ContactFooter from "./contact-footer";
+import { NextShell } from "./next/shell";
+import "./next/next.css";
 import {
   fdaStandardsDatabase,
   mappings,
@@ -23,10 +26,23 @@ const catalog = sortedStandardOptions.map((key) => {
   return { key, reference: standards[key], rows, deviceCount: new Set(rows.flatMap((row) => row.products)).size };
 }).sort((left, right) => right.deviceCount - left.deviceCount);
 
-export default function StandardsMappingPage() {
-  const [query, setQuery] = useState("");
-  const [product, setProduct] = useState<ProductKey | "">("");
-  const [standard, setStandard] = useState<StandardKey | "">("");
+function readFilters() {
+  const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+  const device = productOptions.find((key) => key === params.get("device")) ?? "";
+  const standard = sortedStandardOptions.find((key) => key === params.get("standard")) ?? "";
+  return { query: params.get("q") ?? "", device, standard };
+}
+
+export default function StandardsMappingPage({ design = "old" }: { design?: "old" | "new" }) {
+  const [initial] = useState(readFilters);
+  const [query, setQuery] = useState(initial.query);
+  const [product, setProduct] = useState<ProductKey | "">(initial.device);
+  const [standard, setStandard] = useState<StandardKey | "">(initial.standard);
+  const filters = new URLSearchParams();
+  if (query.trim()) filters.set("q", query.trim());
+  if (product) filters.set("device", product);
+  if (standard) filters.set("standard", standard);
+  const filterQuery = filters.size ? `?${filters}` : "";
   const example = product ? products[product] : null;
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const groups = catalog
@@ -76,119 +92,125 @@ export default function StandardsMappingPage() {
     });
   }
 
-  return (
-    <>
-      <SourceNav source="fda" view="standards" status="Reference library" />
-      <main className="standards-mapping">
-        <section className="standards-intro" aria-labelledby="standards-title">
-          <div className="standards-intro-copy">
-            <span className="standards-eyebrow">FDA / Standards</span>
-            <h1 id="standards-title">Standards mapping</h1>
-            <p>Trace standard clauses to draft requirements and suggested verification evidence across medical device families.</p>
-          </div>
-          <div className="standards-note">
-            <strong>Draft examples for regulatory review</strong>
-            <p>Confirm each clause against the applicable edition, product configuration, and FDA recognition record. Use approved product specifications for acceptance limits.</p>
-            <a href={fdaStandardsDatabase}>FDA recognized standards database <ArrowUpRight size={14} aria-hidden="true" /></a>
-          </div>
-        </section>
+  const content = (
+    <main className="standards-mapping">
+      <section className="standards-intro" aria-labelledby="standards-title">
+        <div className="standards-intro-copy">
+          <span className="standards-eyebrow">Regulatory tools</span>
+          <h1 id="standards-title">Standards mapping</h1>
+          <p>Trace standard clauses to draft requirements and suggested verification evidence across medical device families.</p>
+        </div>
+        <div className="standards-note">
+          <strong>Draft examples for regulatory review</strong>
+          <p>Confirm each clause against the applicable edition, product configuration, and FDA recognition record. Use approved product specifications for acceptance limits.</p>
+          <a href={fdaStandardsDatabase}>FDA recognized standards database <ArrowUpRight size={14} aria-hidden="true" /></a>
+        </div>
+      </section>
 
-        <section aria-labelledby="matrix-title" className="standards-matrix">
-          <div className="standards-matrix-heading">
-            <div>
-              <h2 id="matrix-title">Clause-to-requirement matrix</h2>
-              <p role="status">{visible.length} of {mappings.length} mappings across {groups.length} {groups.length === 1 ? "standard" : "standards"}</p>
+      <section aria-labelledby="matrix-title" className="standards-matrix">
+        <div className="standards-matrix-heading">
+          <div>
+            <h2 id="matrix-title">Clause-to-requirement matrix</h2>
+            <p role="status">{visible.length} of {mappings.length} mappings across {groups.length} {groups.length === 1 ? "standard" : "standards"}</p>
+          </div>
+          <button className="standards-action" type="button" onClick={exportMappings} disabled={!visible.length}>
+            <Download size={16} aria-hidden="true" /> Export filtered rows
+          </button>
+        </div>
+        <div className="standards-filters">
+          <label>
+            <span>Search mappings</span>
+            <div className="standards-search">
+              <Search size={16} aria-hidden="true" />
+              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Clause, requirement, or product" />
             </div>
-            <button className="standards-action" type="button" onClick={exportMappings} disabled={!visible.length}>
-              <Download size={16} aria-hidden="true" /> Export filtered rows
-            </button>
-          </div>
-          <div className="standards-filters">
-            <label>
-              <span>Search mappings</span>
-              <div className="standards-search">
-                <Search size={16} aria-hidden="true" />
-                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Clause, requirement, or product" />
-              </div>
-            </label>
-            <label>
-              <span>Device family</span>
-              <select value={product} onChange={(event) => setProduct(event.target.value as ProductKey | "")}>
-                <option value="">All device families</option>
-                {productOptions.map((id) => <option value={id} key={id}>{products[id].name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Standard</span>
-              <select value={standard} onChange={(event) => setStandard(event.target.value as StandardKey | "")}>
-                <option value="">All standards</option>
-                {sortedStandardOptions.map((id) => <option value={id} key={id}>{standards[id].name}</option>)}
-              </select>
-            </label>
-            <button className="standards-action standards-reset" type="button" onClick={resetFilters} disabled={!query && !product && !standard}>Clear filters</button>
-          </div>
-          {example && (
-            <p className="standards-product-reference">
-              <strong>Device example</strong> {example.url ? <a href={example.url}>{example.example}</a> : example.example}
-            </p>
-          )}
-          {groups.length ? (
-            <div className="standards-groups">
-              {groups.map(({ key, reference, rows }) => (
-                <section className="standards-group" key={key} aria-labelledby={`standard-${key}`}>
-                  <header className="standards-group-heading">
-                    <div>
-                      <h3 id={`standard-${key}`}><a href={reference.publisher}>{reference.name}</a></h3>
-                      <p>{reference.topic} · {rows.length} {rows.length === 1 ? "mapping" : "mappings"}</p>
-                    </div>
-                    {reference.fda ? (
-                      <a className="standards-fda" href={reference.fda.url}>FDA {reference.fda.number} · {reference.fda.extent}</a>
-                    ) : (
-                      <a className="standards-fda" href={fdaStandardsDatabase}>Check FDA recognition for this edition</a>
-                    )}
-                  </header>
-                  <div className="standards-table-wrap" role="region" aria-label={`${reference.name} mappings`} tabIndex={0}>
-                    <table className="standards-table" aria-labelledby={`standard-${key}`}>
-                      <thead>
-                        <tr>
-                          <th scope="col">Clause</th>
-                          <th scope="col">Product applicability</th>
-                          <th scope="col">Expected requirement</th>
-                          <th scope="col">Verification evidence</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row) => (
-                          <tr key={row.id}>
-                            <th scope="row">
-                              <span className="standards-clause">{/^\d/.test(row.clause) ? `§ ${row.clause}` : row.clause}</span>
-                              <strong>{row.topic}</strong>
-                              <small>{row.id}</small>
-                            </th>
-                            <td>
-                              <ul className="standards-products" aria-label="Device families">
-                                {row.products.map((productKey) => <li key={productKey}>{products[productKey].name}</li>)}
-                              </ul>
-                              {row.applicability}
-                            </td>
-                            <td>{row.requirement}</td>
-                            <td>{row.evidence}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+          </label>
+          <label>
+            <span>Device family</span>
+            <select value={product} onChange={(event) => setProduct(event.target.value as ProductKey | "")}>
+              <option value="">All device families</option>
+              {productOptions.map((id) => <option value={id} key={id}>{products[id].name}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Standard</span>
+            <select value={standard} onChange={(event) => setStandard(event.target.value as StandardKey | "")}>
+              <option value="">All standards</option>
+              {sortedStandardOptions.map((id) => <option value={id} key={id}>{standards[id].name}</option>)}
+            </select>
+          </label>
+          <button className="standards-action standards-reset" type="button" onClick={resetFilters} disabled={!query && !product && !standard}>Clear filters</button>
+        </div>
+        {example && (
+          <p className="standards-product-reference">
+            <strong>Device example</strong> {example.url ? <a href={example.url}>{example.example}</a> : example.example}
+          </p>
+        )}
+        {groups.length ? (
+          <div className="standards-groups">
+            {groups.map(({ key, reference, rows }) => (
+              <section className="standards-group" key={key} aria-labelledby={`standard-${key}`}>
+                <header className="standards-group-heading">
+                  <div>
+                    <h3 id={`standard-${key}`}><a href={reference.publisher}>{reference.name}</a></h3>
+                    <p>{reference.topic} · {rows.length} {rows.length === 1 ? "mapping" : "mappings"}</p>
                   </div>
-                </section>
-              ))}
-            </div>
-          ) : (
-            <div className="standards-empty">
-              <strong>No mappings match these filters</strong>
-              <p>Try another clause, device family, or standard.</p>
-            </div>
-          )}
-        </section>
-      </main>
+                  {reference.fda ? (
+                    <a className="standards-fda" href={reference.fda.url}>FDA {reference.fda.number} · {reference.fda.extent}</a>
+                  ) : (
+                    <a className="standards-fda" href={fdaStandardsDatabase}>Check FDA recognition for this edition</a>
+                  )}
+                </header>
+                <div className="standards-table-wrap" role="region" aria-label={`${reference.name} mappings`} tabIndex={0}>
+                  <table className="standards-table" aria-labelledby={`standard-${key}`}>
+                    <thead>
+                      <tr>
+                        <th scope="col">Clause</th>
+                        <th scope="col">Product applicability</th>
+                        <th scope="col">Expected requirement</th>
+                        <th scope="col">Verification evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <tr key={row.id}>
+                          <th scope="row">
+                            <span className="standards-clause">{/^\d/.test(row.clause) ? `§ ${row.clause}` : row.clause}</span>
+                            <strong>{row.topic}</strong>
+                            <small>{row.id}</small>
+                          </th>
+                          <td>
+                            <ul className="standards-products" aria-label="Device families">
+                              {row.products.map((productKey) => <li key={productKey}>{products[productKey].name}</li>)}
+                            </ul>
+                            {row.applicability}
+                          </td>
+                          <td>{row.requirement}</td>
+                          <td>{row.evidence}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="standards-empty">
+            <strong>No mappings match these filters</strong>
+            <p>Try another clause, device family, or standard.</p>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+  return design === "new" ? (
+    <NextShell active="standards" olderDesignHref={`/fda/standards${filterQuery}`}>{content}</NextShell>
+  ) : (
+    <>
+      <SourceNav tool="standards" designHref={`/next/fda/standards${filterQuery}`} status="Reference library" />
+      {content}
+      <ContactFooter />
     </>
   );
 }

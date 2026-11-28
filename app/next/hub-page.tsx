@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, Ear, FileSearch, Layers, Radio, ScrollText, Search, ShieldCheck } from "lucide-react";
+import { Activity, BookOpen, Ear, FileSearch, Layers, Radio, ScrollText, Search, ShieldCheck } from "lucide-react";
 import { API, PRESET_CODES, fetchOpenFda } from "../fda-shared";
 import { NextShell } from "./shell";
 import "./next.css";
@@ -22,13 +22,13 @@ export default function HubPage() {
       <div className="nx-hub">
         <div className="nx-hub-head">
           <span className="nx-eyebrow">Design preview</span>
-          <h1>One workbench for public regulatory records.</h1>
+          <h1>Explore regulatory data and tools.</h1>
           <p>
-            Search FDA registrations and listings, FCC equipment authorizations and Health Canada licences, open any record
-            without losing your place, and export exactly what you filtered. The query lives in the URL, so a view is always shareable.
+            Explore device records, monitor changes, and open tools for standards mapping and Canada Gazette publications.
           </p>
         </div>
 
+        <div className="nx-section-title">Data sources</div>
         <div className="nx-cards">
           <article className="nx-card">
             <h2><FileSearch size={17} /> FDA</h2>
@@ -61,6 +61,27 @@ export default function HubPage() {
               <a className="nx-btn" href="/hc/monitoring"><Activity size={13} /> Monitoring</a>
             </div>
           </article>
+          <article className="nx-card">
+            <h2><FileSearch size={17} /> IECEE</h2>
+            <p>CB Scheme certificates, certificate details, and recent changes.</p>
+            <div className="links">
+              <a className="nx-btn" href="/iecee/explorer"><Search size={13} /> Explorer</a>
+              <a className="nx-btn" href="/iecee/monitoring"><Activity size={13} /> Monitoring</a>
+            </div>
+          </article>
+        </div>
+
+        <div className="nx-section-title">Regulatory tools</div>
+        <div className="nx-cards">
+          {import.meta.env.MODE === "internal" && (
+            <article className="nx-card">
+              <h2><BookOpen size={17} /> Standards mapping</h2>
+              <p>Browse standards clauses, draft requirements, and suggested verification evidence by device family.</p>
+              <div className="links">
+                <a className="nx-btn primary" href="/next/fda/standards">Open standards mapping</a>
+              </div>
+            </article>
+          )}
           <article className="nx-card">
             <h2><ScrollText size={17} /> Canada Gazette</h2>
             <p>Official Part I, II and III publications, parsed into items and ranked by relevance to a medical-device or hearing-aid company. Ranking orders reading; it hides nothing.</p>
@@ -95,7 +116,7 @@ export default function HubPage() {
         <div className="nx-section-title">What changed in this design</div>
         <div className="nx-principles">
           <div><b>A scope, not a search</b><span>Define the codes, country and keyword once. Overview, Companies, Listings, Timeline and Changes all answer that one scope, instantly.</span></div>
-          <div><b>Persistent rail</b><span>All six workflows are one click away on the left, so switching between FDA, FCC and Health Canada never loses context.</span></div>
+          <div><b>Persistent rail</b><span>Open data sources and standalone regulatory tools from the navigation.</span></div>
           <div><b>Companies are first-class</b><span>A competitor roster with coverage per code, establishments, trade names and 510(k)s. Pin up to four and compare them side by side.</span></div>
           <div><b>Analysis the old site cannot do</b><span>Market stats, listings by year and code, new-entrant detection, client-side sorting and filtering, and saved scopes.</span></div>
           <div><b>Freshness in the status bar</b><span>Dataset vintage, pull time and paging live in a slim bar at the bottom, always visible, never in the way.</span></div>

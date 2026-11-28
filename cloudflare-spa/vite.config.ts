@@ -21,7 +21,11 @@ function cleanUrls(internal: boolean): Plugin {
     ["/next/fda/workspace", "/next/fda/workspace.html"],
     ["/next/gazette", "/next/gazette.html"],
   ]);
-  if (internal) routeFiles.set("/fda/standards", "/fda/standards.html");
+  if (internal) {
+    routeFiles.set("/fda/standards", "/fda/standards.html");
+    routeFiles.set("/next/fda/standards", "/next/fda/standards.html");
+    routeFiles.set("/hc/gazette", "/hc/gazette.html");
+  }
   const rewrite = (url?: string) => {
     if (!url) return url;
     const [pathname, query] = url.split("?");
@@ -196,7 +200,11 @@ export default defineConfig(({ mode }) => {
           monitor: resolve(__dirname, "monitor.html"),
           "fda/explorer": resolve(__dirname, "fda/explorer.html"),
           "fda/monitoring": resolve(__dirname, "fda/monitoring.html"),
-          ...(internal && { "fda/standards": resolve(__dirname, "fda/standards.html") }),
+          ...(internal && {
+            "fda/standards": resolve(__dirname, "fda/standards.html"),
+            "next/fda/standards": resolve(__dirname, "next/fda/standards.html"),
+            "hc/gazette": resolve(__dirname, "hc/gazette.html"),
+          }),
           "fcc/explorer": resolve(__dirname, "fcc/explorer.html"),
           "fcc/monitoring": resolve(__dirname, "fcc/monitoring.html"),
           "hc/explorer": resolve(__dirname, "hc/explorer.html"),

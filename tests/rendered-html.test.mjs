@@ -117,7 +117,11 @@ test("rejects malformed IECEE relay requests without contacting the upstream sou
 test("server-renders the design-preview hub and FDA Explorer", async () => {
   const hub = await (await render("/next")).text();
   assert.match(hub, /Design preview/);
-  assert.match(hub, /One workbench for public regulatory records/);
+  assert.match(hub, /Explore regulatory data and tools/);
+  assert.match(hub, /Data sources/);
+  assert.match(hub, /Regulatory tools/);
+  assert.match(hub, /href="\/next\/gazette"/);
+  assert.doesNotMatch(hub, /href="\/next\/fda\/standards"/);
   assert.match(hub, /Regulatory Data Hub/);
 
   const explorer = await (await render("/next/fda/explorer")).text();

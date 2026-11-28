@@ -5,6 +5,6 @@ import "../app/globals.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <GazettePage />
+    <GazettePage design={import.meta.env.MODE === "internal" && !window.location.pathname.startsWith("/next/") ? "old" : "new"} />
   </React.StrictMode>,
 );

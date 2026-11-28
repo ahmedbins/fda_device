@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { PackageSearch } from "lucide-react";
+import { ArrowRight, BookOpen, PackageSearch, ScrollText } from "lucide-react";
 import { useDevHost } from "./fda-shared";
 import { ThemeControl } from "./theme-control";
 
@@ -29,9 +29,12 @@ const SOURCE_TITLE: Record<RegulatorySource, string> = {
   iecee: "IECEE CB Scheme certificates",
 };
 
-type SourceNavProps = {
-  source: RegulatorySource;
-  view: RegulatoryView | "standards";
+type SourceNavProps = ({ source: RegulatorySource; view: RegulatoryView; tool?: never } | {
+  source?: never;
+  view?: never;
+  tool: "standards" | "gazette";
+  designHref: string;
+}) & {
   status: string;
   statusDetail?: string;
   statusState?: "ready" | "connected" | "error";
@@ -76,7 +79,8 @@ function destination(source: RegulatorySource, view: RegulatoryView) {
   }
 }
 
-export default function SourceNav({ source, view, status, statusDetail, statusState = "ready", title, tagline }: SourceNavProps) {
+export default function SourceNav(props: SourceNavProps) {
+  const { source, view, tool, status, statusDetail, statusState = "ready", title, tagline } = props;
   const devHost = useDevHost();
   const stackedStatus = import.meta.env.MODE === "internal" && statusDetail !== undefined;
   const [welcome] = useState(() => welcomeState(!!title));
@@ -94,7 +98,7 @@ export default function SourceNav({ source, view, status, statusDetail, statusSt
   }, [welcome.play]);
 
   const rememberCurrent = () => {
-    if (typeof window === "undefined" || view === "standards") return;
+    if (typeof window === "undefined" || !source || !view) return;
     try {
       sessionStorage.setItem(`regulatory:last:${source}:${view}`, `${window.location.pathname}${window.location.search}`);
     } catch {
@@ -108,8 +112,8 @@ export default function SourceNav({ source, view, status, statusDetail, statusSt
   };
 
   return (
-    <header className={`topbar regulatory-topbar${welcoming ? " welcoming" : ""}`}>
-      <button className="brand brand-button" type="button" onClick={() => navTo(source, "explorer")} aria-label={`${source.toUpperCase()} Explorer home`}>
+    <header className={`topbar regulatory-topbar${import.meta.env.MODE === "internal" ? " internal-regulatory-nav" : ""}${welcoming ? " welcoming" : ""}`}>
+      <button className="brand brand-button" type="button" onClick={() => navTo(source ?? "fda", "explorer")} aria-label={source ? `${source.toUpperCase()} Explorer home` : "Regulatory Data Hub home"}>
         <span className="brand-mark"><PackageSearch size={19} /></span>
         <span className="brand-name"><b>SONOVA</b> / REGULATORY DATA HUB</span>
         {devHost && <span className="dev-badge">DEV</span>}
@@ -123,31 +127,43 @@ export default function SourceNav({ source, view, status, statusDetail, statusSt
       )}
 
       <div className="topbar-right regulatory-nav">
-        {devHost && <a className="nav-preview-link" href="/next" title="Preview of the redesigned workbench (internal only)">New design ↗</a>}
         <div className="nav-dimension">
-          <span>Source</span>
+          <span>Data source</span>
           <nav className="top-nav" aria-label="Regulatory source">
             {(["fda", "fcc", "hc", "iecee"] as const).map((item) => (
-              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view === "standards" ? "explorer" : view)} aria-current={source === item ? "page" : undefined} title={SOURCE_TITLE[item]}>
+              <button key={item} type="button" className={source === item ? "current" : ""} onClick={() => navTo(item, view ?? "explorer")} aria-current={source === item ? "page" : undefined} title={SOURCE_TITLE[item]}>
                 {SOURCE_LABEL[item]}
               </button>
             ))}
           </nav>
         </div>
-        <div className="nav-dimension">
-          <span>View</span>
-          <nav className="top-nav" aria-label="Regulatory view">
-            {(["explorer", "monitoring"] as const).map((item) => (
-              <button key={item} type="button" className={view === item ? "current" : ""} onClick={() => navTo(source, item)} aria-current={view === item ? "page" : undefined}>
-                {item}
-              </button>
-            ))}
-            {import.meta.env.MODE === "internal" && source === "fda" && (
-              <a href="/fda/standards" onClick={rememberCurrent} className={view === "standards" ? "current" : undefined} aria-current={view === "standards" ? "page" : undefined}>Standards</a>
-            )}
-          </nav>
-        </div>
-        {import.meta.env.MODE === "internal" && <ThemeControl />}
+        {source && (
+          <div className="nav-dimension">
+            <span>Data view</span>
+            <nav className="top-nav" aria-label="Regulatory view">
+              {(["explorer", "monitoring"] as const).map((item) => (
+                <button key={item} type="button" className={view === item ? "current" : ""} onClick={() => navTo(source, item)} aria-current={view === item ? "page" : undefined}>
+                  {item}
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
+        {import.meta.env.MODE === "internal" && (
+          <div className="nav-dimension regulatory-tools">
+            <span>Tools</span>
+            <nav className="top-nav" aria-label="Regulatory tools">
+              <a href="/fda/standards" onClick={rememberCurrent} className={tool === "standards" ? "current" : undefined} aria-current={tool === "standards" ? "page" : undefined}><BookOpen size={15} aria-hidden="true" /> Standards mapping</a>
+              <a href="/hc/gazette" onClick={rememberCurrent} className={tool === "gazette" ? "current" : undefined} aria-current={tool === "gazette" ? "page" : undefined}><ScrollText size={15} aria-hidden="true" /> Canada Gazette</a>
+            </nav>
+          </div>
+        )}
+        {(import.meta.env.MODE === "internal" || devHost) && (
+          <div className="regulatory-preferences">
+            <a className="nav-preview-link" href={props.tool ? props.designHref : "/next"}>New design <ArrowRight size={14} aria-hidden="true" /></a>
+            {import.meta.env.MODE === "internal" && <ThemeControl />}
+          </div>
+        )}
         <div className={`source-status status-${statusState}${stackedStatus ? " source-status-stacked" : ""}`}>
           <span className="pulse" aria-hidden="true" />
           {stackedStatus ? (

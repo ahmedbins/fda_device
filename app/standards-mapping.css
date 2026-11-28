@@ -3,6 +3,17 @@
   margin: 32px auto 56px;
 }
 
+.nx-app .standards-mapping {
+  --paper: var(--nx-bg);
+  --paper-2: var(--nx-accent-soft);
+  --white: var(--nx-surface);
+  --ink: var(--nx-ink);
+  --coral: var(--nx-accent-ink);
+  --line: var(--nx-line);
+  --muted: var(--nx-muted);
+  --font-rufina: var(--nx-sans);
+}
+
 .standards-intro {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);

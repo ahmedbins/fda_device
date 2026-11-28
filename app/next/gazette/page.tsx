@@ -1,3 +1,7 @@
 "use client";
 
-export { default } from "../gazette-page";
+import GazettePage from "../gazette-page";
+
+export default function Page() {
+  return <GazettePage />;
+}
