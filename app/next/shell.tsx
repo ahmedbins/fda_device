@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Activity, Compass, FileSearch, Radio, ScrollText, ShieldCheck } from "lucide-react";
+import { Activity, ArrowLeft, Compass, FileSearch, Radio, ScrollText, ShieldCheck } from "lucide-react";
 import { useDevHost } from "../fda-shared";
 import { ThemeControl } from "../theme-control";
 
@@ -22,11 +22,18 @@ export function NextShell({ active, children }: NextShellProps) {
   return (
     <div className="nx-app">
       <nav className="nx-rail" aria-label="Regulatory sources">
-        <a className="nx-brand" href="/next">
-          <span className="nx-brand-mark">S</span>
-          <span><b>SONOVA</b><small>Regulatory Data Hub</small></span>
-          {devHost && <em className="nx-dev">DEV</em>}
-        </a>
+        <div className="nx-rail-header">
+          <a className="nx-brand" href="/next">
+            <span className="nx-brand-mark">S</span>
+            <span><b>SONOVA</b><small>Regulatory Data Hub</small></span>
+            {devHost && <em className="nx-dev">DEV</em>}
+          </a>
+          {import.meta.env.MODE === "internal" && (
+            <a className="nx-older-design" href="/fda/explorer">
+              <ArrowLeft size={14} aria-hidden="true" /> Older design
+            </a>
+          )}
+        </div>
         <div className="nx-rail-group">
           <span>FDA · openFDA</span>
           <a className={`nx-rail-link ${active === "fda-workspace" ? "active" : ""}`} href="/next/fda/workspace" aria-current={active === "fda-workspace" ? "page" : undefined}><Compass size={15} /> Workspace <em>new</em></a>

@@ -38,7 +38,9 @@
 
 /* ---------- left rail ---------- */
 .nx-rail { height: 100vh; display: flex; flex-direction: column; overflow: auto; background: var(--nx-rail-bg); color: #c9d3e3; border-right: 1px solid var(--nx-rail-line); }
-.nx-brand { height: 56px; padding: 0 14px; display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; border-bottom: 1px solid var(--nx-rail-line); }
+.nx-rail-header { display: flex; align-items: center; border-bottom: 1px solid var(--nx-rail-line); }
+.nx-brand { min-height: 55px; min-width: 0; flex: 1; padding: 0 14px; display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; }
+.nx-older-design { display: none; }
 .nx-brand-mark { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; background: var(--nx-accent); display: grid; place-items: center; color: #fff; font: 700 12px var(--nx-sans); letter-spacing: .02em; }
 .nx-brand b { display: block; font: 700 11.5px/1.1 var(--nx-sans); letter-spacing: .08em; }
 .nx-brand small { display: block; margin-top: 3px; color: #8797b1; font-size: 10px; letter-spacing: .02em; }
@@ -260,7 +262,23 @@
 @media (max-width: 900px) {
   .nx-app { height: auto; min-height: 100vh; grid-template-columns: 1fr; }
   .nx-rail { height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; overflow: visible; }
-  .nx-brand { width: 100%; }
+  .nx-rail-header { width: 100%; }
+  .nx-older-design {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    min-height: 44px;
+    margin-right: 14px;
+    padding: 0 10px;
+    border: 1px solid #435674;
+    border-radius: 8px;
+    background: #1a2b49;
+    color: #e1ebf8;
+    font: 600 12px var(--nx-sans);
+    text-decoration: none;
+  }
+  .nx-older-design:hover, .nx-older-design:focus-visible { border-color: #7cc3ef; color: #fff; }
   .nx-rail-group { display: flex; gap: 2px; padding: 6px 8px; }
   .nx-rail-group > span { display: inline-flex; align-items: center; padding: 0 6px 0 2px; font-size: 9px; }
   .nx-rail a.nx-rail-link { padding: 7px 9px; font-size: 12px; }
