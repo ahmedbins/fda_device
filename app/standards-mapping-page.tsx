@@ -14,21 +14,20 @@ import {
 } from "./standards-mapping-data";
 import "./standards-mapping.css";
 
-const productOptions = Object.keys(products) as ProductKey[];
-const standardOptions = Object.keys(standards) as StandardKey[];
 const clauseOrder = new Intl.Collator("en", { numeric: true });
-const sortedStandardOptions = [...standardOptions].sort((left, right) => clauseOrder.compare(standards[left].name, standards[right].name));
+const productOptions = (Object.keys(products) as ProductKey[]).sort((left, right) => clauseOrder.compare(products[left].name, products[right].name));
+const sortedStandardOptions = (Object.keys(standards) as StandardKey[]).sort((left, right) => clauseOrder.compare(standards[left].name, standards[right].name));
 
-const catalog = standardOptions.map((key) => ({
-  key,
-  reference: standards[key],
-  rows: mappings.filter((row) => row.standard === key).sort((left, right) => clauseOrder.compare(left.clause, right.clause)),
-}));
+const catalog = sortedStandardOptions.map((key) => {
+  const rows = mappings.filter((row) => row.standard === key).sort((left, right) => clauseOrder.compare(left.clause, right.clause));
+  return { key, reference: standards[key], rows, deviceCount: new Set(rows.flatMap((row) => row.products)).size };
+}).sort((left, right) => right.deviceCount - left.deviceCount);
 
 export default function StandardsMappingPage() {
   const [query, setQuery] = useState("");
   const [product, setProduct] = useState<ProductKey | "">("");
   const [standard, setStandard] = useState<StandardKey | "">("");
+  const example = product ? products[product] : null;
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const groups = catalog
     .filter(({ key }) => !standard || key === standard)
@@ -55,11 +54,11 @@ export default function StandardsMappingPage() {
 
   function exportMappings() {
     downloadExcel({
-      filename: "sonova-draft-standards-mapping",
+      filename: "medical-device-draft-standards-mapping",
       sheetName: "Draft mappings",
       columns: [
         { header: "Mapping ID" }, { header: "Review status" }, { header: "Standard and edition", width: 28 },
-        { header: "Clause" }, { header: "Topic", width: 30 }, { header: "Product family", width: 33 },
+        { header: "Clause" }, { header: "Topic", width: 30 }, { header: "Device family", width: 33 },
         { header: "Applicability", width: 55 }, { header: "Draft requirement", width: 70 },
         { header: "Suggested verification evidence", width: 70 }, { header: "Publisher", type: "link" },
         { header: "FDA recognition", type: "link", width: 32 },
@@ -85,7 +84,7 @@ export default function StandardsMappingPage() {
           <div className="standards-intro-copy">
             <span className="standards-eyebrow">FDA / Standards</span>
             <h1 id="standards-title">Standards mapping</h1>
-            <p>Trace standard clauses to draft product requirements and suggested verification evidence for Sonova product families.</p>
+            <p>Trace standard clauses to draft requirements and suggested verification evidence across medical device families.</p>
           </div>
           <div className="standards-note">
             <strong>Draft examples for regulatory review</strong>
@@ -113,9 +112,9 @@ export default function StandardsMappingPage() {
               </div>
             </label>
             <label>
-              <span>Product family</span>
+              <span>Device family</span>
               <select value={product} onChange={(event) => setProduct(event.target.value as ProductKey | "")}>
-                <option value="">All product families</option>
+                <option value="">All device families</option>
                 {productOptions.map((id) => <option value={id} key={id}>{products[id].name}</option>)}
               </select>
             </label>
@@ -128,9 +127,11 @@ export default function StandardsMappingPage() {
             </label>
             <button className="standards-action standards-reset" type="button" onClick={resetFilters} disabled={!query && !product && !standard}>Clear filters</button>
           </div>
-          <p className="standards-product-reference">
-            {product ? <><strong>Product example</strong> <a href={products[product].url}>{products[product].example}</a></> : "Select a product family to see a Sonova product example."}
-          </p>
+          {example && (
+            <p className="standards-product-reference">
+              <strong>Device example</strong> {example.url ? <a href={example.url}>{example.example}</a> : example.example}
+            </p>
+          )}
           {groups.length ? (
             <div className="standards-groups">
               {groups.map(({ key, reference, rows }) => (
@@ -165,7 +166,7 @@ export default function StandardsMappingPage() {
                               <small>{row.id}</small>
                             </th>
                             <td>
-                              <ul className="standards-products" aria-label="Product families">
+                              <ul className="standards-products" aria-label="Device families">
                                 {row.products.map((productKey) => <li key={productKey}>{products[productKey].name}</li>)}
                               </ul>
                               {row.applicability}
@@ -183,7 +184,7 @@ export default function StandardsMappingPage() {
           ) : (
             <div className="standards-empty">
               <strong>No mappings match these filters</strong>
-              <p>Try another clause, product family, or standard.</p>
+              <p>Try another clause, device family, or standard.</p>
             </div>
           )}
         </section>
